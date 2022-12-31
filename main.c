@@ -216,7 +216,8 @@ int main(int argc, char *argv[]){
                       break; 
             case 'n': errno = 0;
                       opts->flt_n_bcs = (uint32_t)strtoul(optarg, &p_end, 10);
-                      if ((opts->flt_n_bcs == 0 || opts->flt_n_bcs == ULONG_MAX) && errno > 0){
+                      int eno = errno;
+                      if (eno == EINVAL || eno == ERANGE){
                           ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --flt_n_bcs %s to int: %s", 
                                   optarg, strerror(errno));
