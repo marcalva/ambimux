@@ -5,9 +5,41 @@ Software tools to process aligned multiome data.
 
 ## Installation
 
-Run `make` to install ambimux. The only dependency is htslib, which is 
+The source code can be downloaded using
+```
+git clone --recurse-submodules git@github.com:marcalva/ambimux.git
+```
+The `--recurse-submodules` makes sure the `htslib` dependency is downloaded.
+
+To create the binary, run `make`. After a successful build, the `ambimux` 
+binary file will be present in the directory.
+
+The only dependency is htslib, which is 
 included as a subdirectory. Note that ambimux requires htslib to be built 
 successfully during `make`.
+
+## Usage
+
+An example usage of ambimux is
+```
+./ambimux \
+    --rna-bam $rna_bam \
+    --atac-bam $atac_bam \
+    --vcf $vcf \
+    --gtf $gtf \
+    --peaks $peaks \
+    --exclude $excl \
+    --samples $samples \
+    --rna-mapq 30 \
+    --atac-mapq 30 \
+    --flt-n 2000 \
+    --out-min 100 \
+    --bc-wl $wl_bcs \
+    --flt-bcs $flt_bcs \
+    --verbose
+    --out mulitome
+```
+where the variables are replaced by your own files.
 
 ## Alignment data
 
