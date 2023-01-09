@@ -68,20 +68,14 @@ typedef struct atac_dups_t {
 /* duplicates keyed by region */
 KHASH_INIT(khad, g_reg_pair, atac_dups_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
 
-/*! @typedef
- @abstract Fragment (deduplicated read pair)
-
- @field loc Genomic region.
- @field bases A seq_blist_t object to store observed bases.
- @field pks ATAC peaks the fragment overlaps.
- @field s Number of supporting reads for the fragment.
-
- @note
+/* ATAC fragments
  */
 typedef struct atac_frag_t {
+    atac_dups_t *dups;
     seq_blist_t bases;
     vacs_t vacs;
     iregn_t pks;
+    uint8_t _dedup;
     size_t s;
 } atac_frag_t;
 
@@ -306,6 +300,7 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp);
 atac_frag_t *atac_frag_init();
 void atac_frag_dstry(atac_frag_t *f);
 
+
 /* Deduplicate an atac dups object and form a frag.
  *
  * Expects non-null @p d.
@@ -319,6 +314,7 @@ void atac_frag_dstry(atac_frag_t *f);
  * reads. The (paired) region is copied, and the bases are added to the frag 
  * from the best PCR duplicate read pair.
  */
+int atac_frag_dedup(atac_frag_t *frag);
 atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret);
 
 /* call variants from atac fragments
@@ -367,6 +363,8 @@ void bc_atac_dstry(bc_atac_t *bca);
  * @return 0 on success, -1 on error.
  */
 int bc_atac_add_read(bc_atac_t *bca, const atac_read1_t *ar, qshort qname);
+
+int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp);
 
 /* Add a read pair to dups object in bc_atac
  *

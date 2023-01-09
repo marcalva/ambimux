@@ -246,13 +246,18 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
  * rna_mol_t
  ******************************************************************************/
 
-void rna_mol_init(rna_mol_t *rmol){
-    if (rmol == NULL) return;
+int rna_mol_init(rna_mol_t *rmol){
+    if (rmol == NULL) return(-1);
+    rmol->dups = rna_dups_alloc();
+    if (rmol->dups == NULL)
+        return(-1);
     init_g_region(&rmol->loc);
     init_seq_blist(&rmol->bases);
     seq_glist_init(&rmol->genes);
     init_vacs(&rmol->vacs);
     rmol->n_reads = 0;
+    rmol->_dedup = 0;
+    return(0);
 }
 
 rna_mol_t *rna_mol_alloc(){
@@ -261,13 +266,16 @@ rna_mol_t *rna_mol_alloc(){
         err_msg(-1, 0, "rna_mol_alloc: %s", strerror(errno));
         return(NULL);
     }
-    rna_mol_init(rmol);
+    if (rna_mol_init(rmol) < 0)
+        return(NULL);
     return(rmol);
 }
 
 void rna_mol_free(rna_mol_t *rmol){
     if (rmol == NULL) return;
 
+    rna_dups_dstry(rmol->dups);
+    rmol->dups = NULL;
     free_seq_blist(&rmol->bases);
     seq_glist_free(&rmol->genes);
     free_vacs(&rmol->vacs);
@@ -289,6 +297,18 @@ rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret){
     if (cpy == NULL){
         *ret = -1;
         return(NULL);
+    }
+
+    // copy dups
+    cpy->dups = rna_dups_alloc();
+    if (cpy->dups == NULL){
+        *ret = err_msg(-1, 0, "rna_mol_cpy: %s", strerror(errno));
+        return(NULL);
+    }
+    int i;
+    for (i = 0; i < m->dups->size; ++i){
+        if (rna_dups_add_read(cpy->dups, m->dups->dups + i) < 0)
+            return(NULL);
     }
 
     cpy->loc = m->loc;
@@ -313,7 +333,79 @@ rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret){
 
     cpy->n_reads = m->n_reads;
 
+    cpy->_dedup = m->_dedup;
+
     return(cpy);
+}
+
+int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r){
+    if (mol == NULL || r == NULL)
+        return err_msg(-1, 0, "rna_mol_add_read: 'mol' or 'r' is null");
+    return rna_dups_add_read(mol->dups, r);
+}
+
+int rna_mol_dedup(rna_mol_t *mol){
+    if (mol == NULL)
+        return err_msg(-1, 0, "rna_mol_dedup: mol is NULL");
+
+    if (mol->dups == NULL)
+        return err_msg(-1, 0, "rna_mol_dedup: mol->dups is NULL");
+
+    rna_dups_t *dups = mol->dups;
+
+    // if no dups, return 0 successfully
+    if (dups->size == 0)
+        return(0);
+
+    int ix_best = 0;
+    size_t max_c = 0; // store read count
+    size_t rd_w_max = 0; // number of read pairs with max_c read counts
+
+    int i;
+    for (i = 0; i < dups->size; ++i){
+        // check for bugs
+        if (dups->rds_per_dup[i] == 0)
+            return err_msg(-1, 0, "rna_mol_dedup: a dup read has 0 "
+                    "supporting reads, there is a bug");
+
+        if (dups->rds_per_dup[i] == max_c){
+            ++rd_w_max;
+        } else if (dups->rds_per_dup[i] > max_c){
+            max_c = dups->rds_per_dup[i];
+            ix_best = i;
+            rd_w_max = 1;
+        }
+    }
+
+    // check for bugs
+    if (max_c == 0 || rd_w_max == 0)
+        return err_msg(-1, 0, "atac_rna_dedup: no best duplicate found "
+                ", there is a bug");
+
+    // initialize molecule
+    rna_read1_t rb = dups->dups[ix_best];
+
+    int cret;
+
+    seq_blist_t *b_cpy = copy_seq_blist(&rb.bases, &cret);
+    if (cret < 0) return(-1);
+    mol->bases = *b_cpy;
+    free(b_cpy);
+
+    seq_glist_t *g_cpy = seq_glist_cpy(&rb.genes, &cret);
+    if (cret < 0) return(-1);
+    mol->genes = *g_cpy;
+    free(g_cpy);
+
+    mol->n_reads = dups->rds_per_dup[ix_best];
+
+    // free dups
+    rna_dups_dstry(dups);
+    mol->dups = NULL;
+
+    mol->_dedup = 1;
+
+    return(0);
 }
 
 rna_mol_t *rna_dups_dedup(rna_dups_t *rd, int *ret){

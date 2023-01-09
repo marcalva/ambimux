@@ -163,7 +163,7 @@ int bam_ag_add_bc_map(bam_ag_t *agc, str_map *sm){
 
 int bam_ag_add_peaks(bam_ag_t *agc, iregs_t *pks){
     if (agc == NULL || pks == NULL)
-        return err_msg(-1, 0, "bam_ag_add_bc_map: arguments are NULL");
+        return err_msg(-1, 0, "bam_ag_add_peaks: arguments are NULL");
 
     agc->pks = pks;
     return 0;
@@ -175,14 +175,17 @@ int bam_ag_add_peaks(bam_ag_t *agc, iregs_t *pks){
 
 int bam_rna_gc_count(bam_ag_t *agc, bam_data_t *bam_dat){
 
-    bam_rna_t *br = bam_dat->rna;
-    if (br == NULL)
-        return 0;
+    if (agc == NULL || bam_dat == NULL)
+        return err_msg(-1, 0, "bam_rna_gc_count: 'agc' or 'bam_dat' is null");
+
+    if (bam_dat->has_rna == 0) return(0);
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_dat->bc_data;
     khint_t k_bc;
-    for (k_bc = kh_begin(br->bc_rna); k_bc != kh_end(br->bc_rna); ++k_bc){
-        if (!kh_exist(br->bc_rna, k_bc)) continue;
-        char *bc_key = kh_key(br->bc_rna, k_bc);
-        bc_rna_t *bc_rna = kh_val(br->bc_rna, k_bc);
+    for (k_bc = kh_begin(bcs_hash); k_bc != kh_end(bcs_hash); ++k_bc){
+        if (!kh_exist(bcs_hash, k_bc)) continue;
+        char *bc_key = kh_key(bcs_hash, k_bc);
+        bc_data_t *bc_data = kh_val(bcs_hash, k_bc);
 
         int bci, found;
         if ( (bci = add2str_map(agc->bc_ix, bc_key, &found)) < 0)
@@ -204,10 +207,11 @@ int bam_rna_gc_count(bam_ag_t *agc, bam_data_t *bam_dat){
                     strerror(errno));
 
         // add counts
+        khash_t(khrmn) *mols = bc_data->rna_mols;
         khint_t k_m;
-        for (k_m = kh_begin(bc_rna->mols); k_m != kh_end(bc_rna->mols); ++k_m){
-            if (!kh_exist(bc_rna->mols, k_m)) continue;
-            rna_mol_t *mol = kh_val(bc_rna->mols, k_m);
+        for (k_m = kh_begin(mols); k_m != kh_end(mols); ++k_m){
+            if (!kh_exist(mols, k_m)) continue;
+            rna_mol_t *mol = kh_val(mols, k_m);
             if (mol == NULL) continue;
             seq_gene_t *gene = mol->genes.head;
             size_t n_feat = mol->genes.n;
@@ -237,14 +241,17 @@ int bam_rna_gc_count(bam_ag_t *agc, bam_data_t *bam_dat){
 
 int bam_rna_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
 
-    bam_rna_t *ba = bam_dat->rna;
-    if (ba == NULL)
-        return 0;
+    if (agc == NULL || bam_dat == NULL)
+        return err_msg(-1, 0, "bam_rna_gc_count: 'agc' or 'bam_dat' is null");
+
+    if (bam_dat->has_rna == 0) return(0);
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_dat->bc_data;
     khint_t k_bc;
-    for (k_bc = kh_begin(ba->bc_rna); k_bc != kh_end(ba->bc_rna); ++k_bc){
-        if (!kh_exist(ba->bc_rna, k_bc)) continue;
-        char *bc_key = kh_key(ba->bc_rna, k_bc);
-        bc_rna_t *bc_rna = kh_val(ba->bc_rna, k_bc);
+    for (k_bc = kh_begin(bcs_hash); k_bc != kh_end(bcs_hash); ++k_bc){
+        if (!kh_exist(bcs_hash, k_bc)) continue;
+        char *bc_key = kh_key(bcs_hash, k_bc);
+        bc_data_t *bc_data = kh_val(bcs_hash, k_bc);
 
         int bci, found;
         if ( (bci = add2str_map(agc->bc_ix, bc_key, &found)) < 0)
@@ -266,10 +273,11 @@ int bam_rna_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
         kbtree_t(str) *bt = kb_init(str, KB_DEFAULT_SIZE);
 
         // add counts
+        khash_t(khrmn) *mols = bc_data->rna_mols;
         khint_t k_m;
-        for (k_m = kh_begin(bc_rna->mols); k_m != kh_end(bc_rna->mols); ++k_m){
-            if (!kh_exist(bc_rna->mols, k_m)) continue;
-            rna_mol_t *mol = kh_val(bc_rna->mols, k_m);
+        for (k_m = kh_begin(mols); k_m != kh_end(mols); ++k_m){
+            if (!kh_exist(mols, k_m)) continue;
+            rna_mol_t *mol = kh_val(mols, k_m);
             if (mol == NULL) continue;
             vac_t *vac = mol->vacs.head;
             for (; vac != NULL; vac = vac->next){
@@ -296,32 +304,23 @@ int bam_rna_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
 }
 
 int bam_atac_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
-    if (bam_dat == NULL)
-        return err_msg(-1, 0, "bam_atac_ac_count: bam_dat or atac is null ");
+    if (agc == NULL || bam_dat == NULL)
+        return err_msg(-1, 0, "bam_rna_gc_count: 'agc' or 'bam_dat' is null");
 
-    bam_atac_t *ba = bam_dat->atac;
-    if (ba == NULL)
-        return 0;
-    if (ba->bc_dat == NULL)
-        return err_msg(-1, 0, "bam_atac_ac_count: bc_dat is null ");
+    if (bam_dat->has_atac == 0) return(0);
+
     if (agc->bc_ix == NULL)
         return err_msg(-1, 0, "bam_atac_ac_count: agc->bc_ix is null ");
     if (agc->bt_atac_ac == NULL)
         return err_msg(-1, 0, "bam_atac_ac_count: agc->bt_atac_ac is null ");
 
-    uint32_t bc_num = 0;
+    khash_t(kh_bc_dat) *bcs_hash = bam_dat->bc_data;
     khint_t k_bc;
-    for (k_bc = kh_begin(ba->bc_dat); k_bc != kh_end(ba->bc_dat); ++k_bc){
-        if (!kh_exist(ba->bc_dat, k_bc)) continue;
-        char *bc_key = kh_key(ba->bc_dat, k_bc);
-        bc_atac_t *bc_atac = kh_val(ba->bc_dat, k_bc);
-        if (bc_atac == NULL)
-            return err_msg(-1, 0, "bam_atac_ac_count: bc_atac is null");
+    for (k_bc = kh_begin(bcs_hash); k_bc != kh_end(bcs_hash); ++k_bc){
+        if (!kh_exist(bcs_hash, k_bc)) continue;
+        char *bc_key = kh_key(bcs_hash, k_bc);
+        bc_data_t *bc_data = kh_val(bcs_hash, k_bc);
 
-        if (bc_atac->frags == NULL)
-            return err_msg(-1, 0, "bam_atac_ac_count: bc_atac->frags is null");
-
-        bc_num++;
         int bci, found;
         if ( (bci = add2str_map(agc->bc_ix, bc_key, &found)) < 0)
             return -1;
@@ -342,11 +341,11 @@ int bam_atac_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
         kbtree_t(str) *bt = kb_init(str, KB_DEFAULT_SIZE);
 
         // add counts
-        uint32_t n_var = 0;
+        khash_t(khaf) *frags = bc_data->atac_frags;
         khint_t k_m;
-        for (k_m = kh_begin(bc_atac->frags); k_m != kh_end(bc_atac->frags); ++k_m){
-            if (!kh_exist(bc_atac->frags, k_m)) continue;
-            atac_frag_t *frag = kh_val(bc_atac->frags, k_m);
+        for (k_m = kh_begin(frags); k_m != kh_end(frags); ++k_m){
+            if (!kh_exist(frags, k_m)) continue;
+            atac_frag_t *frag = kh_val(frags, k_m);
             if (frag == NULL) continue;
             vac_t *vac = frag->vacs.head;
             for (; vac != NULL; vac = vac->next){
@@ -367,7 +366,6 @@ int bam_atac_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
                 else{
                     ++p->counts[allele];
                 }
-                ++n_var;
             }
         }
         kh_val(agc->bt_atac_ac, k_acs).b = bt;
@@ -377,29 +375,23 @@ int bam_atac_ac_count(bam_ag_t *agc, bam_data_t *bam_dat){
 }
 
 int bam_atac_pc_count(bam_ag_t *agc, bam_data_t *bam_dat){
-    if (bam_dat == NULL)
-        return err_msg(-1, 0, "bam_atac_pc_count: bam_dat or atac is null ");
+    if (agc == NULL || bam_dat == NULL)
+        return err_msg(-1, 0, "bam_rna_gc_count: 'agc' or 'bam_dat' is null");
 
-    bam_atac_t *ba = bam_dat->atac;
-    if (ba == NULL)
-        return 0;
-    if (ba->bc_dat == NULL)
-        return err_msg(-1, 0, "bam_atac_pc_count: bc_dat is null ");
+    if (bam_dat->has_atac == 0) return(0);
+
     if (agc->bc_ix == NULL)
         return err_msg(-1, 0, "bam_atac_pc_count: agc->bc_ix is null ");
     if (agc->bt_atac_pc == NULL)
-        return err_msg(-1, 0, "bam_atac_pc_count: agc->by_atac_pc is null ");
+        return err_msg(-1, 0, "bam_atac_pc_count: agc->bt_atac_pc is null ");
 
-    uint32_t bc_num = 0;
+    khash_t(kh_bc_dat) *bcs_hash = bam_dat->bc_data;
     khint_t k_bc;
-    for (k_bc = kh_begin(ba->bc_dat); k_bc != kh_end(ba->bc_dat); ++k_bc){
-        if (!kh_exist(ba->bc_dat, k_bc)) continue;
-        char *bc_key       = kh_key(ba->bc_dat, k_bc);
-        bc_atac_t *bc_atac = kh_val(ba->bc_dat, k_bc);
-        if (bc_atac == NULL)
-            return err_msg(-1, 0, "bam_atac_pc_count: bc_atac is null");
+    for (k_bc = kh_begin(bcs_hash); k_bc != kh_end(bcs_hash); ++k_bc){
+        if (!kh_exist(bcs_hash, k_bc)) continue;
+        char *bc_key = kh_key(bcs_hash, k_bc);
+        bc_data_t *bc_data = kh_val(bcs_hash, k_bc);
 
-        ++bc_num;
         int bci, found;
         if ( (bci = add2str_map(agc->bc_ix, bc_key, &found)) < 0)
             return -1;
@@ -419,17 +411,18 @@ int bam_atac_pc_count(bam_ag_t *agc, bam_data_t *bam_dat){
         }
         kbtree_t(str) *bt = kb_init(str, KB_DEFAULT_SIZE);
 
-        // loop over each fragment and add reg counts
+        // add counts
+        khash_t(khaf) *frags = bc_data->atac_frags;
         khint_t k_m;
-        for (k_m = kh_begin(bc_atac->frags); k_m != kh_end(bc_atac->frags); ++k_m){
-            if (!kh_exist(bc_atac->frags, k_m)) continue;
-            atac_frag_t *f = kh_val(bc_atac->frags, k_m);
-            if (f == NULL){
+        for (k_m = kh_begin(frags); k_m != kh_end(frags); ++k_m){
+            if (!kh_exist(frags, k_m)) continue;
+            atac_frag_t *frag = kh_val(frags, k_m);
+            if (frag == NULL){
                 printf("frag is null in bam_atac_pc_count, is this ok?\n");
                 continue;
             }
             uint32_t c_add = 1;
-            iregn_t pk = f->pks;
+            iregn_t pk = frag->pks;
             int i;
             for (i = 0; i < pk.n; ++i){
                 cnt_node_t *p, t = {0};

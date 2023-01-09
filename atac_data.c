@@ -309,11 +309,14 @@ atac_frag_t *atac_frag_init(){
         err_msg(-1, 0, "atac_frag_init: %s", strerror(errno));
         return(NULL);
     }
+    f->dups = atac_dups_init();
+    if (f->dups == NULL) return(NULL);
     init_seq_blist(&f->bases);
     init_vacs(&f->vacs);
     f->pks.ix = NULL;
     f->pks.n = 0;
     f->pks.m = 0;
+    f->_dedup = 0;
     f->s = 0;
     return(f);
 }
@@ -321,10 +324,83 @@ atac_frag_t *atac_frag_init(){
 void atac_frag_dstry(atac_frag_t *f){
     if (f == NULL) return;
 
+    atac_dups_dstry(f->dups);
     free_seq_blist(&f->bases);
     free_vacs(&f->vacs);
     free(f->pks.ix);
     free(f);
+}
+
+int atac_frag_dedup(atac_frag_t *frag){
+    if (frag == NULL)
+        return err_msg(-1, 0, "atac_frag_dedup: frag is NULL");
+
+    atac_dups_t *dups = frag->dups;
+
+    // check for bugs
+    if (dups->size == 0)
+        return err_msg(-1, 0, "atac_frag_dedup: no duplicates present in frag");
+
+    int ix_best;
+    size_t max_c = 0; // store read count
+    size_t rp_w_max = 0; // number of read pairs with max_c read counts
+
+    int i;
+    for (i = 0; i < dups->size; ++i){
+        // check for bugs
+        if (dups->dups[i].n_rd == 0)
+            return err_msg(-1, 0, "atac_frag_dedup: a dup read pair has 0 "
+                    "supporting reads, there is a bug");
+
+        if (dups->dups[i].n_rd == max_c){
+            ++rp_w_max;
+        } else if (dups->dups[i].n_rd > max_c){
+            max_c = dups->dups[i].n_rd;
+            ix_best = i;
+            rp_w_max = 1;
+        }
+    }
+
+    if (max_c == 0 || rp_w_max == 0)
+        return err_msg(-1, 0, "atac_frag_dedup: no best duplicate found "
+                ", there is a bug");
+
+    atac_rd_pair_t rpb = dups->dups[ix_best].rd;
+
+    int bret;
+    seq_base_t *base;
+
+    // check for bugs
+    if (rpb.s < 2)
+        return err_msg(-1, 0, "atac_frag_dedup: dup read pair has less than 2 reads"
+                ", there is a bug");
+
+    /* add bases from read 1 */
+    base = rpb.r1.bases.head;
+    while (base){
+        bret = blist_add_base(&frag->bases, base, 1, 1);
+        if (bret < 0) return(-1);
+        base = base->next;
+    }
+
+    /* add bases from read 2 */
+    base = rpb.r2.bases.head;
+    while (base){
+        bret = blist_add_base(&frag->bases, base, 1, 1);
+        if (bret < 0) return(-1);
+        base = base->next;
+    }
+
+    /* add number of supporting reads */
+    frag->s = dups->dups[ix_best].n_rd;
+
+    // free dups
+    atac_dups_dstry(dups);
+    frag->dups = NULL;
+
+    frag->_dedup = 1;
+
+    return 0;
 }
 
 atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret){
@@ -586,6 +662,32 @@ int bc_atac_add_read(bc_atac_t *bca, const atac_read1_t *ar, qshort qname){
                 (kh_n_buckets(bca->pairs) > (10 * kh_size(bca->pairs))) )
             kh_resize(khap, bca->pairs, kh_size(bca->pairs));
     }
+
+    return(0);
+}
+
+int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp){
+    if (frags == NULL || rp == NULL)
+        return err_msg(-1, 0, "khaf_add_dup: 'frags' or 'rp' is null");
+
+    int kret;
+    khint_t kf;
+    g_reg_pair reg_pair = get_reg_pair(rp->r1.loc, rp->r2.loc);
+    kf = kh_get(khaf, frags, reg_pair);
+    if (kf == kh_end(frags)){
+        // add region key
+        kf = kh_put(khaf, frags, reg_pair, &kret);// TODO: high heap alloc
+        if (kret < 0){
+            return err_msg(-1 , 0, "khaf_add_dup: failed to add "
+                    "duplicate reg key to hash table");
+        }
+        // add allocated frag // TODO: high heap alloc
+        if ( (kh_val(frags, kf) = atac_frag_init()) == NULL) return(-1);
+    }
+    // add read pair to frag
+    atac_frag_t *frag = kh_val(frags, kf);
+    if (atac_dups_add_pair(frag->dups, rp) < 0)
+        return(-1);
 
     return(0);
 }

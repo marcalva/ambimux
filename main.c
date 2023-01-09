@@ -386,7 +386,7 @@ int main(int argc, char *argv[]){
     // Pileup for RNA and ATAC:
     // Run ATAC
     if (objs->atac_bam != NULL){
-        ret = run_atac(objs, &bam_dat->atac);
+        ret = run_atac(objs, bam_dat);
         if (ret < 0){
             ret = EXIT_FAILURE;
             goto cleanup;
@@ -395,7 +395,7 @@ int main(int argc, char *argv[]){
 
     // Run RNA
     if (objs->rna_bam != NULL){
-        ret = run_rna(objs, &bam_dat->rna);
+        ret = run_rna(objs, bam_dat);
         if (ret < 0){
             ret = EXIT_FAILURE;
             goto cleanup;

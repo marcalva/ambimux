@@ -166,7 +166,7 @@ void destroy_mdl_fit(mdl_fit_t *mf);
  * @param smooth add to estimate.
  * @return -1 on error, 0 if success.
  */
-int mdl_pars_est_alpha(mdl_pars_t *gp, bam_rna_t *br, str_map *flt_bcs, 
+int mdl_pars_est_alpha(mdl_pars_t *gp, bam_data_t *bam_data, str_map *flt_bcs, 
         double smooth);
 
 /* Add gamma parameters
@@ -271,7 +271,7 @@ int write_llk(mdl_t *mdl, char *fn);
 
 int write_samples(mdl_t *mdl, char *fn);
 
-int write_res(mdl_t *mdl, char *fn);
+int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn);
 
 #endif // MOD_H
 

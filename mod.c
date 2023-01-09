@@ -124,19 +124,20 @@ void mdl_dstry(mdl_t *m){
 
 int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
     if (mdl == NULL || bam_dat == NULL || objs == NULL)
-        return err_msg(-1, 0, "mdl_set_bcs: arguments are NULL");
+        return err_msg(-1, 0, "mdl_set_bcs: arguments are null");
 
     khint_t k;
 
     // get barcode stats
     if ( (mdl->bcss = bc_stats_alloc()) == NULL )
         return(-1);
-    if (bcs_stats_fill(mdl->bcss, bam_dat->rna, bam_dat->atac) < 0)
+    if (bam_data_fill_stats(bam_dat) < 0)
         return(-1);
 
-    // set the whitelist barcodes
+    // set all barcodes for model
     int found;
     if (objs->wl_bcs != NULL){
+        // set to wl_bc if given
         mdl->all_bcs = str_map_copy(objs->wl_bcs);
         if (mdl->all_bcs == NULL)
             return err_msg(-1, 0, "mdl_set_bcs: failed to copy all_bcs");
@@ -144,17 +145,18 @@ int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
         if ( (mdl->all_bcs = init_str_map()) == NULL )
             return(-1);
 
-        for (k = kh_begin(mdl->bcss->kh_bcc); k != kh_end(mdl->bcss->kh_bcc); ++k){
-            if (!kh_exist(mdl->bcss->kh_bcc, k))
+        // if wl_bc not given, set to all varcodes present in data
+        for (k = kh_begin(bam_dat->bc_data); k != kh_end(bam_dat->bc_data); ++k){
+            if (!kh_exist(bam_dat->bc_data, k))
                 continue;
 
-            bc_counts *bcc = kh_val(mdl->bcss->kh_bcc, k);
+            char *bc_key = kh_key(bam_dat->bc_data, k);
 
-            if (add2str_map(mdl->all_bcs, bcc->bc, &found) < 0)
+            if (add2str_map(mdl->all_bcs, bc_key, &found) < 0)
                 return(-1);
             if (found == 1)
                 return err_msg(-1, 0, "mdl_set_bcs: %s wl barcode duplicate "
-                        "found, there is a bug", bcc->bc);
+                        "found, there is a bug", bc_key);
         }
     }
 
@@ -164,52 +166,55 @@ int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
         if (mdl->flt_bcs == NULL)
             return err_msg(-1, 0, "mdl_set_bcs: failed to copy flt_bcs");
     } else {
-        if (objs->flt_n_bcs >= kh_size(mdl->bcss->kh_bcc)){
+        if (objs->flt_n_bcs >= kh_size(bam_dat->bc_data)){
             return err_msg(-1, 0, "mdl_set_bcs: the --flt-n barcodes (%u) "
                     "is greater than or equal to "
                     "the number of barcodes present in the data (%u). "
                     "Set to a value less than this.", 
-                    objs->flt_n_bcs, kh_size(mdl->bcss->kh_bcc));
+                    objs->flt_n_bcs, kh_size(bam_dat->bc_data));
         }
 
         if ( (mdl->flt_bcs = init_str_map()) == NULL )
             return(-1);
 
         int ret;
-        uint32_t min_c = bcs_stats_min(mdl->bcss, objs->flt_n_bcs, &ret);
+        uint32_t min_c = bam_data_count_of_n(bam_dat, objs->flt_n_bcs, &ret);
         if (ret < 0)
             return(-1);
 
-        for (k = kh_begin(mdl->bcss->kh_bcc); k != kh_end(mdl->bcss->kh_bcc); ++k){
-            if (!kh_exist(mdl->bcss->kh_bcc, k))
+        for (k = kh_begin(bam_dat->bc_data); k != kh_end(bam_dat->bc_data); ++k){
+            if (!kh_exist(bam_dat->bc_data, k))
                 continue;
 
-            bc_counts *bcc = kh_val(mdl->bcss->kh_bcc, k);
+            char *bc_key = kh_key(bam_dat->bc_data, k);
+            bc_data_t *bc_data = kh_val(bam_dat->bc_data, k);
 
-            if (bcc->counts < min_c)
+            if (bc_data->bc_stats->counts < min_c)
                 continue;
 
-            if (add2str_map(mdl->flt_bcs, bcc->bc, &found) < 0)
+            if (add2str_map(mdl->flt_bcs, bc_key, &found) < 0)
                 return(-1);
             if (found == 1)
                 return err_msg(-1, 0, "mdl_set_bcs: %s flt barcode duplicate "
-                        "found, there is a bug", bcc->bc);
+                        "found, there is a bug", bc_key);
         }
     }
 
     // set the output barcodes to calculate llk for
     mdl->test_bcs = init_str_map();
     uint32_t out_mins = (uint32_t)objs->out_min;
-    for (k = kh_begin(mdl->bcss->kh_bcc); k != kh_end(mdl->bcss->kh_bcc); ++k){
-        if (!kh_exist(mdl->bcss->kh_bcc, k))
+    for (k = kh_begin(bam_dat->bc_data); k != kh_end(bam_dat->bc_data); ++k){
+        if (!kh_exist(bam_dat->bc_data, k))
             continue;
-        bc_counts *bcc = kh_val(mdl->bcss->kh_bcc, k);
-        if (bcc->rna_counts < out_mins && bcc->atac_counts < out_mins) 
+        char *bc_key = kh_key(bam_dat->bc_data, k);
+        bc_data_t *bc_data = kh_val(bam_dat->bc_data, k);
+        bc_counts *c = bc_data->bc_stats;
+        if (c->rna_counts < out_mins && c->atac_counts < out_mins) 
             continue;
-        if (add2str_map(mdl->test_bcs, bcc->bc, &found) < 0)
+        if (add2str_map(mdl->test_bcs, bc_key, &found) < 0)
             return(-1);
         if (found == 1)
-            return err_msg(-1, 0, "mdl_set_bcs: %s already found", bcc->bc);
+            return err_msg(-1, 0, "mdl_set_bcs: %s already found", c->bc);
     }
 
     return(0);
@@ -230,16 +235,15 @@ int mdl_set_samples(mdl_t *mdl, obj_pars *objs){
     return(0);
 }
 
-int mdl_pars_est_alpha(mdl_pars_t *gp, bam_rna_t *br, str_map *flt_bcs, 
+int mdl_pars_est_alpha(mdl_pars_t *gp, bam_data_t *bam_data, str_map *flt_bcs, 
         double smooth){
-    if (gp == NULL)
-        return err_msg(-1, 0, "mdl_pars_est_alpha: arguments are NULL");
+    if (gp == NULL || bam_data == NULL || flt_bcs == NULL)
+        return err_msg(-1, 0, "mdl_pars_est_alpha: arguments are null");
 
     // if RNA wasn't provided, the model only contains variants from ATAC.
-    if (gp->G == 0 || br == NULL)
+    if (bam_data->has_rna == 0)
         return(0);
 
-    /* set alpha */
     uint32_t gs = gp->G * N_SPL;
     uint32_t ne = gs * 2;
     gp->alpha = calloc(ne, sizeof(double));
@@ -248,6 +252,7 @@ int mdl_pars_est_alpha(mdl_pars_t *gp, bam_rna_t *br, str_map *flt_bcs,
 
     double ttl_umi[2] = {0,0};
 
+    // add smoothing prior to alpha and ttl_umi
     int i, j;
     for (i = 0; i < 2; ++i){
         for (j = 0; j < gs; ++j){
@@ -256,28 +261,30 @@ int mdl_pars_est_alpha(mdl_pars_t *gp, bam_rna_t *br, str_map *flt_bcs,
         }
     }
 
-    // sum counts
+    // add RNA gene counts to alpha and ttl_umi
+    khash_t(kh_bc_dat) *bc_hash = bam_data->bc_data;
     khint_t k;
-    for (k = kh_begin(br->bc_rna); k != kh_end(br->bc_rna); ++k){
-        if (!kh_exist(br->bc_rna, k)) continue;
-        bc_rna_t *bc_rna = kh_val(br->bc_rna, k);
-        char *bc_key = kh_key(br->bc_rna, k);
+    for (k = kh_begin(bc_hash); k != kh_end(bc_hash); ++k){
+        if (!kh_exist(bc_hash, k)) continue;
+        bc_data_t *bc_data = kh_val(bc_hash, k);
+        char *bc_key = kh_key(bc_hash, k);
 
         int bc_o = C_CELL; // 0 if contamination, 1 if cellular
         if (str_map_ix(flt_bcs, bc_key) < 0)
             bc_o = C_AMBN;
 
         khint_t l;
-        for (l = kh_begin(bc_rna->mols); l != kh_end(bc_rna->mols); ++l){
-            if (!kh_exist(bc_rna->mols, l)) continue;
-            rna_mol_t *u = kh_val(bc_rna->mols, l);
+        khash_t(khrmn) *mols = bc_data->rna_mols;
+        for (l = kh_begin(mols); l != kh_end(mols); ++l){
+            if (!kh_exist(mols, l)) continue;
+            rna_mol_t *u = kh_val(mols, l);
             if (u == NULL){
                 fprintf(stderr, "UMI is null\n");
                 continue;
             }
+            // TODO: remove UMIs that map to multiple genes
             seq_gene_t *gene;
-            gene = u->genes.head;
-            for (;gene != NULL; gene = gene->next){
+            for (gene = u->genes.head; gene != NULL; gene = gene->next){
                 int32_t gid = gene->gene_id;
                 uint8_t sid = gene->splice;
                 uint32_t ix = gid + (sid * gp->G) + (bc_o * gs);
@@ -474,22 +481,24 @@ int p_c(int c, double tau, double *prob){
 int mdl_llk(mdl_t *mdl, bam_data_t *bam_dat, int verbose){
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_llk: mdl is NULL");
-    if (bam_dat->rna == NULL && bam_dat->atac == NULL)
-        return err_msg(-1, 0, "mdl_llk: br and ba are NULL");
+    if (bam_dat->bc_data == NULL)
+        return err_msg(-1, 0, "mdl_llk: bam_dat->bc_data is NULL");
 
     if (mdl->mp == NULL)
-        return err_msg(-1, 0, "mdl_llk: gp is NULL");
+        return err_msg(-1, 0, "mdl_llk: mp is NULL");
 
     // barcodes to test
     str_map *bcs = mdl->test_bcs;
 
     int fret = 0;
 
-    uint16_t M = mdl->mp->M;
-    int max_ix = M + (M * (M-1) / 2);
+    uint16_t M = mdl->mp->M; // number of samples
+    int max_ix = M + (M * (M-1) / 2); // number of singlets + doublets
 
     // allocate llk memory
     mdl->mf->bc_llks = calloc(bcs->n * max_ix, sizeof(double)); // n_bcs * ix. col major
+
+    khash_t(kh_bc_dat) *bc_hash = bam_dat->bc_data;
 
     char dt[20];
     get_time(dt, 20);
@@ -504,93 +513,90 @@ int mdl_llk(mdl_t *mdl, bam_data_t *bam_dat, int verbose){
         if (verbose) fprintf(stdout, 
                 "\033[A\33[2K\r%s: getting likelihood %i%%\n", dt, prog);
 
+        khint_t k_bc = kh_get(kh_bc_dat, bc_hash, bc_name);
+        if (k_bc == kh_end(bc_hash)){
+            log_msg("mdl_llk: barcode %s in mdl but not in data", bc_name);
+            continue;
+        }
+        bc_data_t *bc_data = kh_val(bc_hash, k_bc);
+
         for (s_ix = 0; s_ix < max_ix; ++s_ix){
             mdl->mf->bc_llks[CMI( (bc_i), (s_ix), (bcs->n) )] = 0;
 
             // Loop through RNA
-            if (bam_dat->rna != NULL){
-                bam_rna_t *br = bam_dat->rna;
-                khint_t k_bc_rna = kh_get(khrbc, br->bc_rna, bc_name);
-                if (k_bc_rna != kh_end(br->bc_rna)){
-                    bc_rna_t *bc_rna = kh_val(br->bc_rna, k_bc_rna);
-                    khint_t k_rna;
-                    for (k_rna = kh_begin(bc_rna->mols); k_rna != kh_end(bc_rna->mols); ++k_rna){
-                        if (!kh_exist(bc_rna->mols, k_rna)) continue;
+            if (bam_dat->has_rna){
+                khash_t(khrmn) *mols = bc_data->rna_mols;
+                khint_t k_rna;
+                for (k_rna = kh_begin(mols); k_rna != kh_end(mols); ++k_rna){
+                    if (!kh_exist(mols, k_rna)) continue;
 
-                        rna_mol_t *rna_mol = kh_val(bc_rna->mols, k_rna);
-                        if (rna_mol == NULL) continue;
+                    rna_mol_t *rna_mol = kh_val(mols, k_rna);
+                    if (rna_mol == NULL) continue;
 
-                        double tmp_p = 1;
-                        double prb_uc[2] = {1,1}; // store prob features
-                        int c_stat;
-                        for (c_stat = 0; c_stat < 2; ++c_stat){
-                            // prior prob of contamination
-                            fret = p_c(c_stat, mdl->mp->tau, &tmp_p);
+                    double tmp_p = 1;
+                    double prb_uc[2] = {1,1}; // store prob features
+                    int c_stat;
+                    for (c_stat = 0; c_stat < 2; ++c_stat){
+                        // prior prob of contamination
+                        fret = p_c(c_stat, mdl->mp->tau, &tmp_p);
+                        if (fret < 0) return -1;
+                        prb_uc[c_stat] *= tmp_p;
+                        // gene expression probs
+                        seq_gene_t *gene;
+                        for (gene = rna_mol->genes.head; gene != NULL; gene = gene->next){
+                            int32_t g_ix = gene->gene_id;
+                            uint8_t sp = gene->splice;
+                            fret = p_f_c(g_ix, sp, mdl->mp, c_stat, &tmp_p);
                             if (fret < 0) return -1;
                             prb_uc[c_stat] *= tmp_p;
-                            // gene expression probs
-                            seq_gene_t *gene;
-                            for (gene = rna_mol->genes.head; gene != NULL; gene = gene->next){
-                                int32_t g_ix = gene->gene_id;
-                                uint8_t sp = gene->splice;
-                                fret = p_f_c(g_ix, sp, mdl->mp, c_stat, &tmp_p);
-                                if (fret < 0) return -1;
-                                prb_uc[c_stat] *= tmp_p;
-                                if (tmp_p == 0){
-                                    log_msg("warning: barcode %s has p_f_c of %f", bc_name, tmp_p);
-                                }
-                            }
-                            // get var probs
-                            vac_t *v = rna_mol->vacs.head;
-                            for (; v != NULL; v = v->next){
-                                uint8_t allele = v->allele;
-                                if (allele != 0 && allele != 1)
-                                    continue;
-                                // prior prob of seq error
-                                double prb_e0 = 1;
-                                double prb_e1 = 1;
-                                fret = p_e(0, mdl->mp->eps, &prb_e0);
-                                if (fret < 0) return -1;
-                                fret = p_e(1, mdl->mp->eps, &prb_e1);
-                                if (fret < 0) return -1;
-
-                                fret = p_b_gce(allele, v->vix, mdl->mp, s_ix, 0, c_stat, &tmp_p);
-                                if (fret < 0) return -1;
-                                prb_e0 *= tmp_p;
-
-                                fret = p_b_gce(allele, v->vix, mdl->mp, s_ix, 1, c_stat, &tmp_p);
-                                if (fret < 0) return -1;
-                                prb_e1 *= tmp_p;
-
-                                double prb_v = prb_e0 + prb_e1;
-                                if (prb_v == 0){
-                                    log_msg("warning: barcode %s has prb_v of %f", bc_name, prb_v);
-                                }
-                                prb_uc[c_stat] *= prb_v;
+                            if (tmp_p == 0){
+                                log_msg("warning: barcode %s has p_f_c of %f", bc_name, tmp_p);
                             }
                         }
-                        double prb_u = prb_uc[0] + prb_uc[1];
-                        if (prb_u == 0){
-                            log_msg("warning: barcode %s has prb_u of %f", bc_name, prb_u);
+                        // get var probs
+                        vac_t *v = rna_mol->vacs.head;
+                        for (; v != NULL; v = v->next){
+                            uint8_t allele = v->allele;
+                            if (allele != 0 && allele != 1)
+                                continue;
+                            // prior prob of seq error
+                            double prb_e0 = 1;
+                            double prb_e1 = 1;
+                            fret = p_e(0, mdl->mp->eps, &prb_e0);
+                            if (fret < 0) return -1;
+                            fret = p_e(1, mdl->mp->eps, &prb_e1);
+                            if (fret < 0) return -1;
+
+                            fret = p_b_gce(allele, v->vix, mdl->mp, s_ix, 0, c_stat, &tmp_p);
+                            if (fret < 0) return -1;
+                            prb_e0 *= tmp_p;
+
+                            fret = p_b_gce(allele, v->vix, mdl->mp, s_ix, 1, c_stat, &tmp_p);
+                            if (fret < 0) return -1;
+                            prb_e1 *= tmp_p;
+
+                            double prb_v = prb_e0 + prb_e1;
+                            if (prb_v == 0){
+                                log_msg("warning: barcode %s has prb_v of %f", bc_name, prb_v);
+                            }
+                            prb_uc[c_stat] *= prb_v;
                         }
-                        mdl->mf->bc_llks[CMI( (bc_i), (s_ix), (bcs->n) )] += log(prb_u);
                     }
+                    double prb_u = prb_uc[0] + prb_uc[1];
+                    if (prb_u == 0){
+                        log_msg("warning: barcode %s has prb_u of %f", bc_name, prb_u);
+                    }
+                    mdl->mf->bc_llks[CMI( (bc_i), (s_ix), (bcs->n) )] += log(prb_u);
                 }
             }
             // Loop through ATAC
-            if (bam_dat->atac != NULL){
-                bam_atac_t *ba = bam_dat->atac;
-                khint_t k_bc_atac = kh_get(khab, ba->bc_dat, bc_name);
-
-                if (k_bc_atac == kh_end(ba->bc_dat))
-                    continue;
-
-                bc_atac_t *bc_atac = kh_val(ba->bc_dat, k_bc_atac);
+            if (bam_dat->has_atac){
+                khash_t(khaf) *frags = bc_data->atac_frags;
                 khint_t k_atac;
-                for (k_atac = kh_begin(bc_atac->frags); k_atac != kh_end(bc_atac->frags); ++k_atac){
-                    if (!kh_exist(bc_atac->frags, k_atac)) continue;
+                for (k_atac = kh_begin(frags); k_atac != kh_end(frags); ++k_atac){
+                    if (!kh_exist(frags, k_atac)) continue;
 
-                    atac_frag_t *atac_frag = kh_val(bc_atac->frags, k_atac);
+                    atac_frag_t *atac_frag = kh_val(frags, k_atac);
                     if (atac_frag == NULL) continue;
 
                     double tmp_p = 1;
@@ -710,7 +716,7 @@ int mdl_est_pars(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
     if (set_mdl_pars(mdl->mp, n_bcs, n_genes, n_vars, n_samples) < 0)
         return(-1);
 
-    if (mdl_pars_est_alpha(mdl->mp, bam_dat->rna, mdl->flt_bcs, 1.0) < 0)
+    if (mdl_pars_est_alpha(mdl->mp, bam_dat, mdl->flt_bcs, 1.0) < 0)
         return(-1);
 
     // get valid indices
@@ -750,7 +756,7 @@ int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs){
     if (bam_dat == NULL || objs == NULL)
         return err_msg(-1, 0, "fit_mdl_pars: arguments are NULL");
 
-    if (bam_dat->rna == NULL && bam_dat->atac == NULL)
+    if (bam_dat->bc_data == NULL)
         return err_msg(-1, 0, "fit_mdl_pars: rna and atac are NULL");
 
     if (objs->gv == NULL || objs->vcf_hdr == NULL)
@@ -762,11 +768,12 @@ int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs){
     if (mdl == NULL)
         return -1;
 
-    if (objs->verbose) log_msg("setting barcodes and samples");
+    if (objs->verbose) log_msg("setting barcodes");
     // sets all bc, flt_bcs, and test_bcs
     if (mdl_set_bcs(mdl, bam_dat, objs) < 0)
         return -1;
 
+    if (objs->verbose) log_msg("setting samples");
     if (mdl_set_samples(mdl, objs) < 0)
         return -1;
 
@@ -796,7 +803,7 @@ int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs){
         return -1;
 
     if (objs->verbose) log_msg("writing output");
-    if (write_res(mdl, objs->out_fn) < 0)
+    if (write_res(mdl, bam_dat, objs->out_fn) < 0)
         return -1;
 
     mdl_dstry(mdl);
@@ -978,10 +985,9 @@ int write_samples(mdl_t *mdl, char *fn){
     return 0;
 }
 
-int write_res(mdl_t *mdl, char *fn){
+int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
     char *r_fn = ".summary.txt";
     mdl_fit_t *mf = mdl->mf;
-    bcs_stats *ss = mdl->bcss;
     str_map *samples = mdl->samples;
     str_map *bcs = mdl->test_bcs;
     int M = samples->n;
@@ -1020,11 +1026,12 @@ int write_res(mdl_t *mdl, char *fn){
         char *bc_name = str_map_str(bcs, bc_i);
         fret = fputs(bc_name, fp);
 
-        khint_t k_bc = kh_get(kh_bcs, ss->kh_bcc, bc_name);
-        if (k_bc == kh_end(ss->kh_bcc))
+        khint_t k_bc = kh_get(kh_bc_dat, bam_dat->bc_data, bc_name);
+        if (k_bc == kh_end(bam_dat->bc_data))
             return err_msg(-1, 0, "write_res: barcode %s not found", bc_name);
 
-        bc_counts *bcc = kh_val(ss->kh_bcc, k_bc);
+        bc_data_t *bc_data = kh_val(bam_dat->bc_data, k_bc);
+        bc_counts *bcc = bc_data->bc_stats;
 
         // write bc stats
         fputc(delim, fp);

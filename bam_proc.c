@@ -9,8 +9,10 @@
 #include "r_count.h"
 
 
-int run_atac(obj_pars *objs, bam_atac_t **bam_atac){
-    bam_atac_t *bama = NULL;
+int run_atac(obj_pars *objs, bam_data_t *bam_data){
+    if (bam_data == NULL)
+        return err_msg(-1, 0, "run_atac: 'bam_data' is null");
+
     hts_itr_t *bam_itr = NULL;
     bam1_t *bam_r = NULL;
 
@@ -18,7 +20,6 @@ int run_atac(obj_pars *objs, bam_atac_t **bam_atac){
         return err_msg(-1, 0, "run_atac: ATAC BAM file not given");
     if (objs->gv == NULL)
         return err_msg(-1, 0, "run_atac: VCF file not given");
-    bama = bam_atac_init();
     uint64_t n_reads = 0;
     
     /* Set BAM iterator to region */
@@ -106,41 +107,40 @@ int run_atac(obj_pars *objs, bam_atac_t **bam_atac){
         free_seq_blist(bl);
         free(bl);
 
-        // add read to bama
-        if (bam_atac_add_read(bama, b_cb, ar, qs) < 0)
+        // add read to bam_data
+        if (bam_data_atac_add_read(bam_data, b_cb, ar, qs) < 0)
             return err_msg(-1, 0, "run_atac: failed add read");
 
-        atac_read_dstry(ar); // destroy since atac read is copied into bama
+        atac_read_dstry(ar); // destroy since atac read is copied into bam_data
     }
     if (objs->verbose) log_msg("processed %" PRIu64 " alignments", n_reads);
 
     hts_itr_destroy(bam_itr);
     bam_destroy1(bam_r);
 
-    bam_atac_free_pairs(bama); // free the rest of the reads that weren't paired to dups.
+    if (bam_data_atac_free_pairs(bam_data) < 0) return(-1);
 
     if (objs->verbose) log_msg("deduplicating reads");
-    if (bam_atac_dedup(bama) < 0) return(-1);
-
-    bam_atac_free_dups(bama);
+    if (bam_data_atac_dedup(bam_data) < 0) return(-1);
 
     // go from base pair to ref/alt/other allele at variants
     if (objs->verbose) log_msg("calling variants");
-    if (bam_atac_var_call(bama, objs->gv, objs->cmap, objs->min_phred) < 0) return(-1);
+    if (bam_data_atac_var_call(bam_data, objs->gv, objs->cmap, objs->min_phred) < 0)
+        return(-1);
 
     // call peaks at fragments
     if (objs->pks){
         if (objs->verbose) log_msg("calling peaks");
-        if (bam_atac_peak_call(bama, objs->pks, objs->cmap) < 0) return(-1);
+        if (bam_data_atac_peak_call(bam_data, objs->pks, objs->cmap) < 0)
+            return(-1);
     }
-
-    *bam_atac = bama;
 
     return(0);
 }
 
-int run_rna(obj_pars *objs, bam_rna_t **bam_rna){
-    bam_rna_t *br = NULL;
+int run_rna(obj_pars *objs, bam_data_t *bam_data){
+    if (objs == NULL || bam_data == NULL)
+        return err_msg(-1, 0, "run_rna:'objs' or 'bam_data' is null");
     hts_itr_t *bam_itr = NULL;
     bam1_t *bam_r = NULL;
 
@@ -151,7 +151,6 @@ int run_rna(obj_pars *objs, bam_rna_t **bam_rna){
     if (objs->gv == NULL)
         return err_msg(-1, 0, "run_rna: VCF file not given");
 
-    br = bam_rna_alloc();
     uint64_t n_reads = 0;
     
     /*
@@ -275,7 +274,7 @@ int run_rna(obj_pars *objs, bam_rna_t **bam_rna){
         free(bl);
 
         // add read to rna
-        if (bam_rna_add_read(br, b_cb, rna_read, b_umi) < 0)
+        if (bam_data_rna_add_read(bam_data, b_cb, rna_read, b_umi) < 0)
             return(-1);
 
         rna_read1_dstry(rna_read);
@@ -289,16 +288,12 @@ int run_rna(obj_pars *objs, bam_rna_t **bam_rna){
     free(splice);
     */
 
-    *bam_rna = br;
-
     if (objs->verbose) log_msg("deduplicating reads");
-    if (bam_rna_dedup(br) < 0)
+    if (bam_data_rna_dedup(bam_data) < 0)
         return(-1);
 
-    bam_rna_free_dups(br);
-
     if (objs->verbose) log_msg("calling variants");
-    if (bam_rna_var_call(br, objs->gv, objs->cmap, objs->min_phred) < 0)
+    if (bam_data_rna_var_call(bam_data, objs->gv, objs->cmap, objs->min_phred) < 0)
         return(-1);
 
     return(0);

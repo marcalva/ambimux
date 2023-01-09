@@ -119,14 +119,16 @@ KHASH_INIT(khrdn, char *, rna_dups_t *, 1, kh_str_hash_func, kh_str_hash_equal);
  * @field n_reads Number of supporting reads
  */
 typedef struct rna_mol_t {
+    rna_dups_t *dups;
     g_region loc;
     seq_blist_t bases;
     seq_glist_t genes;
     vacs_t vacs;
     size_t n_reads;
+    uint8_t _dedup;
 } rna_mol_t;
 
-void rna_mol_init(rna_mol_t *rmol);
+int rna_mol_init(rna_mol_t *rmol);
 rna_mol_t *rna_mol_alloc();
 
 void rna_mol_free(rna_mol_t *rmol);
@@ -134,11 +136,16 @@ void rna_mol_dstry(rna_mol_t *rmol);
 
 rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret);
 
+/* Add read to dups in rna_mol_t struct
+ */
+int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r);
+
 /* De-duplicate/get best RNA read and form rna_mol_t
  *
  * Expects non-null arguments.
  * If @p rd has no reads, return NULL successfully.
  */
+int rna_mol_dedup(rna_mol_t *mol);
 rna_mol_t *rna_dups_dedup(rna_dups_t *rd, int *ret);
 
 int rna_mol_var_call(rna_mol_t *m, GenomeVar *gv, contig_map *cmap, 
