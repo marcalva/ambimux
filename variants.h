@@ -23,8 +23,6 @@
 enum alleles {REF, ALT, OTHER, NA_ALLELE};
 #define N_ALLELE 4
 
-// #define MAX_BIN (((1<<18)-1)/7)
-
 /************************************************************************
  * VCF file
  ***********************************************************************/
@@ -35,31 +33,31 @@ int load_vcf(const char *vcffn, const char *region, int region_set,
 int sub_vcf_samples(bcf_hdr_t **vcf_hdr, const char *samplefn);
 
 /************************************************************************
- * Var
+ * var_t
  ***********************************************************************/
 
-typedef struct Var { 
+typedef struct var_t { 
     bcf1_t *b;
     int32_t vix;
-    struct Var *next;
-} Var;
+    struct var_t *next;
+} var_t;
 
-// KHASH_INIT(var, var_id_t*, Var*, 1, _var_id_t_hash_func, _var_id_t_hash_equal);
-KHASH_INIT(var, char*, Var*, 1, kh_str_hash_func, kh_str_hash_equal);
+// KHASH_INIT(var, var_id_t*, var_t*, 1, _var_id_t_hash_func, _var_id_t_hash_equal);
+KHASH_INIT(var, char*, var_t*, 1, kh_str_hash_func, kh_str_hash_equal);
 
-typedef struct chrmVar {
-    Var *bins[MAX_BIN];
+typedef struct chr_var_t {
+    var_t *bins[MAX_BIN];
     uint16_t vars_n[MAX_BIN];
-} ChrmVar;
+} chr_var_t;
 
 typedef struct {
     str_map *chrm_ix; // chromosome index
-    ChrmVar **chrms; // array to array of ChrmVar
+    chr_var_t **chrms; // array to array of chr_var_t
     int chrms_m; // max number of elements
-    Var **ix2var; // variant index to Var object
+    var_t **ix2var; // variant index to var_t object
     int32_t n_v, n_e, n_a; // num. variants, num. elements, num. allocated
     bcf_hdr_t *vcf_hdr;
-} GenomeVar;
+} g_var_t;
 
 // Functions
 
@@ -95,16 +93,16 @@ int get_var_len(bcf1_t *b);
 
 int get_var_bin(bcf1_t *b);
 
-Var *init_var();
+var_t *init_var();
 
-GenomeVar *init_genomevar();
+g_var_t *init_genomevar();
 
-/* initialize chrmVar object
+/* initialize chr_var_t object
  * return NULL if memory wasn't allocated
  */ 
-ChrmVar *init_ChrmVar();
+chr_var_t *init_chr_var();
 
-int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr);
+int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr);
 
 /*
  * @param max_miss ignore variatns with number missing alleles > max_miss.
@@ -112,12 +110,12 @@ int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr);
  * @param maf_cut ignore variants with maf <= maf_cut or maf >= (1-maf_cut).
  *   Set to negative value to ignore.
  */
-GenomeVar *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut);
+g_var_t *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut);
 
-void destroy_gv(GenomeVar *gv);
+void destroy_gv(g_var_t *gv);
 
 // destroy bcf1_t records to preserve memory
-void free_bcf1_t(GenomeVar *gv);
+void free_bcf1_t(g_var_t *gv);
 
 /* Check if a SNP is bi-allelic.
  *
@@ -179,7 +177,7 @@ float *bcf1_ap_gp(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra);
 
 /* Return dose in a two-dimensional array.
  *
- * @param gv pointer to GenomeVar object.
+ * @param gv pointer to g_var_t object.
  * @param vcf_hdr pointer to VCF header of the VCF lines in @p gv.
  * @param ids Array of the variant integer IDs to return dose for.
  *   The order of these variants will be preserved in @p dose.
@@ -187,62 +185,37 @@ float *bcf1_ap_gp(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra);
  * @param field one of "GT" or "GP".
  * @return float matrix, NULL on error.
  */
-float **ap_array_gt(GenomeVar *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char *field);
+float **ap_array_gt(g_var_t *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char *field);
 
 /* Get the variants that overlap region [beg, end)
  *
  * If @p *vars is NULL, then the pointer pointed to by vars is replaced 
- * with a linked list of Var object. If @p vars already points to a linked 
- * list of Var objects, then the overlapping variants are appened to the 
+ * with a linked list of var_t object. If @p vars already points to a linked 
+ * list of var_t objects, then the overlapping variants are appened to the 
  * list. There is no dummy head node.
  *
- * @param gv GenomeVar object to retrieve variants from.
+ * @param gv g_var_t object to retrieve variants from.
  * @param ref Reference sequence name (chromosome) in character array.
  * @param beg 0-based start position of region.
  * @param end 0-based position the base pair after the end. Open end position.
- * @param vars pointer to Var pointer.
+ * @param vars pointer to var_t pointer.
  *
  * @return Number of overlapping variants found.
- *  -1 if the reference is not found in GenomeVar. -2 on error
+ *  -1 if the reference is not found in g_var_t. -2 on error
  *
  * @note The containers in vars must be freed, but not the actual 
  * contents.
  */
-int region_vars(GenomeVar *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, Var **vars);
+int region_vars(g_var_t *gv, const char* ref, hts_pos_t beg, 
+        hts_pos_t end, var_t **vars);
 
-/* Get variants that overlap given region [beg, end).
- * Use region_vars function above instead.
- *
- * If the chromosome @p ref is not present, do nothing and return 0.
- * Returns the overlapping in the array of the argument @p vars.
- * This function reallocates the memory if necessary.
- *
- * @param gv GenomeVar object to retrieve variants from.
- * @param ref Reference sequence name (chromosome) in character array.
- * @param beg 0-based start position of region.
- * @param end 0-based position the base pair after the end. Open end position.
- * @param vars pointer to array of Var pointers.
- * @param vars_m Pointer to integer that contains the length of the vars array.
- *
- * @return Number of overlapping variants in @p vars.
- *  -1 if the reference is not found in GenomeVar. -2 on error
- *
- * The @p vars array must be an allocated array, or NULL. The @p vars_len 
- * gives the length of the @p vars array. The function can increase the size of 
- * @p vars by calling realloc, and will change @p vars_len to reflect the udpated 
- * size.
- */
-int vars_from_region(GenomeVar *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, Var ***vars, int *vars_m);
-
-int n_snp(GenomeVar *gv, int *n_snp);
+int n_snp(g_var_t *gv, int *n_snp);
 
 /* return the variant at index ix
  *
- * @return NULL if ix is invalid, pointer to Var if successful.
+ * @return NULL if ix is invalid, pointer to var_t if successful.
  */
-Var *gv_vari(GenomeVar *gv, int32_t ix);
+var_t *gv_vari(g_var_t *gv, int32_t ix);
 
 #endif // VARIANTS_H
 

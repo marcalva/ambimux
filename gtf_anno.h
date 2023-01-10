@@ -44,26 +44,26 @@ enum {GTF_SEQNAME,
 /* all @p beg and @p end are [beg,end) 
  * all coordinates are 0-based coordinates */
 
-/* Exon structure */
-typedef struct Exon {
+/* exon_t structure */
+typedef struct exon_t {
     int beg;
     int end;
-    struct Exon *next; // for linked list. NULL if none.
-} Exon;
+    struct exon_t *next; // for linked list. NULL if none.
+} exon_t;
 
-/* Isoform structure */
-typedef struct Isoform {
+/* isoform_t structure */
+typedef struct isoform_t {
     int beg;
     int end;
-    struct Exon *exons; // list of exons. NULL if empty.
+    struct exon_t *exons; // list of exons. NULL if empty.
     uint32_t exons_n; // number of exons in exons field.
-} Isoform;
+} isoform_t;
 
-/* hash table of char* key Isoform* values */
-KHASH_INIT(iso, char*, Isoform*, 1, kh_str_hash_func, kh_str_hash_equal);
+/* hash table of char* key isoform_t* values */
+KHASH_INIT(iso, char*, isoform_t*, 1, kh_str_hash_func, kh_str_hash_equal);
 
-/* Gene structure */
-typedef struct Gene {
+/* gene_t structure */
+typedef struct gene_t {
     char *id; // gene_id attribute in GTF
     char *name; // gene_name attribute in GTF
     char *type; // gene_type attribute in GTF
@@ -74,14 +74,14 @@ typedef struct Gene {
     int bin;
     khash_t(iso) *isoforms; // hash table of isoforms
     int isoforms_n; // number of isoforms in @field isoforms
-    struct Gene *next; // NULL if empty.
-} Gene;
+    struct gene_t *next; // NULL if empty.
+} gene_t;
 
 /* Chromosome structure */
-typedef struct Chrm {
-    Gene *bins[MAX_BIN]; // array of pointers to Gene objects. NULL if empty.
+typedef struct chr_genes_t {
+    gene_t *bins[MAX_BIN]; // array of pointers to gene_t objects. NULL if empty.
     uint16_t genes_n[MAX_BIN]; // Number of genes in each element of bins.
-} Chrm;
+} chr_genes_t;
 
 /* main struct to hold gene-transcript-exon info
  * Given a chromosome string, get the index in @field chrms with kh_get and kh_val.
@@ -91,9 +91,9 @@ typedef struct {
     str_map *gene_ix; // gene to index. g->ix has same memory as key here
     khash_t(str_int) *gene_chrm; // gene to chrm ix. key is same memory as g->id
     khash_t(str_int) *gene_bin; // gene to bin. key is same memory as g->id
-    Chrm **chrms; // array of pointers to Chrm objects.
+    chr_genes_t **chrms; // array of pointers to chr_genes_t objects.
     int chrms_m; // allocated max number of elements in chrms
-} Annotation;
+} gene_anno_t;
 
 /* Structure to hold gtf information
  * The fields attr_tag and attr_val hold linked lists of the 
@@ -113,7 +113,7 @@ typedef struct {
     kstr_node *attr_tag; // tag strings of each attribute
     kstr_node *attr_val; // value strings of each attribute. Match @field attr_tag.
     int n_attr;
-} gtf_line;
+} gtf1_t;
 
 
 /****************
@@ -121,44 +121,44 @@ typedef struct {
  ****************/
 
 /****************************
- * Annotation structure
+ * gene_anno_t structure
  ****************************/
 
 /* Initialize exon object */
-Exon *init_exon();
+exon_t *init_exon();
 
 /* Destroy exon object.
  *
  * @return pointer to next member of @p e.
  */
-Exon *destroy_exon(Exon *e);
+exon_t *destroy_exon(exon_t *e);
 
 /* Initialize isoform object */
-Isoform *init_isoform();
+isoform_t *init_isoform();
 
 /* Destroy isoform object */
-void destroy_isoform(Isoform *iso);
+void destroy_isoform(isoform_t *iso);
 
-/* Initialize Gene object */
-Gene *init_gene();
+/* Initialize gene_t object */
+gene_t *init_gene();
 
 /* destroy gene object
  *
- * @param g pointer to Gene object to destroy.
+ * @param g pointer to gene_t object to destroy.
  * @return pointer to @p g->next member
  */
-Gene *destroy_gene(Gene *g);
+gene_t *destroy_gene(gene_t *g);
 
 /* Initialize anno object */
-Annotation *init_anno();
+gene_anno_t *init_anno();
 
-/* Initialize Chrm object
+/* Initialize chr_genes_t object
  * return NULL if memory couldn't be allocated
  */
-Chrm *init_Chrm();
+chr_genes_t *init_chr_genes();
 
 /* destroy annotation object a and free memory. */
-void destroy_anno(Annotation *a);
+void destroy_anno(gene_anno_t *a);
 
 /* Add chromosome to the annotation object.
  *
@@ -166,7 +166,7 @@ void destroy_anno(Annotation *a);
  * @param c character array of chromosome name.
  * @return index of the chromosome in @p a->chrm_ix, or -1 on error.
  */
-int add_chrm(Annotation *a, char *c);
+int add_chrm(gene_anno_t *a, char *c);
 
 /* Return gene object in a given gene name
  *
@@ -174,43 +174,43 @@ int add_chrm(Annotation *a, char *c);
  *
  * If not found, returns NULL. If found, returns the pointer to it.
  */
-Gene *gene_from_name_chrm(Annotation *a, int chrm_ix, char *gene_id);
-Gene *gene_from_name(Annotation *a, char *gene_id);
+gene_t *gene_from_name_chrm(gene_anno_t *a, int chrm_ix, char *gene_id);
+gene_t *gene_from_name(gene_anno_t *a, char *gene_id);
 
 /****************************
  * GTF processing
  ****************************/
 
 /* Initialize gtf line object */
-gtf_line *init_gtf_line();
+gtf1_t *init_gtf1();
 
-/* Clears the memory in gtf_line g and reset values */
-void clear_gtf_line(gtf_line *g);
+/* Clears the memory in gtf1_t g and reset values */
+void clear_gtf1(gtf1_t *g);
 
-/* Clear memory and free gtf_line g object */
-void destroy_gtf_line(gtf_line *g);
+/* Clear memory and free gtf1_t g object */
+void destroy_gtf1(gtf1_t *g);
 
 /* Add gene, isoform, or exon from GTF line to anno
  *
  * @param a pointer to annotation object
- * @param gl pointer to gtf_line object
+ * @param gl pointer to gtf1_t object
  * @return 0 on success, -1 on failure.
  */
-int gtf_gene2anno(Annotation *a, gtf_line *gl);
-int gtf_iso2anno(Annotation *a, gtf_line *gl);
-int gtf_exon2anno(Annotation *a, gtf_line *gl);
-int gtf_line2anno(Annotation *a, gtf_line *gl);
+int gtf_gene2anno(gene_anno_t *a, gtf1_t *gl);
+int gtf_iso2anno(gene_anno_t *a, gtf1_t *gl);
+int gtf_exon2anno(gene_anno_t *a, gtf1_t *gl);
+int gtf1_to_anno(gene_anno_t *a, gtf1_t *gl);
 
-/* Parse GTF line in string and place data into gtf_line
+/* Parse GTF line in string and place data into gtf1_t
  *
  * The function makes successive calls to strtok_r on the 
  * string @p line. The corresponding GTF fields are populated .
  *
  * @param line string that contains the GTF line.
- * @param g pointer to gtf_line to populate data.
+ * @param g pointer to gtf1_t to populate data.
  * @return 0 on success, -1 on error.
  */
-int parse_gtf_line(kstring_t *line, gtf_line *g);
+int parse_gtf1(kstring_t *line, gtf1_t *g);
 
 /* Parse GTF line attributes.
  *
@@ -220,26 +220,26 @@ int parse_gtf_line(kstring_t *line, gtf_line *g);
  *
  * @return 0 on success
  */
-int parse_gtf_attr(gtf_line *g);
+int parse_gtf_attr(gtf1_t *g);
 
 /* Get attribute value of key from gtf line.
  * Searches for the first occurence of key, and returns the 
  * corresponding value in the gtf line.
  *
- * @param g pointer to gtf_line object
+ * @param g pointer to gtf1_t object
  * @param key char array of key of GTF attribute
  * @return char array of the first occurence of the key's value.
  *  NULL if the attribute is not found.
  */
-char *get_attr_val(gtf_line *g, char *key);
+char *get_attr_val(gtf1_t *g, char *key);
 
 /* Test if key-value pair is present in gtf line
  *
  * Returns 1 if found, 0 if not found.
  */
-int has_key_val(gtf_line *g, char *key, char *val);
+int has_key_val(gtf1_t *g, char *key, char *val);
 
-/* Read GTF annotations into Annotation object.
+/* Read GTF annotations into gene_anno_t object.
  *
  * The GTF file must have attributes 'gene_id' and 'transcript_id'. The 
  * exons of a transcript must be listed after the transcript, and the 
@@ -249,11 +249,11 @@ int has_key_val(gtf_line *g, char *key, char *val);
  *
  * @param file char array containing file name of GTF.
  * @param basic specify whether to use only isoforms that are tagged as basic (basic=1).
- * @return pointer to Annotation object, or NULL if failure.
+ * @return pointer to gene_anno_t object, or NULL if failure.
  *
  * Returned object must be freed with destroy_anno()
  */
-Annotation *read_from_gtf(char *file, int basic);
+gene_anno_t *read_from_gtf(char *file, int basic);
 
 /* Write out gene summary data
  *
@@ -262,7 +262,7 @@ Annotation *read_from_gtf(char *file, int basic);
  *
  * @return 0 on success, -1 on error.
  */
-int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix);
+int write_gene_data(BGZF *fp, gene_anno_t *anno, str_map *gene_ix);
 
 /****************************
  * Region overlap
@@ -270,13 +270,13 @@ int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix);
 
 /* Get features that overlap given region [beg, end).
  *
- * @param a Annotation object to retrieve features from.
+ * @param a gene_anno_t object to retrieve features from.
  * @param ref Reference sequence name (chromosome) in character array.
  * @param beg 0-based start position of region.
  * @param end 0-based position the base pair after the end. Open end position.
  * @param stranded 0 if given region is unstranded, any other value if the region is stranded.
  * @param strand Character of strand, one of '+' or '-'. Ignored if @p stranded is 0.
- * @param genes array of pointers to Gene objects, for overlapping genes.
+ * @param genes array of pointers to gene_t objects, for overlapping genes.
  * @param genes_len Pointer to integer that contains the length of the genes array.
  * @param p Minimum fraction of the region that overlaps.
  *
@@ -287,13 +287,13 @@ int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix);
  * If no genes overlap, then 0 is returned and @p genes is unchanged.
  * The object @p genes must be allocated before the function is called, and freed after the call.
  */
-int feats_from_region_p(const Annotation *a, const char* ref, 
+int feats_from_region_p(const gene_anno_t *a, const char* ref, 
         int64_t beg, int64_t end, uint8_t stranded, char strand, 
-        Gene ***genes, int *genes_len, double p);
+        gene_t ***genes, int *genes_len, double p);
 
 /* Get features that overlap completely with @p set to 1 in the above company */
-static inline int feats_from_region(const Annotation *a, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, uint8_t stranded, char strand, Gene ***genes, int *genes_len){
+static inline int feats_from_region(const gene_anno_t *a, const char* ref, hts_pos_t beg, 
+        hts_pos_t end, uint8_t stranded, char strand, gene_t ***genes, int *genes_len){
     return feats_from_region_p(a, ref, beg, end, stranded, strand, genes, genes_len, 1.0);
 }
 
@@ -301,7 +301,7 @@ static inline int feats_from_region(const Annotation *a, const char* ref, hts_po
  * Summary functions
  ****************************/
 
-int n_feat(Annotation *a, int *n_gene, int *n_iso, int *n_exon);
+int n_feat(gene_anno_t *a, int *n_gene, int *n_iso, int *n_exon);
 
 int test_anno(char *file);
 

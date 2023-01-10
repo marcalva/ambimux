@@ -404,6 +404,8 @@ int main(int argc, char *argv[]){
 
     if (bam_data_fill_bcs(bam_dat, objs->wl_bcs) < 0)
         goto cleanup;
+    if (bam_data_fill_stats(bam_dat) < 0)
+        goto cleanup;
 
     // generate gene counts
     if (bam_count(bam_dat, objs, objs->out_fn) < 0){

@@ -94,8 +94,6 @@ mdl_t *mdl_alloc(){
     mdl->flt_bcs = NULL;
     mdl->samples = NULL;
 
-    mdl->bcss = NULL;
-
     mdl->mp = init_mdl_pars();
     mdl->mf = init_mdl_fit();
     if (mdl->mp == NULL || mdl->mf == NULL)
@@ -106,11 +104,6 @@ mdl_t *mdl_alloc(){
 
 void mdl_dstry(mdl_t *m){
     if (m == NULL) return;
-
-    if (m->bcss){
-        bcs_stats_free(m->bcss);
-        free(m->bcss);
-    }
 
     if (m->all_bcs) destroy_str_map(m->all_bcs);
     if (m->flt_bcs) destroy_str_map(m->flt_bcs);
@@ -126,13 +119,10 @@ int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
     if (mdl == NULL || bam_dat == NULL || objs == NULL)
         return err_msg(-1, 0, "mdl_set_bcs: arguments are null");
 
-    khint_t k;
+    if (bam_dat->has_stats == 0)
+        return err_msg(-1, 0, "mdl_set_bcs: 'bam_dat' stats are required");
 
-    // get barcode stats
-    if ( (mdl->bcss = bc_stats_alloc()) == NULL )
-        return(-1);
-    if (bam_data_fill_stats(bam_dat) < 0)
-        return(-1);
+    khint_t k;
 
     // set all barcodes for model
     int found;
@@ -208,7 +198,7 @@ int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_dat, obj_pars *objs){
             continue;
         char *bc_key = kh_key(bam_dat->bc_data, k);
         bc_data_t *bc_data = kh_val(bam_dat->bc_data, k);
-        bc_counts *c = bc_data->bc_stats;
+        bc_stats_t *c = bc_data->bc_stats;
         if (c->rna_counts < out_mins && c->atac_counts < out_mins) 
             continue;
         if (add2str_map(mdl->test_bcs, bc_key, &found) < 0)
@@ -793,7 +783,7 @@ int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs){
     write_llk(mf, "llk_test.txt");
     */
 
-    if (bam_dat->rna && write_alpha(mdl, objs, objs->out_fn) < 0)
+    if (bam_dat->has_rna && write_alpha(mdl, objs, objs->out_fn) < 0)
         return -1;
 
     if (write_llk(mdl, objs->out_fn) < 0)
@@ -1031,7 +1021,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
             return err_msg(-1, 0, "write_res: barcode %s not found", bc_name);
 
         bc_data_t *bc_data = kh_val(bam_dat->bc_data, k_bc);
-        bc_counts *bcc = bc_data->bc_stats;
+        bc_stats_t *bcc = bc_data->bc_stats;
 
         // write bc stats
         fputc(delim, fp);

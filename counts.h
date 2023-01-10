@@ -152,7 +152,7 @@ int seq_blist_match_qual(seq_blist_t *bl, const seq_blist_t *cmp);
 /*! @typedef
  * @abstract variant allele call
  *
- * @field vix Variant integer ID. Map to chr name with contig_map.
+ * @field vix Variant integer ID.
  *  Missing values are encoded as 15 (0xf)
  * @field allele Index of variant allele. Ref is 0, first alt allele is 1, second is 2, ... 
  */
@@ -215,10 +215,10 @@ int vacs_add(vacs_t *vacs, vac_t *v);
  * If the vase in @p b is 'N', skip and return 0.
  * If the base quality is < min_qual, skip and return 0.
  */
-int seq_base_call_var(seq_base_t *b, vacs_t *vacs, GenomeVar *gv, 
+int seq_base_call_var(seq_base_t *b, vacs_t *vacs, g_var_t *gv, 
     contig_map *cmap, uint8_t min_qual);
 
-int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, GenomeVar *gv, 
+int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, g_var_t *gv, 
         contig_map *cmap, uint8_t min_qual);
 
 /*******************************************************************************

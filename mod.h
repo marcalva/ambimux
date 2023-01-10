@@ -111,8 +111,6 @@ typedef struct {
     str_map *test_bcs; // barcodes to calculate llk
     str_map *samples;
 
-    bcs_stats *bcss;
-
     mdl_pars_t *mp;
     mdl_fit_t *mf;
 } mdl_t;

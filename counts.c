@@ -98,7 +98,7 @@ int seq_blist_equal(seq_blist_t l1, seq_blist_t l2, int qual_cmp){
 
 int blist_add_base(seq_blist_t *s, const seq_base_t *b, int dup_ok, int skip_dup){
     if (s == NULL || b == NULL)
-        return err_msg(-1, 0, "blist_add_base: arguments cannot be NULL");
+        return err_msg(-1, 0, "blist_add_base: argument is null");
 
     /* sorted insert based on genomic position */
     int cret;
@@ -176,7 +176,7 @@ seq_blist_t *copy_seq_blist(const seq_blist_t *s, int *ret){
 
 int seq_blist_match_qual(seq_blist_t *bl, const seq_blist_t *cmp){
     if (bl == NULL || cmp == NULL)
-        return err_msg(-1, 0, "seq_blist_match_qual: arguments are NULL");
+        return err_msg(-1, 0, "seq_blist_match_qual: argument is null");
 
     if (bl->n != cmp->n)
         return err_msg(-1, 0, "seq_blist_match_qual: "
@@ -221,7 +221,7 @@ vac_t *alloc_vac(){
 
 vac_t *dstry_vac(vac_t *v){
     vac_t *n = v->next;
-    if (v) free(v); // The bcf record is freed elsewhere
+    if (v) free(v);
     return(n);
 }
 
@@ -244,9 +244,8 @@ void free_vacs(vacs_t *vacs){
 }
 
 int vacs_add(vacs_t *vacs, vac_t *v){
-    if (vacs == NULL || v == NULL){
-        return err_msg(-1, 0, "vacs_add: arguments cannot be NULL");
-    }
+    if (vacs == NULL || v == NULL)
+        return err_msg(-1, 0, "vacs_add: argument is null");
 
     if (vacs->head == NULL){
         vacs->head = v;
@@ -262,11 +261,10 @@ int vacs_add(vacs_t *vacs, vac_t *v){
     return(0);
 }
 
-int seq_base_call_var(seq_base_t *b, vacs_t *vacs, GenomeVar *gv, 
+int seq_base_call_var(seq_base_t *b, vacs_t *vacs, g_var_t *gv, 
         contig_map *cmap, uint8_t min_qual){ 
-    if (b == NULL || gv == NULL || cmap == NULL){
-        return err_msg(-1, 0, "seq_base_call_var: arguments are NULL");
-    }
+    if (b == NULL || gv == NULL || cmap == NULL)
+        return err_msg(-1, 0, "seq_base_call_var: argument is null");
 
     /* get chromosome and position */
     int32_t b_rid = b->pos.rid;
@@ -280,14 +278,14 @@ int seq_base_call_var(seq_base_t *b, vacs_t *vacs, GenomeVar *gv,
     uint8_t b_qual = b->qual;
 
     // skip bases observed as N
-    if (b_base == 15)
+    if (b_base == 0xf)
         return(0);
 
     if (b_qual < min_qual)
         return(0);
 
     /* Get overlapping variants */
-    Var *v_a = NULL, *v_hd = NULL;
+    var_t *v_a = NULL, *v_hd = NULL;
     int n_added = 0;
     int n_v = region_vars(gv, b_ref, b_beg, b_end, &v_hd);
     if (n_v < 0) return(-1);
@@ -307,8 +305,7 @@ int seq_base_call_var(seq_base_t *b, vacs_t *vacs, GenomeVar *gv,
             continue;
 
         // skip indels
-        int issnp = bcf_is_snp(rec);
-        if (!issnp)
+        if (!bcf_is_snp(rec))
             continue;
 
         // throw error if more alleles than present than can be stored.
@@ -343,17 +340,17 @@ int seq_base_call_var(seq_base_t *b, vacs_t *vacs, GenomeVar *gv,
         if (vacs_add(vacs, vac_next) < 0) return(-1);
         ++n_added;
     }
-    // free allocated Var objects.
+    // free allocated var_t objects.
     v_a = v_hd;
     while (v_a != NULL){
-        Var *v_tmp = v_a->next;
+        var_t *v_tmp = v_a->next;
         free(v_a);
         v_a = v_tmp;
     }
     return(n_added);
 }
 
-int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, GenomeVar *gv, 
+int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, g_var_t *gv, 
         contig_map *cmap, uint8_t min_qual){
     if (s == NULL || vacs == NULL || gv == NULL || cmap == NULL){
         return err_msg(-1, 0, "pbcs_to_vacs: arguments cannot be NULL");
@@ -489,11 +486,12 @@ seq_glist_t *seq_glist_cpy(const seq_glist_t *src, int *ret){
 
 int seq_glist_add_gene(seq_glist_t *gl, const seq_gene_t *gene){
     if (gl == NULL || gene == NULL)
-        return err_msg(-1, 0, "seq_gene_add_gene: arguments are NULL");
+        return err_msg(-1, 0, "seq_gene_add_gene: argument is null");
 
     // copy seq_gene_t
     int cret = 0;
     seq_gene_t *cpy = seq_gene_cpy(gene, &cret);
+    cpy->next = NULL;
     if (cret < 0)
         return(-1);
 

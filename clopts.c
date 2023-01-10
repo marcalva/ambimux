@@ -5,6 +5,10 @@
 
 cl_opts *init_cl_opts(){
     cl_opts *opts = (cl_opts *)calloc(1, sizeof(cl_opts));
+    if (opts == NULL){
+        err_msg(-1, 0, "init_cl_opts: %s", strerror(errno));
+        return(NULL);
+    }
 
     opts->rna_bam_fn = NULL;
     opts->atac_bam_fn = NULL;
@@ -64,6 +68,10 @@ void dstry_cl_opts(cl_opts *opts){
 
 obj_pars *init_obj_pars(){
     obj_pars *p = (obj_pars *)calloc(1, sizeof(obj_pars));
+    if (p == NULL){
+        err_msg(-1, 0, "init_obj_pars: %s", strerror(errno));
+        return(NULL);
+    }
 
     p->rna_bam = NULL;
     p->rna_bam_hdr = NULL;
@@ -135,6 +143,8 @@ void dstry_obj_pars(obj_pars *objs){
 }
 
 int load_rna_bam(cl_opts *opts, obj_pars *objs){
+    if (opts == NULL || objs == NULL)
+        return err_msg(-1, 0, "load_rna_bam: 'opts' or 'objs' is null");
     if (opts->rna_bam_fn == NULL) return(0);
 
     if (opts->verbose)
@@ -146,6 +156,8 @@ int load_rna_bam(cl_opts *opts, obj_pars *objs){
 }
 
 int load_atac_bam(cl_opts *opts, obj_pars *objs){
+    if (opts == NULL || objs == NULL)
+        return err_msg(-1, 0, "load_atac_bam: 'opts' or 'objs' is null");
     if (opts->atac_bam_fn == NULL) return(0);
 
     if (opts->verbose)
@@ -157,6 +169,8 @@ int load_atac_bam(cl_opts *opts, obj_pars *objs){
 }
 
 int load_vars(cl_opts *opts, obj_pars *objs){
+    if (opts == NULL || objs == NULL)
+        return err_msg(-1, 0, "load_vars: 'opts' or 'objs' is null");
     if (opts->vcf_fn == NULL) return(0);
 
     int ret;
@@ -198,7 +212,7 @@ int load_vars(cl_opts *opts, obj_pars *objs){
 
 int load_gtf(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_gtf: arguments are NULL");
+        return err_msg(-1, 0, "load_gtf: 'opts' or 'objs' is null");
 
     if (opts->gtf_fn == NULL)
         return(0);
@@ -215,7 +229,7 @@ int load_gtf(cl_opts *opts, obj_pars *objs){
 
 int load_samples(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_samples: arguments are NULL");
+        return err_msg(-1, 0, "load_samples: 'opts' or 'objs' is null");
 
     if (opts->sample_fn == NULL)
         return(0);
@@ -233,7 +247,7 @@ int load_samples(cl_opts *opts, obj_pars *objs){
 
 int load_bcs(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_flt_bcs: arguments are NULL");
+        return err_msg(-1, 0, "load_flt_bcs: 'opts' or 'objs' is null");
 
     if (opts->verbose)
         log_msg("loading barcodes");
@@ -259,7 +273,7 @@ int load_bcs(cl_opts *opts, obj_pars *objs){
 
 int load_peaks(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_peaks: arguments are NULL");
+        return err_msg(-1, 0, "load_peaks: 'opts' or 'objs' is null");
 
     if (opts->peaks_fn == NULL) return(0);
 
@@ -274,7 +288,7 @@ int load_peaks(cl_opts *opts, obj_pars *objs){
 
 int load_exclude(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_exclude: arguments are NULL");
+        return err_msg(-1, 0, "load_exclude: 'opts' or 'objs' is null");
 
     if (opts->exclude_fn == NULL) return(0);
 
@@ -288,6 +302,8 @@ int load_exclude(cl_opts *opts, obj_pars *objs){
 }
 
 int copy_options(cl_opts *opts, obj_pars *objs){
+    if (opts == NULL || objs == NULL)
+        return err_msg(-1, 0, "copy_options: 'opts' or 'objs' is null");
     objs->max_nh = opts->max_nh;
     strcpy(objs->rna_bc_tag, opts->rna_bc_tag);
     strcpy(objs->atac_bc_tag, opts->atac_bc_tag);

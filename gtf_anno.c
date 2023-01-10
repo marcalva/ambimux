@@ -11,10 +11,10 @@
 #include <unistd.h>
 #include <inttypes.h>
 
-Exon *init_exon(){
-    Exon *e;
+exon_t *init_exon(){
+    exon_t *e;
     
-    if ((e = malloc(sizeof(Exon))) == NULL){
+    if ((e = malloc(sizeof(exon_t))) == NULL){
         err_msg(-1, 0, "init_exon: %s", strerror(errno));
     } else {
         e->beg = -1;
@@ -25,17 +25,17 @@ Exon *init_exon(){
     return e;
 }
 
-Exon *destroy_exon(Exon *e){
+exon_t *destroy_exon(exon_t *e){
     if (e == NULL) return NULL;
-    Exon *n = e->next;
+    exon_t *n = e->next;
     free(e);
     return n;
 }
 
-Isoform *init_isoform(){
-    Isoform *i;
+isoform_t *init_isoform(){
+    isoform_t *i;
 
-    if ((i = malloc(sizeof(Isoform))) == NULL){
+    if ((i = malloc(sizeof(isoform_t))) == NULL){
         err_msg(-1, 0, "init_isoform: %s", strerror(errno));
     } else {
         i->beg = 0;
@@ -47,17 +47,17 @@ Isoform *init_isoform(){
     return i;
 }
 
-void destroy_isoform(Isoform *iso){
+void destroy_isoform(isoform_t *iso){
     if (iso == NULL) return;
-    Exon *e = iso->exons;
+    exon_t *e = iso->exons;
     while (e) e = destroy_exon(e);
     free(iso);
 }
 
-Gene *init_gene(){
-    Gene *g;
+gene_t *init_gene(){
+    gene_t *g;
 
-    if ((g = malloc(sizeof(Gene))) == NULL){
+    if ((g = malloc(sizeof(gene_t))) == NULL){
         err_msg(-1, 0, "init_gene: %s", strerror(errno));
     } else {
         g->id = NULL;
@@ -76,11 +76,11 @@ Gene *init_gene(){
     return g;
 }
 
-Gene *destroy_gene(Gene *g){
+gene_t *destroy_gene(gene_t *g){
     khint_t k;
     for (k = kh_begin(g->isoforms); k != kh_end(g->isoforms); ++k){
         if (!kh_exist(g->isoforms, k)) continue;
-        Isoform *iso = kh_val(g->isoforms, k);
+        isoform_t *iso = kh_val(g->isoforms, k);
         char *key = kh_key(g->isoforms, k);
         destroy_isoform(iso);
         free(key);
@@ -88,20 +88,20 @@ Gene *destroy_gene(Gene *g){
     kh_destroy(iso, g->isoforms);
     free(g->name);
     free(g->type);
-    Gene *n = g->next;
+    gene_t *n = g->next;
     free(g);
     return n;
 }
 
-Annotation *init_anno(){
+gene_anno_t *init_anno(){
     int init_n = 1<<8;
-    Annotation *a;
+    gene_anno_t *a;
 
-    if ((a = malloc(sizeof(Annotation))) == NULL){
+    if ((a = malloc(sizeof(gene_anno_t))) == NULL){
         err_msg(-1, 0, "init_anno: %s", strerror(errno));
         return NULL;
     } else {
-        if ((a->chrms = malloc(init_n * sizeof(Chrm*))) == NULL){
+        if ((a->chrms = malloc(init_n * sizeof(chr_genes_t*))) == NULL){
             err_msg(-1, 0, "init_anno: %s", strerror(errno));
         }
         a->chrm_ix = init_str_map();
@@ -114,11 +114,11 @@ Annotation *init_anno(){
     return a;
 }
 
-Chrm *init_Chrm(){
-    Chrm *chrm = (Chrm*)calloc(1, sizeof(Chrm));
+chr_genes_t *init_chr_genes(){
+    chr_genes_t *chrm = (chr_genes_t*)calloc(1, sizeof(chr_genes_t));
 
     if (chrm == NULL){
-        err_msg(-1, 0, "init_Chrm: %s", strerror(errno));
+        err_msg(-1, 0, "init_chr_genes: %s", strerror(errno));
         return NULL;
     }
 
@@ -130,17 +130,17 @@ Chrm *init_Chrm(){
     return chrm;
 }
 
-void destroy_anno(Annotation *a){
+void destroy_anno(gene_anno_t *a){
 
     if (a == NULL) return;
 
     int i;
     for (i = 0; i < a->chrm_ix->n; i++){
-        Chrm *c = a->chrms[i];
+        chr_genes_t *c = a->chrms[i];
         int j;
         // clear bins in chromosome
         for (j = 0; j < MAX_BIN; j++){
-            Gene *g = c->bins[j];
+            gene_t *g = c->bins[j];
             while (g) g = destroy_gene(g);
         }
         free(c);
@@ -155,26 +155,26 @@ void destroy_anno(Annotation *a){
     free(a);
 }
 
-int add_chrm(Annotation *a, char *c){
+int add_chrm(gene_anno_t *a, char *c){
     // add chromosome ID
     int chr_ix, found = 0;
     if ( (chr_ix = add2str_map(a->chrm_ix, (const char*)c, &found)) < 0 ) return -1;
     if (found == 0){
         while (a->chrm_ix->n >= a->chrms_m){
             a->chrms_m = (a->chrms_m)<<1;
-            a->chrms = realloc(a->chrms, (a->chrms_m)*sizeof(Chrm*));
+            a->chrms = realloc(a->chrms, (a->chrms_m)*sizeof(chr_genes_t*));
 
             if (a->chrms == NULL)
                 return err_msg(-1, 0, "add_chrm: %s", strerror(errno));
 
         }
-        a->chrms[chr_ix] = init_Chrm();
+        a->chrms[chr_ix] = init_chr_genes();
         if (a->chrms[chr_ix] == NULL) return -1;
     }
     return chr_ix;
 }
 
-Gene *gene_from_name_chrm(Annotation *a, int chrm_ix, char *gene_id){
+gene_t *gene_from_name_chrm(gene_anno_t *a, int chrm_ix, char *gene_id){
     khint_t k;
     k = kh_get(str_int, a->gene_bin, gene_id);
     if (k == kh_end(a->gene_bin)){
@@ -183,14 +183,14 @@ Gene *gene_from_name_chrm(Annotation *a, int chrm_ix, char *gene_id){
     }
     int bin = kh_val(a->gene_bin, k);
 
-    Gene *ag = a->chrms[chrm_ix]->bins[bin];
+    gene_t *ag = a->chrms[chrm_ix]->bins[bin];
     for (; ag != NULL; ag = ag->next){
         if (strcmp(ag->id, gene_id) == 0) break;
     }
     return ag;
 }
 
-Gene *gene_from_name(Annotation *a, char *gene_id){
+gene_t *gene_from_name(gene_anno_t *a, char *gene_id){
     khint_t k;
     k = kh_get(str_int, a->gene_bin, gene_id);
     if (k == kh_end(a->gene_bin)){
@@ -206,7 +206,7 @@ Gene *gene_from_name(Annotation *a, char *gene_id){
     }
     int chrm_ix = kh_val(a->gene_chrm, k);
 
-    Gene *ag = a->chrms[chrm_ix]->bins[bin];
+    gene_t *ag = a->chrms[chrm_ix]->bins[bin];
     for (; ag != NULL; ag = ag->next){
         if (strcmp(ag->id, gene_id) == 0) break;
     }
@@ -217,11 +217,11 @@ Gene *gene_from_name(Annotation *a, char *gene_id){
  * GTF processing
  ****************************/
 
-gtf_line *init_gtf_line(){
-    gtf_line *g = (gtf_line *)calloc(1, sizeof(gtf_line));
+gtf1_t *init_gtf1(){
+    gtf1_t *g = (gtf1_t *)calloc(1, sizeof(gtf1_t));
 
     if (g == NULL){
-        err_msg(-1, 0, "init_gtf_line: %s", strerror(errno));
+        err_msg(-1, 0, "init_gtf1_t: %s", strerror(errno));
         return NULL;
     }
 
@@ -241,7 +241,7 @@ gtf_line *init_gtf_line(){
     return g;
 }
 
-void clear_gtf_line(gtf_line *g){
+void clear_gtf1(gtf1_t *g){
     ks_free(&(g->chrname));
     ks_free(&(g->source));
     ks_free(&(g->feature));
@@ -265,18 +265,18 @@ void clear_gtf_line(gtf_line *g){
     g->n_attr = 0;
 }
 
-void destroy_gtf_line(gtf_line *g){
+void destroy_gtf1(gtf1_t *g){
     if (g == NULL) return;
-    clear_gtf_line(g);
+    clear_gtf1(g);
     free(g);
 }
 
 // Add gene from a GTF line
-int gtf_gene2anno(Annotation *a, gtf_line *gl){
+int gtf_gene2anno(gene_anno_t *a, gtf1_t *gl){
     int ci = add_chrm(a, gl->chrname.s);
     if (ci < 0) return -1;
 
-    Gene *g = init_gene();
+    gene_t *g = init_gene();
     if (g == NULL) return -1;
     
     char *gene_id = get_attr_val(gl, GENE_ID);
@@ -313,7 +313,7 @@ int gtf_gene2anno(Annotation *a, gtf_line *gl){
 
     // add to bins
     if (a->chrms[ci]->bins[g->bin]){
-        Gene *ag = a->chrms[ci]->bins[g->bin];
+        gene_t *ag = a->chrms[ci]->bins[g->bin];
         while (ag->next) ag = ag->next;
         ag->next = g;
     } else {
@@ -342,11 +342,11 @@ int gtf_gene2anno(Annotation *a, gtf_line *gl){
 }
 
 // add isoform from a GTF line
-int gtf_iso2anno(Annotation *a, gtf_line *gl){
+int gtf_iso2anno(gene_anno_t *a, gtf1_t *gl){
     int ci = add_chrm(a, gl->chrname.s);
     if (ci < 0) return -1;
 
-    Isoform *iso = init_isoform();
+    isoform_t *iso = init_isoform();
     if (iso == NULL) return -1;
     
     // get GENE ID
@@ -367,7 +367,7 @@ int gtf_iso2anno(Annotation *a, gtf_line *gl){
     iso->end = gl->end;
 
     // get gene object
-    Gene *ag = gene_from_name_chrm(a, ci, gene_id);
+    gene_t *ag = gene_from_name_chrm(a, ci, gene_id);
     if (ag == NULL){
         err_msg(-1, 0, "gtf_iso2anno: gene %s not found", gene_id);
         return -1;
@@ -394,11 +394,11 @@ int gtf_iso2anno(Annotation *a, gtf_line *gl){
 }
 
 // add exon from a GTF line
-int gtf_exon2anno(Annotation *a, gtf_line *gl){
+int gtf_exon2anno(gene_anno_t *a, gtf1_t *gl){
     int ci = add_chrm(a, gl->chrname.s);
     if (ci < 0) return -1;
 
-    Exon *e = init_exon();
+    exon_t *e = init_exon();
     if (e == NULL) return -1;
     
     // get gene tx exon IDs
@@ -424,7 +424,7 @@ int gtf_exon2anno(Annotation *a, gtf_line *gl){
     khint_t k;
 
     // get gene object
-    Gene *ag = gene_from_name_chrm(a, ci, gene_id);
+    gene_t *ag = gene_from_name_chrm(a, ci, gene_id);
     if (ag == NULL){
         err_msg(-1, 0, "gtf_exon2anno: gene %s not found in bin index", gene_id);
         return -1;
@@ -432,7 +432,7 @@ int gtf_exon2anno(Annotation *a, gtf_line *gl){
 
     // get isoform object
     k = kh_get(iso, ag->isoforms, tx_id);
-    Isoform *iso = kh_val(ag->isoforms, k);
+    isoform_t *iso = kh_val(ag->isoforms, k);
 
     // if no isoform
     if (k == kh_end(ag->isoforms) || !iso){
@@ -442,7 +442,7 @@ int gtf_exon2anno(Annotation *a, gtf_line *gl){
     }
 
     // sorted insert
-    Exon *ge = iso->exons;
+    exon_t *ge = iso->exons;
     while (ge->next != NULL && e->beg > ge->next->beg) ge = ge->next;
 
     if (ge->beg == e->beg){ // if exon found already
@@ -458,7 +458,7 @@ int gtf_exon2anno(Annotation *a, gtf_line *gl){
     return 0;
 }
 
-int gtf_line2anno(Annotation *a, gtf_line *gl){
+int gtf1_to_anno(gene_anno_t *a, gtf1_t *gl){
 
     int ret;
     char *type = gl->feature.s;
@@ -475,7 +475,7 @@ int gtf_line2anno(Annotation *a, gtf_line *gl){
     return ret;
 }
 
-int parse_gtf_line(kstring_t *line, gtf_line *g){
+int parse_gtf1(kstring_t *line, gtf1_t *g){
     char delims[] = "\t";
     char *token = NULL;
     char *rest = NULL;
@@ -485,62 +485,62 @@ int parse_gtf_line(kstring_t *line, gtf_line *g){
     errno = 0;
 
     if ( (token = strtok_r(line->s, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     if (kputs(token, &(g->chrname)) == EOF) return -1;
     
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     if (kputs(token, &(g->source)) == EOF) return -1;
 
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     if (kputs(token, &(g->feature)) == EOF) return -1;
     
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     g->start = (int) strtol(token, &endptr, 10);
     if (g->start == 0 && errno > 0){
-        return err_msg(-1, 0, "parse_gtf_line: could not convert %s to int: %s", 
+        return err_msg(-1, 0, "parse_gtf1: could not convert %s to int: %s", 
                 token, strerror(errno));
     }
     g->start -= 1; // convert start to 0-based coordinate
     
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     g->end = strtol(token, &endptr, 10);
     if (g->end == 0 && errno > 0)
-        return err_msg(-1, 0, "parse_gtf_line: could not convert %s to int: %s", 
+        return err_msg(-1, 0, "parse_gtf1: could not convert %s to int: %s", 
                 token, strerror(errno));
     
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     if (token[0] == '.')
         g->score = -1;
     else{
         g->score = strtol(token, &endptr, 10);
         if (g->score == 0 && errno > 0)
-            return err_msg(-1, 0, "parse_gtf_line: could not convert %s to int: %s", 
+            return err_msg(-1, 0, "parse_gtf1: could not convert %s to int: %s", 
                     token, strerror(errno));
     }
 
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     g->strand = token[0];
     // can be '+' '-' '.':irrelevant '?':relevant but unknown
 
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);
     if (token[0] == '.')
         g->frame = -1;
     else{
         g->frame = strtol(token, &endptr, 10);
         if (g->frame == 0 && errno > 0)
-            return err_msg(-1, 0, "parse_gtf_line: could not convert %s to int: %s",
+            return err_msg(-1, 0, "parse_gtf1: could not convert %s to int: %s",
                     token, strerror(errno));
     }
 
     if ( (token = strtok_r(NULL, delims, &rest)) == NULL)
-        return err_msg(-1, 0, "parse_gtf_line: GTF line is malformed\n%s", line);;
+        return err_msg(-1, 0, "parse_gtf1: GTF line is malformed\n%s", line);;
     if (kputs(token, &(g->attribute)) == EOF) return -1;
 
     errno = save_errno;
@@ -548,7 +548,7 @@ int parse_gtf_line(kstring_t *line, gtf_line *g){
     return 0;
 }
 
-int parse_gtf_attr(gtf_line *g){
+int parse_gtf_attr(gtf1_t *g){
     kstring_t *s = &(g->attribute);
     char delim[4] = " ;\"";
 
@@ -583,7 +583,7 @@ int parse_gtf_attr(gtf_line *g){
 }
 
 // returns char* pointer to value of first occurence of key.
-char *get_attr_val(gtf_line *g, char *key){
+char *get_attr_val(gtf1_t *g, char *key){
     kstr_node *tag_next = g->attr_tag;
     kstr_node *val_next = g->attr_val;
     int i;
@@ -596,7 +596,7 @@ char *get_attr_val(gtf_line *g, char *key){
     return NULL;
 }   
 
-int has_key_val(gtf_line *g, char *key, char *val){
+int has_key_val(gtf1_t *g, char *key, char *val){
     kstr_node *tag_next = g->attr_tag;
     kstr_node *val_next = g->attr_val;
     int i;
@@ -610,9 +610,9 @@ int has_key_val(gtf_line *g, char *key, char *val){
     return 0;
 }
 
-Annotation *read_from_gtf(char *file, int basic){
+gene_anno_t *read_from_gtf(char *file, int basic){
 
-    Annotation *a = init_anno();
+    gene_anno_t *a = init_anno();
 
     if (a == NULL) return NULL;
 
@@ -639,13 +639,13 @@ Annotation *read_from_gtf(char *file, int basic){
     }
 
     int nlines = 0;
-    gtf_line *gl = init_gtf_line();
+    gtf1_t *gl = init_gtf1();
     while ( (len = bgzf_getline(fp, '\n', &line)) > 0 ){
         nlines++;
 
-        if ( (ret = parse_gtf_line(&line, gl)) < 0){
+        if ( (ret = parse_gtf1(&line, gl)) < 0){
             err_msg(-1, 0, "read_from_gtf: failed to parse GTF line\n%s", line.s);
-            destroy_gtf_line(gl);
+            destroy_gtf1(gl);
             destroy_anno(a);
             bgzf_close(fp);
             return NULL;
@@ -657,32 +657,32 @@ Annotation *read_from_gtf(char *file, int basic){
         if ((strcmp(gl->feature.s, GENE) != 0) && // not gene
             (basic)                            && // filter for basic tx
             (!line_is_basic)){ // line is not basic
-            clear_gtf_line(gl);
+            clear_gtf1(gl);
             continue;
         }
 
         // add gtf line
-        if ( (ret = gtf_line2anno(a, gl)) == -1 ){
+        if ( (ret = gtf1_to_anno(a, gl)) == -1 ){
             err_msg(-1, 0, "read_from_gtf: failed to add GTF line\n%s", line.s);
-            destroy_gtf_line(gl);
+            destroy_gtf1(gl);
             destroy_anno(a);
             bgzf_close(fp);
             return NULL;
         }
 
-        clear_gtf_line(gl);
+        clear_gtf1(gl);
 
         // printf("Feature: name = %s; id = %s; beg = %i; end = %i; strand = %c; chrm = %i; bin = %i\n", f.name.s, f.id.s, f.beg, f.end, f.strand, f.chrm, f.bin);
     } // end read GTF
 
     ks_free(&line);
-    destroy_gtf_line(gl);
+    destroy_gtf1(gl);
     bgzf_close(fp);
 
     return a;
 }
 
-int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix){
+int write_gene_data(BGZF *fp, gene_anno_t *anno, str_map *gene_ix){
     if (fp == NULL || anno == NULL || gene_ix == NULL)
         return err_msg(-1, 0, "write_gene_data: arguments are NULL");
 
@@ -697,7 +697,7 @@ int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix){
             continue;
         }
 
-        Gene *gene_obj = gene_from_name(anno, gene_key);
+        gene_t *gene_obj = gene_from_name(anno, gene_key);
 
         char *chrm = str_map_str(anno->chrm_ix, gene_obj->chrm);
         if (chrm == NULL){
@@ -741,9 +741,9 @@ int write_gene_data(BGZF *fp, Annotation *anno, str_map *gene_ix){
  *****************************/
 
 
-int feats_from_region_p(const Annotation *a, const char* ref, 
+int feats_from_region_p(const gene_anno_t *a, const char* ref, 
         int64_t beg, int64_t end, uint8_t stranded, char strand, 
-        Gene ***genes, int *genes_len, double p){
+        gene_t ***genes, int *genes_len, double p){
 
     // overlap chromosomes
     int tid = str_map_ix(a->chrm_ix, (char *)ref);
@@ -760,7 +760,7 @@ int feats_from_region_p(const Annotation *a, const char* ref,
     // reallocate genes array
     if (*genes_len <= 0){
         *genes_len = 1;
-        *genes = (Gene **)realloc(*genes, *genes_len * sizeof(Gene *));
+        *genes = (gene_t **)realloc(*genes, *genes_len * sizeof(gene_t *));
         if (*genes == NULL)
             return err_msg(-1, 0, "feats_from_region_p: %s", strerror(errno));
     }
@@ -772,7 +772,7 @@ int feats_from_region_p(const Annotation *a, const char* ref,
     int i;
     for (i = 0; i < n_bin; ++i){ // for each bin
         uint16_t bin = list[i];
-        Gene *g = a->chrms[tid]->bins[bin]; 
+        gene_t *g = a->chrms[tid]->bins[bin]; 
         for (; g; g = g->next){ // for each gene in bin
             char reg_strand = '.';
             if (stranded) reg_strand = strand;
@@ -791,7 +791,7 @@ int feats_from_region_p(const Annotation *a, const char* ref,
             // reallocate genes array
             while (ngenes >= *genes_len){
                 *genes_len = (*genes_len) * 2;
-                *genes = (Gene **)realloc(*genes, (*genes_len) * sizeof(Gene *));
+                *genes = (gene_t **)realloc(*genes, (*genes_len) * sizeof(gene_t *));
                 if (*genes == NULL)
                     return err_msg(-1, 0, "feats_from_region_p: %s", strerror(errno));
             }
@@ -814,23 +814,23 @@ int feats_from_region_p(const Annotation *a, const char* ref,
  * summary functions
  ****************************/
 
-int n_feat(Annotation *a, int *n_gene, int *n_iso, int *n_exon){
+int n_feat(gene_anno_t *a, int *n_gene, int *n_iso, int *n_exon){
     *n_gene = 0;
     *n_iso = 0;
     *n_exon = 0;
     int nc = a->chrm_ix->n;
     int i, j;
     for (i = 0; i < nc; i++){
-        Chrm *chrm = a->chrms[i];
+        chr_genes_t *chrm = a->chrms[i];
         for (j = 0; j < MAX_BIN; j++){
-            Gene *g = chrm->bins[j];
+            gene_t *g = chrm->bins[j];
             while (g){
                 *n_gene = *n_gene + 1;
                 khint_t k_iso;
                 fprintf(stdout, "gene %s has %i isoforms\n", g->id, g->isoforms_n);
                 for (k_iso = kh_begin(g->isoforms); k_iso != kh_end(g->isoforms); ++k_iso){
                     if (!kh_exist(g->isoforms, k_iso)) continue;
-                    Isoform *iso = kh_val(g->isoforms, k_iso);
+                    isoform_t *iso = kh_val(g->isoforms, k_iso);
                     char *key = kh_key(g->isoforms, k_iso);
                     fprintf(stdout, "ID %s beg %i end %i n_exon %i\n", key, iso->beg, iso->end, iso->exons_n);
                     *n_iso = *n_iso + 1;
@@ -845,7 +845,7 @@ int n_feat(Annotation *a, int *n_gene, int *n_iso, int *n_exon){
 
 int test_anno(char *file){
     fprintf(stdout, "Reading from GTF\n");
-    Annotation *a = read_from_gtf(file, 1);
+    gene_anno_t *a = read_from_gtf(file, 1);
     fprintf(stdout, "finished\n");
     int n_gene = 0;
     int n_chr = 0;

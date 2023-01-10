@@ -85,11 +85,11 @@ typedef struct {
     // VCF
     bcf_srs_t *sr;
     bcf_hdr_t *vcf_hdr;
-    GenomeVar *gv;
+    g_var_t *gv;
     contig_map *cmap;
 
     // GTF
-    Annotation *anno;
+    gene_anno_t *anno;
 
     // ATAC peaks
     iregs_t *pks;
@@ -157,9 +157,9 @@ int load_rna_bam(cl_opts *opts, obj_pars *objs);
  */
 int load_atac_bam(cl_opts *opts, obj_pars *objs);
 
-/* Load the VCF file into GenomeVar object.
+/* Load the VCF file into g_var_t object.
  *
- * Loads the vcf file, subsets samples, creates a GenomeVar object, and 
+ * Loads the vcf file, subsets samples, creates a g_var_t object, and 
  * creates a cmap object.
  *
  * @return -1 on error, 0 if nothing happened, 1 if loaded successfully.
@@ -176,7 +176,7 @@ int load_samples(cl_opts *opts, obj_pars *objs);
  */
 int load_bcs(cl_opts *opts, obj_pars *objs);
 
-/* Load the GTF file into the Annotation object.
+/* Load the GTF file into the gene_anno_t object.
  *
  * Calls read_from_gtf
  *

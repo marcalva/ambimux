@@ -135,8 +135,8 @@ uint8_t base_ref_alt(bcf1_t *b, char base){
     else return((uint8_t)OTHER);
 }
 
-Var *init_var(){
-    Var *v = (Var*)calloc(1, sizeof(Var));
+var_t *init_var(){
+    var_t *v = (var_t*)calloc(1, sizeof(var_t));
     if (v == NULL){
         err_msg(-1, 0, "init_var: %s", strerror(errno));
         return NULL;
@@ -146,9 +146,9 @@ Var *init_var(){
     return v;
 }
 
-GenomeVar *init_genomevar(){
+g_var_t *init_genomevar(){
     int init_n = 1<<8;
-    GenomeVar *gv = (GenomeVar*)calloc(1, sizeof(GenomeVar));
+    g_var_t *gv = (g_var_t*)calloc(1, sizeof(g_var_t));
     
     if (gv == NULL){
         err_msg(-1, 0, "init_genomevar: %s", strerror(errno));
@@ -156,7 +156,7 @@ GenomeVar *init_genomevar(){
     }
 
     gv->chrm_ix = init_str_map();
-    gv->chrms = (ChrmVar**)calloc(init_n, sizeof(ChrmVar*));
+    gv->chrms = (chr_var_t**)calloc(init_n, sizeof(chr_var_t*));
 
     if (gv->chrms == NULL){
         err_msg(-1, 0, "init_genomevar: %s", strerror(errno));
@@ -167,7 +167,7 @@ GenomeVar *init_genomevar(){
     gv->n_v = 0;
     gv->n_e = 0;
     gv->n_a = 1<<8;
-    gv->ix2var = (Var **)calloc(gv->n_a, sizeof(Var *));
+    gv->ix2var = (var_t **)calloc(gv->n_a, sizeof(var_t *));
     if (gv->ix2var == NULL){
         err_msg(-1, 0, "init_genomevar: %s", strerror(errno));
         return NULL;
@@ -176,11 +176,11 @@ GenomeVar *init_genomevar(){
     return gv;
 }
 
-ChrmVar *init_ChrmVar(){
-    ChrmVar *chrm = (ChrmVar*)calloc(1, sizeof(ChrmVar));
+chr_var_t *init_chr_var(){
+    chr_var_t *chrm = (chr_var_t*)calloc(1, sizeof(chr_var_t));
 
     if (chrm == NULL){
-        err_msg(-1, 0, "init_ChrmVar: %s", strerror(errno));
+        err_msg(-1, 0, "init_chr_var: %s", strerror(errno));
         return NULL;
     }
 
@@ -192,7 +192,7 @@ ChrmVar *init_ChrmVar(){
     return chrm;
 }
 
-int gv_add_hdr(GenomeVar *gv, bcf_hdr_t *hdr){
+int gv_add_hdr(g_var_t *gv, bcf_hdr_t *hdr){
     if (gv == NULL || hdr == NULL)
         return err_msg(-1, 0, "gv_add_hdr: arguments are NULL");
 
@@ -200,8 +200,8 @@ int gv_add_hdr(GenomeVar *gv, bcf_hdr_t *hdr){
     return(0);
 }
 
-int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr){
-    Var *tv = init_var();
+int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
+    var_t *tv = init_var();
     if (tv == NULL) return -1;
     tv->b = bcf_dup(b);
     bcf_unpack(tv->b, BCF_UN_FLT); // unpack up to and including info field
@@ -217,17 +217,17 @@ int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     if (found == 0){
         while (gv->chrm_ix->n >= gv->chrms_m){
             gv->chrms_m = (gv->chrms_m)<<1;
-            gv->chrms = realloc(gv->chrms, (gv->chrms_m)*sizeof(ChrmVar*));
+            gv->chrms = realloc(gv->chrms, (gv->chrms_m)*sizeof(chr_var_t*));
             if (gv->chrms == NULL)
                 return err_msg(-1, 0, "add_var: %s", strerror(errno));
         }
-        gv->chrms[chr_ix] = init_ChrmVar();
+        gv->chrms[chr_ix] = init_chr_var();
         if (gv->chrms[chr_ix] == NULL) return -1;
     }
 
     // add to bins
     if (gv->chrms[chr_ix]->bins[bin]){
-        Var *gvv = gv->chrms[chr_ix]->bins[bin];
+        var_t *gvv = gv->chrms[chr_ix]->bins[bin];
         while (gvv->next){
             gvv = gvv->next;
         }
@@ -241,7 +241,7 @@ int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     // add to ix2var
     while (gv->n_e >= gv->n_a){
         gv->n_a <<= 1;
-        gv->ix2var = realloc(gv->ix2var, (gv->n_a) * sizeof(Var));
+        gv->ix2var = realloc(gv->ix2var, (gv->n_a) * sizeof(var_t));
         if (gv->ix2var == NULL)
             return err_msg(-1, 0, "add_var: %s", strerror(errno));
     }
@@ -253,8 +253,8 @@ int add_var(GenomeVar *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     return 0;
 }
 
-GenomeVar *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut){
-    GenomeVar *gv = init_genomevar();
+g_var_t *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut){
+    g_var_t *gv = init_genomevar();
     if (gv == NULL) return NULL;
 
     gv->vcf_hdr = vcf_hdr;
@@ -278,11 +278,11 @@ GenomeVar *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cu
     }
     // initialize chromosomes read from header
     if (n_chr > 0)
-        gv->chrms = (ChrmVar **)realloc(gv->chrms, n_chr * sizeof(ChrmVar *));
+        gv->chrms = (chr_var_t **)realloc(gv->chrms, n_chr * sizeof(chr_var_t *));
     for (i = 0; i < n_chr; ++i){
-        gv->chrms[i] = init_ChrmVar();
+        gv->chrms[i] = init_chr_var();
         if (gv->chrms[i] == NULL){
-            err_msg(-1, 0, "vcf2gv: failed to init ChrmVar");
+            err_msg(-1, 0, "vcf2gv: failed to init chr_var_t");
             return(NULL);
         }
     }
@@ -308,7 +308,7 @@ GenomeVar *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cu
     return gv;
 }
 
-void destroy_gv(GenomeVar *gv){
+void destroy_gv(g_var_t *gv){
 
     if (gv == NULL) return;
 
@@ -316,11 +316,11 @@ void destroy_gv(GenomeVar *gv){
     int i, j;
     for (i = 0; i < gv->chrm_ix->n; i++){
         for (j = 0; j < MAX_BIN; j++){
-            Var *v = gv->chrms[i]->bins[j];
+            var_t *v = gv->chrms[i]->bins[j];
             while (v){
                 bcf1_t *b = v->b;
                 if (b) bcf_destroy(b);
-                Var *vn = v->next;
+                var_t *vn = v->next;
                 free(v);
                 v = vn;
             }
@@ -335,11 +335,11 @@ void destroy_gv(GenomeVar *gv){
     free(gv);
 }
 
-void free_bcf1_t(GenomeVar *gv){
+void free_bcf1_t(g_var_t *gv){
     int i, j;
     for (i = 0; i < gv->chrm_ix->n; i++){
         for (j = 0; j < MAX_BIN; j++){
-            Var *v = gv->chrms[i]->bins[j];
+            var_t *v = gv->chrms[i]->bins[j];
             while (v){
                 bcf1_t *b = v->b;
                 if (b) bcf_destroy(b);
@@ -589,7 +589,7 @@ float *bcf1_ap_gp(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra){
     return dose;
 }
 
-float **ap_array_gt(GenomeVar *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char *field){
+float **ap_array_gt(g_var_t *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char *field){
     int j;
 
     // check input
@@ -618,7 +618,7 @@ float **ap_array_gt(GenomeVar *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, cha
     // loop over each variant
     for (i = 0; i < ni; ++i){
         int32_t tix = ids[i];
-        Var *var = gv_vari(gv, tix);
+        var_t *var = gv_vari(gv, tix);
         // If var is NULL, let ap[i] = NULL
         // TODO: might need a better way to handle missing variants
         if (var == NULL){
@@ -658,9 +658,8 @@ cleanup:
     return NULL;
 }
 
-// return pointers to Var objects
-int region_vars(GenomeVar *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, Var **vars){
+int region_vars(g_var_t *gv, const char* ref, hts_pos_t beg, 
+        hts_pos_t end, var_t **vars){
     if (gv == NULL)
         return err_msg(-2, 0, "region_vars: gv must not be NULL");
 
@@ -674,13 +673,13 @@ int region_vars(GenomeVar *gv, const char* ref, hts_pos_t beg,
 
     int n_vars = 0;
 
-    Var *pv = NULL, *begin = NULL;
+    var_t *pv = NULL, *begin = NULL;
     uint16_t list[MAX_BIN];
     int n_bin = reg2bins((int)beg, (int)end, list);
     int i;
     for (i = 0; i < n_bin; ++i){
         uint16_t bin = list[i];
-        Var *v = gv->chrms[tid]->bins[bin]; 
+        var_t *v = gv->chrms[tid]->bins[bin]; 
         for (; v; v = v->next){
             // Check if variant overlaps region.
             bcf1_t *b = v->b;
@@ -689,9 +688,9 @@ int region_vars(GenomeVar *gv, const char* ref, hts_pos_t beg,
                 return err_msg(-2, 0, "region_vars: failed to get bp_overlap");
             if (ovrlp == 0) continue;
 
-            // Add Var to list
+            // Add var_t to list
             ++n_vars;
-            Var *cpy = (Var *)calloc(1, sizeof(Var));
+            var_t *cpy = (var_t *)calloc(1, sizeof(var_t));
             if (cpy == NULL)
                 return err_msg(-2, 0, "region_vars: %s", strerror(errno));
 
@@ -719,52 +718,7 @@ int region_vars(GenomeVar *gv, const char* ref, hts_pos_t beg,
     return(n_vars);
 }
 
-int vars_from_region(GenomeVar *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, Var ***vars, int *vars_m){
-    int tid = str_map_ix(gv->chrm_ix, (char *)ref);
-    if (tid < 0)
-        return(0);
-
-    double reg_len = (double)end - (double)beg;
-    if (reg_len < 0)
-        return err_msg(-2, 0, "vars_from_region: end (%i) < beg (%i)", beg, end);
-
-    int nvars = 0;
-    if (*vars_m <= 0){
-        *vars_m = 1;
-        *vars = (Var **)realloc(*vars, *vars_m * sizeof(Var *));
-        if (*vars == NULL)
-            return err_msg(-2, 0, "vars_from_region: %s", strerror(errno));
-    }
-
-    uint16_t list[MAX_BIN];
-    int n_bin = reg2bins((int)beg, (int)end, list);
-    int i;
-    for (i = 0; i < n_bin; ++i){
-        uint16_t bin = list[i];
-        Var *v = gv->chrms[tid]->bins[bin]; 
-        for (; v; v = v->next){
-            bcf1_t *b = v->b;
-            int ovrlp = bp_overlap((int)beg, (int)end, '.', b->pos, b->pos + b->rlen, '.');
-            if (ovrlp < 0)
-                return err_msg(-2, 0, "vars_from_region: failed to get bp_overlap");
-
-            if (ovrlp == 0) continue;
-
-            while (nvars >= *vars_m){
-                *vars_m = (*vars_m)<<1;
-                *vars = (Var **)realloc(*vars, (*vars_m) * sizeof(Var *));
-                if (*vars == NULL)
-                    return err_msg(-2, 0, "vars_from_region: %s", strerror(errno));
-            }
-
-            (*vars)[nvars++] = v;
-        }
-    }
-    return(nvars);
-}
-
-int n_snp(GenomeVar *gv, int *n_snp){
+int n_snp(g_var_t *gv, int *n_snp){
     *n_snp = 0;
     int nc = gv->chrm_ix->n;
     int i, j;
@@ -776,7 +730,7 @@ int n_snp(GenomeVar *gv, int *n_snp){
     return nc;
 }
 
-Var *gv_vari(GenomeVar *gv, int32_t ix){
+var_t *gv_vari(g_var_t *gv, int32_t ix){
     if (gv == NULL){
         err_msg(-1, 0, "gv_vari: gv is NULL");
         return(NULL);
@@ -786,7 +740,7 @@ Var *gv_vari(GenomeVar *gv, int32_t ix){
                 ix, 0, gv->n_e);
         return(NULL);
     }
-    Var *var = gv->ix2var[ix];
+    var_t *var = gv->ix2var[ix];
     return(var);
 }
 

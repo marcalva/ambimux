@@ -6,77 +6,11 @@
 #include "htslib/khash.h"
 #include <string.h>
 
-int overlap_bam1_feats(const sam_hdr_t *h, bam1_t *b, const Annotation *a, uint8_t *n_feat, uint8_t *m_feat, 
-        char ***feat, uint8_t **splice){
-
-    int32_t tid = b->core.tid;
-    const char *ref = sam_hdr_tid2name(h, (int)tid);
-    
-    hts_pos_t b_beg = b->core.pos;
-    hts_pos_t b_end = bam_endpos(b);
-    if (b_end == b_beg + 1) return(-1); // unmapped;
-
-    char strand = '+';
-    if (bam_is_rev(b)) strand = '-';
-
-    // get features that contain bam1_t read b.
-    int genes_len = 1;
-    Gene **genes = malloc(genes_len * sizeof(Gene *)); // must be freed.
-
-    if (genes == NULL)
-        return err_msg(-1, 0, "overlap_bam1_feats: %s", strerror(errno));
-
-    int ngenes = feats_from_region(a, ref, b_beg, b_end, 1, strand, &genes, &genes_len);
-    if (ngenes < 0) return -1;
-
-    // reallocate memory for feat and splice
-    if (ngenes > *m_feat){
-        *m_feat = ngenes;
-        *feat = realloc(*feat, *m_feat * sizeof(char *));
-        if (*feat == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: %s", strerror(errno));
-        *splice = realloc(*splice, *m_feat * sizeof(uint8_t));
-        if (*splice == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: %s", strerror(errno));
-    }
-
-    // add gene ID and splice status
-    int i, j;
-    for (i = 0; i < ngenes; ++i){
-        if (genes[i] == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: genes cannot be NULL");
-
-        char *id = genes[i]->id;
-        if (id == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: gene name not found");
-
-        // sorted insert (by string)
-        for (j = 0; j < i; j++){
-            if (strcmp(id, (*feat)[j]) < 0){ // if gene[i] < gene[j]
-                int k;
-                for (k = i; k > j;--k){
-                    (*feat)[k] = (*feat)[k - 1];
-                    (*splice)[k] = (*splice)[k - 1];
-                }
-                break;
-            }
-        }
-
-        (*feat)[j] = id;
-        int sret = 0;
-        (*splice)[j] = bam1_spliced(b, genes[i], &sret);
-        if (sret < 0)
-            return err_msg(-1, 0, "overlap_bam1_feats: splice failed");
-    }
-    *n_feat = (uint32_t)ngenes;
-
-    free(genes);
-
-    return 0;
-}
-
-int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const Annotation *a, 
+int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a, 
         seq_glist_t **gl){
+    if (h == NULL || b == NULL || a == NULL)
+        return err_msg(-1, 0, "bam1_feat_overlap: argument is null");
+
     int32_t tid = b->core.tid;
     const char *ref = sam_hdr_tid2name(h, (int)tid);
     
@@ -89,10 +23,10 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const Annotation *a,
 
     // get features that contain bam1_t read b.
     int genes_len = 1;
-    Gene **genes = malloc(genes_len * sizeof(Gene *)); // must be freed.
+    gene_t **genes = malloc(genes_len * sizeof(gene_t *)); // must be freed.
 
     if (genes == NULL)
-        return err_msg(-1, 0, "overlap_bam1_feats: %s", strerror(errno));
+        return err_msg(-1, 0, "bam1_feat_overlap: %s", strerror(errno));
 
     int ngenes = feats_from_region(a, ref, b_beg, b_end, 1, strand, &genes, &genes_len);
     if (ngenes < 0) return -1;
@@ -104,26 +38,24 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const Annotation *a,
 
     // add gene ID and splice status
     seq_gene_t *sg = seq_gene_alloc();
+    if (sg == NULL) return(-1);
     int i;
     for (i = 0; i < ngenes; ++i){
         // check for bugs
         if (genes[i] == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: genes cannot be NULL");
+            return err_msg(-1, 0, "bam1_feat_overlap: gene is null");
 
         char *id = genes[i]->id;
         if (id == NULL)
-            return err_msg(-1, 0, "overlap_bam1_feats: gene name not found");
+            return err_msg(-1, 0, "bam1_feat_overlap: gene name not found");
         int32_t gid = str_map_ix(a->gene_ix, id);
         if (gid < 0) return(-1);
-
-        if (sg == NULL) return(-1);
-
         sg->gene_id = gid;
 
         int sret = 0;
         sg->splice = bam1_spliced(b, genes[i], &sret);
         if (sret < 0)
-            return err_msg(-1, 0, "overlap_bam1_feats: splice failed");
+            return err_msg(-1, 0, "bam1_feat_overlap: splice failed");
         
         if (seq_glist_add_gene(*gl, sg) < 0) return(-1);
     }
@@ -138,7 +70,7 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const Annotation *a,
  * Detect whether a bam record is spliced. 
  * Assumes the bam alignment and gene lie in the same chromosome.
  */
-uint8_t bam1_spliced(bam1_t *b, Gene *g, int *ret){
+uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
     *ret = 0;
 
     if (g == NULL){
@@ -205,7 +137,7 @@ uint8_t bam1_spliced(bam1_t *b, Gene *g, int *ret){
     int iso_i = 0; // isoform index
     for (k = kh_begin(g->isoforms); k != kh_end(g->isoforms); ++k){
         if (!kh_exist(g->isoforms, k)) continue;
-        Isoform *iso = kh_val(g->isoforms, k);
+        isoform_t *iso = kh_val(g->isoforms, k);
 
         if (iso == NULL){
             err_msg(-1, 0, "bam1_spliced: isoform not stored properly");
@@ -213,7 +145,7 @@ uint8_t bam1_spliced(bam1_t *b, Gene *g, int *ret){
             return 0;
         }
 
-        Exon *exon = iso->exons;
+        exon_t *exon = iso->exons;
         if (exon == NULL){
             iso_i++;
             continue;
@@ -356,11 +288,10 @@ uint8_t bam1_spliced(bam1_t *b, Gene *g, int *ret){
 }
 
 /* new bam1 vars overlap. */
-int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, GenomeVar *gv, 
-        Var **vars){
-    if (b == NULL || h == NULL || gv == NULL){
-        return err_msg(-1, 0, "bam1_vars_overlap: h, b, and v must not be NULL");
-    }
+int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, 
+        var_t **vars){
+    if (b == NULL || h == NULL || gv == NULL)
+        return err_msg(-1, 0, "bam1_vars_overlap: argument is null");
 
     uint32_t *cigar_raw;
     cigar_raw = bam_get_cigar(b);
@@ -402,10 +333,12 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, GenomeVar *gv,
     return(n_vars);
 }
 
-int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, GenomeVar *gv, seq_blist_t **bl){
+int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, seq_blist_t **bl){
+    if (h == NULL || b == NULL || gv == NULL)
+        return err_msg(-1, 0, "bam1_seq_base: argument is null");
 
     int vret;
-    Var *ovars = NULL;
+    var_t *ovars = NULL;
     if ( (vret = bam1_vars_overlap(h, b, gv, &ovars)) < 0 )
         return(-1);
 
@@ -415,7 +348,8 @@ int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, GenomeVar *gv, seq_blist_t **bl
     }
 
     seq_base_t *sb = alloc_seq_base();
-    Var *tvar;
+    if (sb == NULL) return(-1);
+    var_t *tvar;
     for (tvar = ovars; tvar != NULL; tvar = tvar->next){
         // Get position of the variant
         int32_t v_rid = tvar->b->rid;

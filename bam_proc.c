@@ -303,42 +303,28 @@ int bam_count(bam_data_t *bam_dat, obj_pars *objs, char *filename){
     if (bam_dat == NULL || objs == NULL)
         return err_msg(-1, 0, "bam_count: arguments are NULL");
 
-    bam_ag_t *agc = bam_ag_init();
-    if (objs->gv != NULL && (bam_ag_add_gv(agc, objs->gv) < 0))
+    bam_counts_t *agc = bam_counts_init();
+    if (objs->gv != NULL && (bam_counts_add_gv(agc, objs->gv) < 0))
         return -1;
 
-    if (objs->anno != NULL && (bam_ag_add_gene_map(agc, objs->anno->gene_ix) < 0))
+    if (objs->anno != NULL && (bam_counts_add_gene_map(agc, objs->anno->gene_ix) < 0))
         return -1;
 
-    if (objs->pks != NULL && (bam_ag_add_peaks(agc, objs->pks) < 0))
+    if (objs->pks != NULL && (bam_counts_add_peaks(agc, objs->pks) < 0))
         return -1;
 
-    if (bam_ag_add_bc_map(agc, bam_dat->bcs) < 0)
+    if (bam_counts_add_bc_map(agc, bam_dat->bcs) < 0)
         return -1;
 
-    if (objs->verbose) log_msg("generating gene counts from RNA");
-    if (bam_rna_gc_count(agc, bam_dat) < 0)
-        return -1;
-
-    if (objs->pks){
-        if (objs->verbose) log_msg("generating peak counts from ATAC");
-        if (bam_atac_pc_count(agc, bam_dat) < 0)
-            return -1;
-    }
-
-    if (objs->verbose) log_msg("generating allele counts from ATAC");
-    if (bam_atac_ac_count(agc, bam_dat) < 0)
-        return -1;
-
-    if (objs->verbose) log_msg("generating allele counts from RNA");
-    if (bam_rna_ac_count(agc, bam_dat) < 0)
-        return -1;
+    if (objs->verbose) log_msg("generating counts");
+    if (bam_counts_count(agc, bam_dat) < 0)
+        return(-1);
 
     if (objs->verbose) log_msg("writing counts");
-    if (bam_ag_write(agc, objs->anno, objs->gv, filename) < 0)
+    if (bam_counts_write(agc, objs->anno, objs->gv, filename) < 0)
         return -1;
 
-    bam_ag_dstry(agc);
+    bam_counts_dstry(agc);
     return 0;
 }
 

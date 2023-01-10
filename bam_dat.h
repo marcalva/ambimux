@@ -11,11 +11,6 @@
 
 /*! @typedef
  * @abstract Store barcode data
- *
- * @field rna_dups Store the duplicate RNA reads.
- * @field rna_mols Stores deduplicated RNA reads (UMIs).
- * @field atac_frags Store the deduplicated ATAC fragments.
- * @field atac_pairs Store the duplicate ATAC reads.
  */
 typedef struct {
     // RNA
@@ -26,7 +21,7 @@ typedef struct {
     khash_t(khaf) *atac_frags; // indexed by location
 
     // barcode stats/counts
-    bc_counts *bc_stats;
+    bc_stats_t *bc_stats;
 
 } bc_data_t;
 
@@ -56,7 +51,7 @@ int bc_data_rna_dedup(bc_data_t *bcdat);
 
 /* Call RNA variants in bc_data_t struct
  */
-int bc_data_rna_var_call(bc_data_t *bcdat, GenomeVar *gv, contig_map *cmap, 
+int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap, 
         uint8_t min_qual);
 
 /* Add ATAC read to bc_data_t
@@ -82,7 +77,7 @@ int bc_data_dedup_atac(bc_data_t *bcdat);
 
 /* Call ATAC variants in bc_data
  */
-int bc_data_atac_var_call(bc_data_t *bcdat, GenomeVar *gv, contig_map *cmap, 
+int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap, 
         uint8_t min_qual);
 
 /* Call ATAC peaks in bc_data
@@ -93,14 +88,8 @@ int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, contig_map *cmap);
  * bam_data_t
  ******************************************************************************/
 
-/*! @typedef Structure to hold the atac and rna pileup
- *
- * @field rna A pointer to a bam_rna_t object.
- * @field atac A pointer to a bam_atac_t object.
- * @field bcs A pointer to a str_map containing the barcodes.
- *  This list contains all valid barcodes, observed in the data 
- *  and given in a whitelist.
- *  The order is preserved, such that any output will follow this order.
+/*! @typedef
+ * @abstract Structure to hold the atac and rna pileup
  */
 typedef struct {
     khash_t(kh_bc_dat) *bc_data;
@@ -108,9 +97,8 @@ typedef struct {
     // flags
     uint8_t has_rna;
     uint8_t has_atac;
+    uint8_t has_stats;
 
-    bam_rna_t *rna;
-    bam_atac_t *atac;
     str_map *bcs;
 } bam_data_t;
 
@@ -120,18 +108,17 @@ int bam_data_atac_free_pairs(bam_data_t *bam_data);
 int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc, 
         const rna_read1_t *r, const char *name);
 int bam_data_rna_dedup(bam_data_t *bam_data);
-int bam_data_rna_var_call(bam_data_t *bam_data, GenomeVar *gv, 
+int bam_data_rna_var_call(bam_data_t *bam_data, g_var_t *gv, 
         contig_map *cmap, uint8_t min_qual);
 int bam_data_atac_add_read(bam_data_t *bam_data, const char *bc, 
         const atac_read1_t *r, qshort qname);
 int bam_data_atac_dedup(bam_data_t *bam_data);
-int bam_data_atac_var_call(bam_data_t *bam_data, GenomeVar *gv, 
+int bam_data_atac_var_call(bam_data_t *bam_data, g_var_t *gv, 
         contig_map *cmap, uint8_t min_qual);
 int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks, 
         contig_map *cmap);
 
 int bam_data_fill_bcs(bam_data_t *b, str_map *bcs);
-
 int bam_data_fill_stats(bam_data_t *bam_data);
 
 typedef struct {

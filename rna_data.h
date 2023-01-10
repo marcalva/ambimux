@@ -146,101 +146,17 @@ int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r);
  * If @p rd has no reads, return NULL successfully.
  */
 int rna_mol_dedup(rna_mol_t *mol);
-rna_mol_t *rna_dups_dedup(rna_dups_t *rd, int *ret);
 
-int rna_mol_var_call(rna_mol_t *m, GenomeVar *gv, contig_map *cmap, 
+int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, contig_map *cmap, 
         uint8_t min_qual);
 
 // store reads by name
 KHASH_INIT(khrmn, char*, rna_mol_t *, 1, kh_str_hash_func, kh_str_hash_equal);
 
-/*! @typedef
- * @abstract Store barcode RNA data
- *
- * @field dups Pointer to hash table containing duplicates, such as reads 
- *  from the same UMI
- * @field mols Pointer to hash table containing de-duplicated RNA molecules.
- */
-typedef struct bc_rna_t {
-    khash_t(khrdn) *dups;
-    khash_t(khrmn) *mols;
-} bc_rna_t;
-
-void bc_rna_init(bc_rna_t *br);
-bc_rna_t *bc_rna_alloc();
-
-void bc_rna_free_dups(bc_rna_t *br);
-void bc_rna_free_mols(bc_rna_t *br);
-void bc_rna_free(bc_rna_t *br);
-void bc_rna_dstry(bc_rna_t *br);
-
-/* Add read to bc_rna_t object.
- * 
- * Adds the read @p r to the dups field in @p br.
- * A copy is created and added.
- *
- * @return 0 on success, -1 on error.
- */
-int bc_rna_add_read(bc_rna_t *br, const rna_read1_t *r, const char *name);
-
-/* Add molecule to bc_rna_t object.
- *
- * Adds a copy of @p m to @p br. This copies @p name and places as the 
- * key for the allocated @p m.
- *
- * @param name UMI name of the molecule.
- * @return 0 on success, -1 on error.
- */
-int bc_rna_add_mol(bc_rna_t *br, const rna_mol_t *m, const char *name);
-
-/* De-duplicate RNA reads
- *
- * De-duplicates the reads in dups to form molecules, and adds them to 
- * the mols field.
- *
- * @return 0 on success, -1 on error.
- */
-int bc_rna_dedup(bc_rna_t *br);
-
-/* Call variants at sequenced bases
- *
- * @return Number of variants called, or -1 on error.
- */
-int bc_rna_var_call(bc_rna_t *br, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual);
-
-KHASH_INIT(khrbc, char *, bc_rna_t *, 1, kh_str_hash_func, kh_str_hash_equal);
-
-/*! @typedef
- * @abstract Store bam RNA data
- *
- * @field bc_rna Pointer to bc_rna_t
- */
-typedef struct bam_rna_t {
-    khash_t(khrbc) *bc_rna;
-} bam_rna_t;
-
-void bam_rna_init(bam_rna_t *bam_r);
-bam_rna_t *bam_rna_alloc();
-
-void bam_rna_free_dups(bam_rna_t *bam_r);
-void bam_rna_free(bam_rna_t *bam_r);
-void bam_rna_dstry(bam_rna_t *bam_r);
-
-int bam_rna_add_read(bam_rna_t *bam_r, const char *bc, const rna_read1_t *r, 
-        const char *name);
-
-int bam_rna_dedup(bam_rna_t *bam_r);
-
-/* Call variants in bam rna file
- *
- * @return Number of variants called, or -1 on error.
- */
-int bam_rna_var_call(bam_rna_t *bam_r, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual);
-
+/*
 void count_umis(bam_rna_t *bam_r, int *n_umi, int *n_reads, int *n_bc);
-void print_bam_rna(bam_rna_t *b, Annotation *anno, bcf_hdr_t *vcf_hdr, 
-        GenomeVar *gv);
+void print_bam_rna(bam_rna_t *b, gene_anno_t *anno, bcf_hdr_t *vcf_hdr, 
+        g_var_t *gv);
+*/
 
 #endif // RNA_DATA_H

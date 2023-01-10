@@ -13,6 +13,7 @@
 #include "variants.h"
 #include "counts.h"
 
+// store query read name as hashed 64 bit integer
 typedef uint64_t qshort;
 
 #define kh_qname_hash_func(i) (kh_int64_hash_func((i)))
@@ -80,33 +81,6 @@ typedef struct atac_frag_t {
 } atac_frag_t;
 
 KHASH_INIT(khaf, g_reg_pair, atac_frag_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
-
-/*! @typedef
- * @abstract Store a list of frags, duplicates, and reads for each barcode
- *
- * @field frags frags object. Accessed by region
- * @field dups Read duplicates. Accessed by region
- * @field reads Hanging reads from the pairs. Accessed by query name
- */
-typedef struct bc_atac_t {
-    khash_t(khaf) *frags;
-    khash_t(khad) *dups;
-    khash_t(khap) *pairs;
-} bc_atac_t;
-
-// hash table of key: barcode string val: bc_atac object
-KHASH_INIT(khab, char *, bc_atac_t *, 1, kh_str_hash_func, kh_str_hash_equal);
-
-/*! @typedef
- * @abstract Store reads and fragments for each barcode.
- *
-
- * @field bc_dat hash table of bc_atac objects keyed by barcode (char*)
- * @field barcodes str_map of barcodes
- */
-typedef struct bam_atac_t {
-    khash_t(khab) *bc_dat;
-} bam_atac_t;
 
 /*******************************************************************************
  * atac_read1_t
@@ -300,7 +274,6 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp);
 atac_frag_t *atac_frag_init();
 void atac_frag_dstry(atac_frag_t *f);
 
-
 /* Deduplicate an atac dups object and form a frag.
  *
  * Expects non-null @p d.
@@ -323,10 +296,10 @@ atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret);
  *
  * Expects non-null arguments
  * @param f Pointer to atac_frag_t object.
- * @param gv Pointer to GenomeVar object.
+ * @param gv Pointer to g_var_t object.
  * @param cmap Contig map between integer IDs and chromosome names.
  */
-int atac_frag_var_call(atac_frag_t *f, GenomeVar *gv, contig_map *cmap, 
+int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, contig_map *cmap, 
         uint8_t min_qual);
 
 /* Call peaks for a fragment.
@@ -341,115 +314,14 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks,
         contig_map *cmap);
 
 /*******************************************************************************
- * bc_atac_t
+ * frags hash table
  ******************************************************************************/
 
-bc_atac_t *bc_atac_init();
-void bc_atac_dstry_pairs(bc_atac_t *bca);
-void bc_atac_dstry_dups(bc_atac_t *bca);
-void bc_atac_dstry_frags(bc_atac_t *bca);
-void bc_atac_dstry(bc_atac_t *bca);
-
-/* Add read to bc atac object.
- *
- * Adds the read to the bca pairs field.
- *
- * Both arguments must not be NULL.
- * The query name of @p ar must be set.
- * The pairs field of @p bca must be set.
- *
- * @param bca Pointer to bc_atac_t object to add to.
- * @param ar Pointer to atac_read1_t object to add.
- * @return 0 on success, -1 on error.
- */
-int bc_atac_add_read(bc_atac_t *bca, const atac_read1_t *ar, qshort qname);
-
 int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp);
-
-/* Add a read pair to dups object in bc_atac
- *
- * @return 0 on success, -1 on error.
- */
-int bc_atac_add_dup(bc_atac_t *bca, atac_rd_pair_t *rp);
-
-/* Form duplicates from atac reads
- *
- * Expects non-null @p bca argument.
- * The read pairs in the bca cannot be NULL.
- * Only fully formed read pairs with two reads are added.
- * Duplicates are reads with equal read pair locations.
- * Note with PCR duplicates, there may be differing bases.
- * Assumes the read pairs are ordered.
- *
- * @param bca Pointer to bc_atac_t object to form duplicates for.
- * @return 0 on success, -1 on error.
- */
-int bc_atac_form_dups(bc_atac_t *bca);
-
-/* De-duplicate the PCR duplicates and form frags.
- *
- * Expects non-null @p bca argument and @f dups is non-null.
- * Calls atac_dups_dedup on the @f dups field and fills the 
- * @f frags field.
- * Assumes the read pairs are ordered.
- *
- * @param bca Pointer to bc_atac_t object to form duplicates for.
- * @return 0 on success, -1 on error.
- */
-int bc_atac_dedup(bc_atac_t *bca);
-
-/* Call variants from frags in a bc_atac object.
- *
- * Loop through frags and call variants from the observed bases.
- *
- * @param bca Pointer to bc_atac_t object.
- * @param gv Pointer to GenomeVar object.
- * @param cmap Pointer to contig_map object.
- * @return The number of variants called, or -1 on error.
- */
-int bc_atac_var_call(bc_atac_t *bca, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual);
-
-/* Call peaks in a barcode
- *
- * @return The number of overlapping peaks added, or -1 on error.
- */
-int bc_atac_peak_call(bc_atac_t *bca, iregs_t *pks, contig_map *cmap);
 
 /*******************************************************************************
  * bam_atac_t
  ******************************************************************************/
-
-bam_atac_t *bam_atac_init();
-void bam_atac_free_pairs(bam_atac_t *bam_a);
-void bam_atac_free_dups(bam_atac_t *bam_a);
-void bam_atac_dstry(bam_atac_t *bam_a);
-int bam_atac_add_read(bam_atac_t *bam_a, const char *bc, const atac_read1_t *ar, 
-        qshort qname);
-int bam_atac_form_dups(bam_atac_t *bam_a);
-int bam_atac_dedup(bam_atac_t *bam_a);
-
-/* Call variants in a bam atac object.
- *
- * Loop through the barcodes and call variants in each fragment.
- * Expects non-null arguments.
- * The frags in the bam atac object must be formed from calling 
- * bam_atac_dedup.
- *
- * @param bama_a Pointer to bam_atac_t object.
- * @param gv Pointer to GenomeVar object.
- * @param cmap Pointer to contig_map object.
- * 
- * @return The number of variants called, or -1 on error.
- */
-int bam_atac_var_call(bam_atac_t *bam_a, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual);
-
-/* Call peaks in a bam object.
- *
- * @return The number of peaks called, or -1 on error.
- */
-int bam_atac_peak_call(bam_atac_t *bam_a, iregs_t *pks, contig_map *cmap);
 
 /*******************************************************************************
  * miscellaneous
@@ -457,16 +329,15 @@ int bam_atac_peak_call(bam_atac_t *bam_a, iregs_t *pks, contig_map *cmap);
 
 /* Count number of fragments in bam_atac
  */
+/*
 void count_frags(bam_atac_t *bam_a, int *n_frag, int *n_reads, int *n_bc);
 
 uint64_t get_n_buckets(bam_atac_t *bam_a);
 
 void print_atac_read(atac_read1_t *ar);
 
-void print_vac_bam(bam_atac_t *b, GenomeVar *gv);
+void print_vac_bam(bam_atac_t *b, g_var_t *gv);
 
 void print_frag_dup(bam_atac_t *b);
-
-void print_dups_n(bam_atac_t *b);
-
+*/
 #endif // ATAC_DATA_H

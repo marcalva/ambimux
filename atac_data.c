@@ -495,7 +495,7 @@ atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret){
     return(f);
 }
 
-int atac_frag_var_call(atac_frag_t *f, GenomeVar *gv, contig_map *cmap, 
+int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, contig_map *cmap, 
         uint8_t min_qual){
     if (f == NULL || gv == NULL || cmap == NULL){
         return err_msg(-1, 0, "atac_frag_var_call: arguments must not be NULL");
@@ -555,116 +555,8 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, contig_map
 }
 
 /*******************************************************************************
- * bc_atac_t
+ * frags hash table
  ******************************************************************************/
-
-bc_atac_t *bc_atac_init(){
-    bc_atac_t *bca = (bc_atac_t *)calloc(1, sizeof(bc_atac_t));
-    if (bca == NULL){
-        err_msg(-1, 0, "bc_atac_init: %s", strerror(errno));
-        return(NULL);
-    }
-    bca->frags = kh_init(khaf);
-    bca->dups = kh_init(khad);
-    bca->pairs = kh_init(khap);
-    if ( bca->frags == NULL || bca->dups == NULL || bca->pairs == NULL ){
-        err_msg(-1, 0, "bc_atac_init: %s", strerror(errno));
-        return(NULL);
-    }
-    return(bca);
-}
-
-void bc_atac_dstry_pairs(bc_atac_t *bca){
-    if (bca == NULL || bca->pairs == NULL) return;
-
-    khint_t k;
-    for (k = kh_begin(bca->pairs); k != kh_end(bca->pairs); ++k){
-        if (!kh_exist(bca->pairs, k)) continue;
-        atac_rd_pair_t *rp = kh_val(bca->pairs, k);
-        atac_rd_pair_dstry(rp);
-    }
-    kh_destroy(khap, bca->pairs);
-    bca->pairs = NULL;
-}
-
-void bc_atac_dstry_dups(bc_atac_t *bca){
-    if (bca == NULL || bca->dups == NULL) return;
-
-    khint_t k;
-    for (k = kh_begin(bca->dups); k != kh_end(bca->dups); ++k){
-        if (!kh_exist(bca->dups, k)) continue;
-        atac_dups_t *d = kh_val(bca->dups, k);
-        atac_dups_dstry(d);
-    }
-    kh_destroy(khad, bca->dups);
-    bca->dups = NULL;
-}
-
-void bc_atac_dstry_frags(bc_atac_t *bca){
-    if (bca == NULL || bca->frags == NULL) return;
-
-
-    khint_t k;
-    for (k = kh_begin(bca->frags); k != kh_end(bca->frags); ++k){
-        if (!kh_exist(bca->frags, k)) continue;
-        atac_frag_t *f = kh_val(bca->frags, k);
-        atac_frag_dstry(f);
-    }
-    kh_destroy(khaf, bca->frags);
-    bca->frags = NULL;
-}
-
-void bc_atac_dstry(bc_atac_t *bca){
-    if (!bca) return;
-
-    bc_atac_dstry_frags(bca);
-    bc_atac_dstry_dups(bca);
-    bc_atac_dstry_pairs(bca);
-
-    free(bca);
-}
-
-int bc_atac_add_read(bc_atac_t *bca, const atac_read1_t *ar, qshort qname){
-    if (bca == NULL || ar == NULL)
-        return err_msg(-1, 0, "bc_atac_add_read: arguments cannot be NULL");
-
-    if (bca->pairs == NULL)
-        return err_msg(-1, 0, "bc_atac_add_read: pairs is NULL, likely a bug");
-
-    khash_t(khap) *pairs = bca->pairs;
-
-    int ret;
-    khint_t kp;
-    atac_rd_pair_t *rp;
-    kp = kh_get(khap, pairs, qname);
-
-    // if read pair isn't present, allocate and add read pair t
-    if (kp == kh_end(pairs)){
-        kp = kh_put(khap, pairs, qname, &ret);
-        if (ret < 0)
-            return err_msg(-1, 0, "bc_atac_add_reads: failed to add qname to khap");
-        
-        if ( (kh_val(pairs, kp) = atac_rd_pair_init()) == NULL ) return(-1);
-    }
-    rp = kh_val(pairs, kp);
-
-    // add read (copy) to read pair
-    if ( atac_rd_pair_add_read(rp, ar) < 0 )
-        return err_msg(-1, 0, "bc_atac_add_reads: failed to add read to pair");
-
-    // If a read pair was formed, add to duplicates and destroy read.
-    if (rp->s == 2){
-        if (bc_atac_add_dup(bca, rp) < 0)
-            return(-1);
-        atac_rd_pair_dstry(rp);
-        kh_del(khap, bca->pairs, kp);
-        if ( kh_size(bca->pairs) > 4 && 
-                (kh_n_buckets(bca->pairs) > (10 * kh_size(bca->pairs))) )
-            kh_resize(khap, bca->pairs, kh_size(bca->pairs));
-    }
-
-    return(0);
-}
 
 int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp){
     if (frags == NULL || rp == NULL)
@@ -692,329 +584,11 @@ int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp){
     return(0);
 }
 
-int bc_atac_add_dup(bc_atac_t *bca, atac_rd_pair_t *rp){
-    if (bca == NULL)
-        return err_msg(-1, 0, "bc_atac_add_dup: arguments must not be NULL");
-    if (rp == NULL)
-        return(0);
-    int kret;
-    khint_t kd;
-    g_reg_pair reg_pair = get_reg_pair(rp->r1.loc, rp->r2.loc);
-    kd = kh_get(khad, bca->dups, reg_pair);
-    if (kd == kh_end(bca->dups)){
-        // add region key
-        kd = kh_put(khad, bca->dups, reg_pair, &kret);// TODO: high heap alloc
-        if (kret < 0){
-            return err_msg(-1 , 0, "bc_atac_add_dup: failed to add "
-                    "duplicate reg key to hash table");
-        }
-        // add allocated dups // TODO: high heap alloc
-        if ( (kh_val(bca->dups, kd) = atac_dups_init()) == NULL) return(-1);
-    }
-    // add read pair to dups
-    atac_dups_t *dups = kh_val(bca->dups, kd);
-    if (atac_dups_add_pair(dups, rp) < 0)
-        return(-1);
-
-    return(0);
-}
-
-int bc_atac_form_dups(bc_atac_t *bca){
-    if (!bca)
-        return err_msg(-1, 0, "bc_atac_form_dups: arguments must not be NULL");
-
-    khint_t kp;
-    // loop through read pairs in barcode
-    for (kp = kh_begin(bca->pairs); kp != kh_end(bca->pairs); ++kp){
-        if (!kh_exist(bca->pairs, kp)) continue;
-        atac_rd_pair_t *rp = kh_val(bca->pairs, kp);
-        if (rp == NULL) return err_msg(-1, 0, "bc_atac_form_dups: read pair is NULL");
-        if (rp->s != 2) continue;
-        
-        if (bc_atac_add_dup(bca, rp) < 0)
-            return(-1);
-
-        // destroy read pair after forming dup
-        atac_rd_pair_dstry(rp);
-        kh_del(khap, bca->pairs, kp);
-    }
-    return(0);
-}
-
-int bc_atac_dedup(bc_atac_t *bca){
-    if (!bca)
-        return err_msg(-1, 0, "bc_atac_dedup: arguments must not be NULL");
-
-    if (!bca->dups)
-        return err_msg(-1, 0, "bc_atac_dedup: no duplicates found");
-
-    int kret;
-    khint_t kd, kf;
-    for (kd = kh_begin(bca->dups); kd != kh_end(bca->dups); ++kd){
-        if (!kh_exist(bca->dups, kd)) continue;
-
-        atac_dups_t *d = kh_val(bca->dups, kd);
-        if (!d) return err_msg(-1, 0, "bc_atac_dedup: duplicate is NULL");
-        g_reg_pair reg = kh_key(bca->dups, kd);
-
-        // skip the duplicate if chimeric
-        if (reg.r1.rid != reg.r2.rid){
-            atac_dups_dstry(d);
-            kh_del(khad, bca->dups, kd);
-            continue;
-        }
-
-        // add the region key for the frag
-        kf = kh_put(khaf, bca->frags, reg, &kret);// TODO: high heap alloc
-        // should not be present
-        if (kret == 0)
-            return err_msg(-1, 0, "bc_atac_dedup: region already found, "
-                    "this is likely because of a bug");
-        if (kret < 0)
-            return err_msg(-1, 0, "bc_atac_dedup: could not add key to frag table");
-
-        // form de-duplicated frag
-        int dret = 0;
-        atac_frag_t *f = atac_dups_dedup(d, &dret);// TODO: high heap alloc
-        if (dret < 0) return(-1);
-
-        // add to hash
-        kh_val(bca->frags, kf) = f;
-
-        // destroy dups after forming frag
-        atac_dups_dstry(d);
-        kh_del(khad, bca->dups, kd);
-    }
-    kh_resize(khad, bca->dups, kh_size(bca->dups));
-
-    return(0);
-}
-
-int bc_atac_var_call(bc_atac_t *bca, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual){
-    if (bca == NULL)
-        return err_msg(-1, 0, "bc_atac_var_call: bca is null");
-
-    if (bca->frags == NULL)
-        return err_msg(-1, 0, "bc_atac_var_call: bca frags is null");
-
-    int n_add = 0;
-    khint_t kf;
-    for (kf = kh_begin(bca->frags); kf != kh_end(bca->frags); ++kf){
-        if (!kh_exist(bca->frags, kf)) continue;
-
-        atac_frag_t *f = kh_val(bca->frags, kf);
-        if (!f)
-            return err_msg(-1, 0, "bc_atac_var_call: frag is NULL");
-
-        int a = atac_frag_var_call(f, gv, cmap, min_qual);
-        if (a < 0)
-            return(-1);
-        n_add += a;
-    }
-    return n_add;
-}
-
-int bc_atac_peak_call(bc_atac_t *bca, iregs_t *pks, contig_map *cmap){
-    if (bca == NULL || pks == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bc_atac_peak_call: arguments are null");
-
-    if (bca->frags == NULL)
-        return err_msg(-1, 0, "bc_atac_peak_call: bca frags is null");
-
-    int n_add = 0;
-    khint_t kf;
-    for (kf = kh_begin(bca->frags); kf != kh_end(bca->frags); ++kf){
-        if (!kh_exist(bca->frags, kf)) continue;
-
-        atac_frag_t *f = kh_val(bca->frags, kf);
-        if (!f)
-            return err_msg(-1, 0, "bc_atac_peak_call: frag is NULL");
-        g_reg_pair reg = kh_key(bca->frags, kf);
-
-        int np;
-        if ( (np = atac_frag_peak_call(f, reg, pks, cmap)) < 0)
-            return(-1);
-        n_add += np;
-    }
-    return(n_add);
-}
-
-/*******************************************************************************
- * bam_atac_t
- ******************************************************************************/
-
-bam_atac_t *bam_atac_init(){
-    bam_atac_t *bam_a = (bam_atac_t *)calloc(1, sizeof(bam_atac_t));
-    if (!bam_a){
-        err_msg(-1, 0, "bam_atac_init: %s:", strerror(errno));
-        return(NULL);
-    }
-
-    bam_a->bc_dat = kh_init(khab);
-    if (bam_a->bc_dat == NULL){
-        err_msg(-1, 0, "bam_atac_init: %s:", strerror(errno));
-        return(NULL);
-    }
-    return(bam_a);
-}
-
-void bam_atac_free_dups(bam_atac_t *bam_a){
-    if (bam_a == NULL) return;
-
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        bc_atac_dstry_dups(bca);
-    }
-}
-
-void bam_atac_free_pairs(bam_atac_t *bam_a){
-    if (bam_a == NULL) return;
-
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        bc_atac_dstry_pairs(bca);
-    }
-}
-
-void bam_atac_dstry(bam_atac_t *bam_a){
-    if (bam_a == NULL) return;
-
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        char *bc = kh_key(bam_a->bc_dat, kbc);
-        free(bc);
-        bc_atac_dstry(bca);
-    }
-    kh_destroy(khab, bam_a->bc_dat);
-    free(bam_a);
-}
-
-int bam_atac_add_read(bam_atac_t *bam_a, const char *bc, const atac_read1_t *ar, 
-        qshort qname){
-    if (bam_a == NULL || ar == NULL)
-        return err_msg(-1, 0, "bam_atac_add_read: arguments cannot be NULL");
-
-    int ret;
-    khint_t kbc;
-    kbc = kh_get(khab, bam_a->bc_dat, (char *)bc);
-    // if barcode isn't present, add bc_atac
-    if (kbc == kh_end(bam_a->bc_dat)){
-        char *bc_cpy = strdup(bc);
-        kbc = kh_put(khab, bam_a->bc_dat, bc_cpy, &ret);
-        if (ret < 0){
-            return err_msg(-1, 0, "bam_atac_add_reads: failed to add read to bcs");
-        }
-        kh_val(bam_a->bc_dat, kbc) = bc_atac_init();
-    }
-    bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-    ret = bc_atac_add_read(bca, ar, qname);
-    if (ret < 0)
-        return err_msg(-1, 0, "bam_atac_add_reads: failed to add read to bam");
-    return(ret);
-}
-
-int bam_atac_form_dups(bam_atac_t *bam_a){
-    if (!bam_a)
-        return err_msg(-1, 0, "bam_atac_form_dups: arguments must not be NULL");
-
-    int ret;
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        if (bca == NULL)
-            return err_msg(-1, 0, "bam_atac_form_dups: barcode is NULL");
-        ret = bc_atac_form_dups(bca);
-        if (ret < 0) return(-1);
-    }
-    return(0);
-}
-
-int bam_atac_dedup(bam_atac_t *bam_a){
-    if (!bam_a)
-        return err_msg(-1, 0, "bam_atac_dedup: argument bam_a is NULL");
-
-    int ret;
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        if (bca == NULL)
-            return err_msg(-1, 0, "bam_atac_dedup: barcode is NULL");
-
-        ret = bc_atac_dedup(bca);
-        if (ret < 0) return(-1);
-    }
-    return(0);
-}
-
-int bam_atac_var_call(bam_atac_t *bam_a, GenomeVar *gv, contig_map *cmap, 
-        uint8_t min_qual){
-    if (!bam_a)
-        return err_msg(-1, 0, "bam_atac_var_call: argument bam_a is NULL");
-
-    int ret, n_add = 0;
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        if (bca == NULL)
-            return err_msg(-1, 0, "bam_atac_var_call: barcode is NULL");
-
-        ret = bc_atac_var_call(bca, gv, cmap, min_qual);
-        if (ret < 0) return(-1);
-        n_add += ret;
-    }
-    return(n_add);
-}
-
-int bam_atac_peak_call(bam_atac_t *bam_a, iregs_t *pks, contig_map *cmap){
-    if (!bam_a)
-        return err_msg(-1, 0, "bam_atac_peak_call: argument bam_a is NULL");
-
-    int ret, n_add = 0;
-    khint_t kbc;
-    for (kbc = kh_begin(bam_a->bc_dat); kbc != kh_end(bam_a->bc_dat); ++kbc){
-        if (!kh_exist(bam_a->bc_dat, kbc)) continue;
-        bc_atac_t *bca = kh_val(bam_a->bc_dat, kbc);
-        if (bca == NULL)
-            return err_msg(-1, 0, "bam_atac_var_call: barcode is NULL");
-
-        ret = bc_atac_peak_call(bca, pks, cmap);
-        if (ret < 0) return(-1);
-        n_add += ret;
-    }
-    return(n_add);
-}
-
-/*******************************************************************************
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- ******************************************************************************/
-
-
-
-
-
 /*******************************************************************************
  * miscellaneous
  ******************************************************************************/
 
+/*
 void count_frags(bam_atac_t *bam_a, int *n_frag, int *n_reads, int *n_bc){
     *n_frag = 0;
     *n_reads = 0;
@@ -1057,7 +631,7 @@ uint64_t get_n_buckets(bam_atac_t *bam_a){
     return(nb_bc);
 }
 
-void print_vac_bam(bam_atac_t *b, GenomeVar *gv){
+void print_vac_bam(bam_atac_t *b, g_var_t *gv){
     if (b == NULL){
         err_msg(-1, 0, "print_vac_bam: arguments must not be NULL");
         return;
@@ -1106,7 +680,7 @@ void print_vac_bam(bam_atac_t *b, GenomeVar *gv){
             size_t va_n = f_i->vacs.n;
             fprintf(stdout, "\t%zu variants\n", va_n);
             while (va != NULL){
-                Var * var = gv_vari(gv, va->vix); 
+                var_t * var = gv_vari(gv, va->vix); 
                 if (var == NULL)
                     fprintf(stdout, "\t%i is invalid\n", va->vix);
                 bcf1_t *rec = var->b;
@@ -1188,4 +762,6 @@ void print_dups_n(bam_atac_t *b){
     }
     
 }
+
+*/
 
