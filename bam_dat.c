@@ -188,7 +188,7 @@ int bc_data_add_atac_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
 
     // If a read pair was formed, add to duplicates and destroy read.
     if (rp->s == 2){
-        if (khaf_add_dup(frags, rp) < 0)
+        if (khaf_add_dup(frags, rp, 1) < 0)
             return(-1);
         atac_rd_pair_dstry(rp);
         kh_del(khap, pairs, kp);

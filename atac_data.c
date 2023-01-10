@@ -365,6 +365,10 @@ int atac_frag_dedup(atac_frag_t *frag){
         return err_msg(-1, 0, "atac_frag_dedup: no best duplicate found "
                 ", there is a bug");
 
+    // skip if ambiguous
+    if (rp_w_max > 1)
+        return(0);
+
     atac_rd_pair_t rpb = dups->dups[ix_best].rd;
 
     int bret;
@@ -516,7 +520,7 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, contig_map
         return err_msg(-1, 0, "atac_frag_peak_call: pks is NULL");
 
     if (reg.r1.rid != reg.r2.rid)
-        return err_msg(-1, 0, "atac_frag_peak_call: chromosomes in given region pair don't matc");
+        return err_msg(-1, 0, "atac_frag_peak_call: chromosomes in given region pair don't match");
     int rid = (int)reg.r1.rid;
     const char *chr = cm_ix_to_chr(cmap, rid);
 
@@ -558,9 +562,13 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, contig_map
  * frags hash table
  ******************************************************************************/
 
-int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp){
+int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp, int skip_chim){
     if (frags == NULL || rp == NULL)
         return err_msg(-1, 0, "khaf_add_dup: 'frags' or 'rp' is null");
+
+    // skip if chimeric
+    if (skip_chim && rp->r1.loc.rid != rp->r2.loc.rid)
+        return(0);
 
     int kret;
     khint_t kf;

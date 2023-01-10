@@ -317,7 +317,7 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks,
  * frags hash table
  ******************************************************************************/
 
-int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp);
+int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp, int skip_chim);
 
 /*******************************************************************************
  * bam_atac_t

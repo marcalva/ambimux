@@ -1,6 +1,6 @@
 
 CC = gcc
-CFLAGS = -g -O2 -Wall -Wno-unused-function
+CFLAGS = -O2 -Wall -Wno-unused-function
 
 all : ambimux
 
