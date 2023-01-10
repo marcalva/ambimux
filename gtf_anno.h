@@ -11,6 +11,7 @@
 #include "htslib/kstring.h"
 #include "htslib/khash.h"
 #include "htslib/hts.h"
+#include "kbtree.h"
 #include "str_util.h"
 #include "bins.h"
 
@@ -53,14 +54,15 @@ typedef struct exon_t {
 
 /* isoform_t structure */
 typedef struct isoform_t {
+    char *id;
     int beg;
     int end;
     struct exon_t *exons; // list of exons. NULL if empty.
     uint32_t exons_n; // number of exons in exons field.
 } isoform_t;
 
-/* hash table of char* key isoform_t* values */
-KHASH_INIT(iso, char*, isoform_t*, 1, kh_str_hash_func, kh_str_hash_equal);
+#define iso_cmp(p, q) (strcmp(((p).id), ((q).id)))
+KBTREE_INIT(kb_iso, isoform_t, iso_cmp);
 
 /* gene_t structure */
 typedef struct gene_t {
@@ -72,7 +74,7 @@ typedef struct gene_t {
     char strand;
     int chrm; // chromosome index
     int bin;
-    khash_t(iso) *isoforms; // hash table of isoforms
+    kbtree_t(kb_iso) *bt_isoforms;
     int isoforms_n; // number of isoforms in @field isoforms
     struct gene_t *next; // NULL if empty.
 } gene_t;
@@ -134,7 +136,8 @@ exon_t *init_exon();
 exon_t *destroy_exon(exon_t *e);
 
 /* Initialize isoform object */
-isoform_t *init_isoform();
+int isoform_init(isoform_t *iso);
+isoform_t *isoform_alloc();
 
 /* Destroy isoform object */
 void destroy_isoform(isoform_t *iso);

@@ -4,6 +4,7 @@
 #include "str_util.h"
 #include "bins.h"
 #include "htslib/khash.h"
+#include "kbtree.h"
 #include <string.h>
 
 int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a, 
@@ -80,7 +81,7 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
 
     int n_iso = g->isoforms_n;
 
-    if (n_iso <= 0 || g->isoforms == NULL){
+    if (n_iso <= 0 || g->bt_isoforms == NULL){
         err_msg(-1, 0, "bam1_spliced: %s has no isoforms", g->id);
         *ret = -1;
         return 0;
@@ -133,11 +134,12 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
         if (cr && cq) qr_len += c_len;
     }
 
-    khint_t k;
     int iso_i = 0; // isoform index
-    for (k = kh_begin(g->isoforms); k != kh_end(g->isoforms); ++k){
-        if (!kh_exist(g->isoforms, k)) continue;
-        isoform_t *iso = kh_val(g->isoforms, k);
+    kbtree_t(kb_iso) *bt = g->bt_isoforms;
+    kbitr_t itr;
+    kb_itr_first(kb_iso, bt, &itr);
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_iso, bt, &itr)){
+        isoform_t *iso = &kb_itr_key(isoform_t, &itr);
 
         if (iso == NULL){
             err_msg(-1, 0, "bam1_spliced: isoform not stored properly");

@@ -27,12 +27,6 @@ typedef struct {
 #define cnt_node_cmp(p, q) ((p).ix - (q).ix)
 KBTREE_INIT(kh_cnode, cnt_node_t, cnt_node_cmp);
 
-typedef struct {
-    kbtree_t(kh_cnode) *b;
-} bc_btree_t;
-
-KHASH_INIT(kh_bt, char*, bc_btree_t, 1, kh_str_hash_func, kh_str_hash_equal);
-
 /*******************************************************************************
  * Barcode counts
  ******************************************************************************/

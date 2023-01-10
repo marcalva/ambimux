@@ -32,19 +32,24 @@ exon_t *destroy_exon(exon_t *e){
     return n;
 }
 
-isoform_t *init_isoform(){
-    isoform_t *i;
+int isoform_init(isoform_t *iso){
+    iso->id = NULL;
+    iso->beg = 0;
+    iso->end = 0;
+    if ((iso->exons = init_exon()) == NULL) return(-1);
+    iso->exons_n = 0;
+    return 0;
+}
 
-    if ((i = malloc(sizeof(isoform_t))) == NULL){
-        err_msg(-1, 0, "init_isoform: %s", strerror(errno));
-    } else {
-        i->beg = 0;
-        i->end = 0;
-        i->exons = init_exon(); // dummy head node
-        i->exons_n = 0;
+isoform_t *isoform_alloc(){
+    isoform_t *iso = (isoform_t *)calloc(1, sizeof(isoform_t));
+    if (iso == NULL){
+        err_msg(-1, 0, "isoform_alloc: %s", strerror(errno));
+        return(NULL);
     }
-
-    return i;
+    if (isoform_init(iso) < 0)
+        return(NULL);
+    return(iso);
 }
 
 void destroy_isoform(isoform_t *iso){
@@ -59,33 +64,35 @@ gene_t *init_gene(){
 
     if ((g = malloc(sizeof(gene_t))) == NULL){
         err_msg(-1, 0, "init_gene: %s", strerror(errno));
-    } else {
-        g->id = NULL;
-        g->name = NULL;
-        g->type = NULL;
-        g->beg = 0;
-        g->end = 0;
-        g->strand = 0;
-        g->chrm = -1;
-        g->bin = -1;
-        g->isoforms = kh_init(iso);
-        g->isoforms_n = 0;
-        g->next = NULL;
+        return(NULL);
     }
-    
+    g->id = NULL;
+    g->name = NULL;
+    g->type = NULL;
+    g->beg = 0;
+    g->end = 0;
+    g->strand = 0;
+    g->chrm = -1;
+    g->bin = -1;
+    g->bt_isoforms = kb_init(kb_iso, KB_DEFAULT_SIZE);
+    g->isoforms_n = 0;
+    g->next = NULL;
+
     return g;
 }
 
 gene_t *destroy_gene(gene_t *g){
-    khint_t k;
-    for (k = kh_begin(g->isoforms); k != kh_end(g->isoforms); ++k){
-        if (!kh_exist(g->isoforms, k)) continue;
-        isoform_t *iso = kh_val(g->isoforms, k);
-        char *key = kh_key(g->isoforms, k);
-        destroy_isoform(iso);
-        free(key);
+    kbtree_t(kb_iso) *bt = g->bt_isoforms;
+    kbitr_t itr;
+    kb_itr_first(kb_iso, bt, &itr);
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_iso, bt, &itr)){
+        isoform_t *iso = &kb_itr_key(isoform_t, &itr);
+        free(iso->id);
+        exon_t *e = iso->exons;
+        while (e) e = destroy_exon(e);
     }
-    kh_destroy(iso, g->isoforms);
+    kb_destroy(kb_iso, g->bt_isoforms);
+
     free(g->name);
     free(g->type);
     gene_t *n = g->next;
@@ -346,8 +353,9 @@ int gtf_iso2anno(gene_anno_t *a, gtf1_t *gl){
     int ci = add_chrm(a, gl->chrname.s);
     if (ci < 0) return -1;
 
-    isoform_t *iso = init_isoform();
-    if (iso == NULL) return -1;
+    isoform_t iso;
+    if (isoform_init(&iso) < 0)
+        return -1;
     
     // get GENE ID
     char *gene_id = get_attr_val(gl, GENE_ID);
@@ -363,8 +371,9 @@ int gtf_iso2anno(gene_anno_t *a, gtf1_t *gl){
         return -1;
     }
     
-    iso->beg = gl->start;
-    iso->end = gl->end;
+    iso.id = strdup(tx_id);
+    iso.beg = gl->start;
+    iso.end = gl->end;
 
     // get gene object
     gene_t *ag = gene_from_name_chrm(a, ci, gene_id);
@@ -373,22 +382,15 @@ int gtf_iso2anno(gene_anno_t *a, gtf1_t *gl){
         return -1;
     }
 
-    char *tx_id_cpy = calloc(strlen(tx_id)+1, sizeof(char));
-    strcpy(tx_id_cpy, tx_id);
-    
-    int ret;
-    khint_t k;
+    // add isoform to btree
+    isoform_t *p;
+    p = kb_getp(kb_iso, ag->bt_isoforms, &iso);
+    if (p == NULL)
+        kb_putp(kb_iso, ag->bt_isoforms, &iso);
+    else
+        return err_msg(-1, 0, "gtf_iso2anno: trying to add duplicate isoform %s", tx_id);
 
-    // add key to hash
-    k = kh_put(iso, ag->isoforms, tx_id_cpy, &ret);
-    if (ret < 0){
-        err_msg(-1, 0, "gtf_iso2anno: could not add %s to isoform hash table", tx_id);
-        return -1;
-    }
-
-    // add isoform val to hash
-    kh_val(ag->isoforms, k) = iso;
-    ag->isoforms_n += 1;
+    ++ag->isoforms_n;
 
     return 0;
 }
@@ -421,8 +423,6 @@ int gtf_exon2anno(gene_anno_t *a, gtf1_t *gl){
     e->beg = gl->start;
     e->end = gl->end;
 
-    khint_t k;
-
     // get gene object
     gene_t *ag = gene_from_name_chrm(a, ci, gene_id);
     if (ag == NULL){
@@ -431,15 +431,12 @@ int gtf_exon2anno(gene_anno_t *a, gtf1_t *gl){
     }
 
     // get isoform object
-    k = kh_get(iso, ag->isoforms, tx_id);
-    isoform_t *iso = kh_val(ag->isoforms, k);
-
-    // if no isoform
-    if (k == kh_end(ag->isoforms) || !iso){
-        err_msg(-1, 0, "gtf_exon2anno: gtf file is malformed. "
-                "Found exon feature %s before transcript feature %s", exon_id, tx_id);
-        return -1;
-    }
+    isoform_t *iso, d_iso;
+    d_iso.id = tx_id;
+    iso = kb_getp(kb_iso, ag->bt_isoforms, &d_iso);
+    if (iso == NULL)
+        return err_msg(-1, 0, "gtf_exon2anno: could not find isoform %s to "
+                "add exon %s to. GTF file is likely malformed", tx_id, exon_id);
 
     // sorted insert
     exon_t *ge = iso->exons;
@@ -826,13 +823,14 @@ int n_feat(gene_anno_t *a, int *n_gene, int *n_iso, int *n_exon){
             gene_t *g = chrm->bins[j];
             while (g){
                 *n_gene = *n_gene + 1;
-                khint_t k_iso;
                 fprintf(stdout, "gene %s has %i isoforms\n", g->id, g->isoforms_n);
-                for (k_iso = kh_begin(g->isoforms); k_iso != kh_end(g->isoforms); ++k_iso){
-                    if (!kh_exist(g->isoforms, k_iso)) continue;
-                    isoform_t *iso = kh_val(g->isoforms, k_iso);
-                    char *key = kh_key(g->isoforms, k_iso);
-                    fprintf(stdout, "ID %s beg %i end %i n_exon %i\n", key, iso->beg, iso->end, iso->exons_n);
+                kbtree_t(kb_iso) *bt = g->bt_isoforms;
+                kbitr_t itr;
+                kb_itr_first(kb_iso, bt, &itr);
+                for (; kb_itr_valid(&itr); kb_itr_next(kb_iso, bt, &itr)){
+                    isoform_t *iso = &kb_itr_key(isoform_t, &itr);
+                    fprintf(stdout, "ID %s beg %i end %i n_exon %i\n", iso->id, 
+                            iso->beg, iso->end, iso->exons_n);
                     *n_iso = *n_iso + 1;
                     *n_exon = *n_exon + iso->exons_n;
                 }
