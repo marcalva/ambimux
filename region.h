@@ -26,10 +26,10 @@
  * end, the bases that are part of the read are [start, end).
  */
 typedef struct g_region {
+    char strand;
     int32_t rid;
     hts_pos_t start;
     hts_pos_t end;
-    char strand;
 } g_region;
 
 // hash function for a g_region
@@ -59,9 +59,9 @@ typedef struct g_reg_pair {
 } g_reg_pair;
 
 typedef struct g_pos {
+    char strand;
     int32_t rid;
     hts_pos_t pos;
-    char strand;
 } g_pos;
 
 typedef struct contig_map {
