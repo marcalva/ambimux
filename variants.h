@@ -206,8 +206,8 @@ float **ap_array_gt(g_var_t *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char 
  * @note The containers in vars must be freed, but not the actual 
  * contents.
  */
-int region_vars(g_var_t *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, var_t **vars);
+int region_vars(g_var_t *gv, const char* ref, int32_t beg, 
+        int32_t end, var_t **vars);
 
 int n_snp(g_var_t *gv, int *n_snp);
 

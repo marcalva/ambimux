@@ -189,7 +189,7 @@ rna_dups_t *rna_dups_alloc(){
 
 void rna_dups_free(rna_dups_t *rd){
     if (rd == NULL) return;
-    int i;
+    size_t i;
     for (i = 0; i < rd->size; ++i)
         rna_read1_free(&rd->dups[i]);
 
@@ -209,7 +209,8 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     if (rd == NULL || r == NULL)
         return err_msg(-1, 0, "rna_dups_add_read: arguments are null");
 
-    int i, ret;
+    size_t i;
+    int ret;
     for (i = 0; i < rd->size; ++i){
         int rcmp = rna_read1_equal(&rd->dups[i], r, 0);
         if (rcmp < 0)
@@ -362,7 +363,7 @@ int rna_mol_dedup(rna_mol_t *mol){
     size_t max_c = 0; // store read count
     size_t rd_w_max = 0; // number of read pairs with max_c read counts
 
-    int i;
+    size_t i;
     for (i = 0; i < dups->size; ++i){
         // check for bugs
         if (dups->rds_per_dup[i] == 0)

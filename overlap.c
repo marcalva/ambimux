@@ -15,8 +15,8 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a,
     int32_t tid = b->core.tid;
     const char *ref = sam_hdr_tid2name(h, (int)tid);
     
-    hts_pos_t b_beg = b->core.pos;
-    hts_pos_t b_end = bam_endpos(b);
+    int32_t b_beg = (int32_t)b->core.pos;
+    int32_t b_end = (int32_t)bam_endpos(b);
     if (b_end == b_beg + 1) return(-1); // unmapped;
 
     char strand = '+';
@@ -116,17 +116,17 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
     char strand = '+';
     if (bam_is_rev(b)) strand = '-';
 
-    uint32_t *cigar_raw = bam_get_cigar(b);
-    uint32_t n_cigar = b->core.n_cigar;
+    uint32_t *cigar_raw = (uint32_t *)bam_get_cigar(b);
+    uint32_t n_cigar = (uint32_t)b->core.n_cigar;
 
     // pos is 0-based leftmost base of first CIGAR op that consumes reference.
-    hts_pos_t pos = b->core.pos;
+    int32_t pos = (int32_t)b->core.pos;
 
     // get length of cigar length that consumes reference and query
     uint32_t qr_len = 0;
-    for (i = 0; i < n_cigar; ++i){
-        uint32_t c_op = bam_cigar_op(cigar_raw[i]); // lower 4 bits is cigar op
-        uint32_t c_len = bam_cigar_oplen(cigar_raw[i]); // higher 24 bits is length
+    for (i = 0; i < (int)n_cigar; ++i){
+        uint32_t c_op = (uint32_t)bam_cigar_op(cigar_raw[i]); // lower 4 bits is cigar op
+        uint32_t c_len = (uint32_t)bam_cigar_oplen(cigar_raw[i]); // higher 24 bits is length
 
         int cr = bam_cigar_type(c_op)&2; // consumes reference
         int cq = bam_cigar_type(c_op)&1; // consumes query
@@ -154,11 +154,11 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
         }
 
         // position of CIGAR segment in reference sequence
-        hts_pos_t r_beg = pos, r_end = pos;
+        int32_t r_beg = pos, r_end = pos;
 
         for (i = 0; i < n_cigar; ++i){ // for each CIGAR op
-            uint32_t c_op = bam_cigar_op(cigar_raw[i]); // lower 4 bits is cigar op
-            uint32_t c_len = bam_cigar_oplen(cigar_raw[i]); // higher 24 bits is length
+            uint32_t c_op = (uint32_t)bam_cigar_op(cigar_raw[i]); // lower 4 bits is cigar op
+            uint32_t c_len = (uint32_t)bam_cigar_oplen(cigar_raw[i]); // higher 24 bits is length
 
             int cr = bam_cigar_type(c_op)&2; // consumes reference
             int cq = bam_cigar_type(c_op)&1; // consumes query
@@ -295,23 +295,22 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
     if (b == NULL || h == NULL || gv == NULL)
         return err_msg(-1, 0, "bam1_vars_overlap: argument is null");
 
-    uint32_t *cigar_raw;
-    cigar_raw = bam_get_cigar(b);
-    uint32_t n_cigar = b->core.n_cigar;
+    uint32_t *cigar_raw = (uint32_t *)bam_get_cigar(b);
+    uint32_t n_cigar = (uint32_t)b->core.n_cigar;
 
     int32_t tid = b->core.tid;
     const char *ref = sam_hdr_tid2name(h, (int)tid);
-    hts_pos_t left_pos = b->core.pos; // position of first base that consumes the reference.
+    int32_t left_pos = (int32_t)b->core.pos; // position of first base that consumes the reference.
 
     int n_vars = 0;
     /* r_pos stores position in ref. sequence 0-based */
-    int64_t r_pos_beg = left_pos;
-    int64_t r_pos_end = left_pos;
+    int32_t r_pos_beg = left_pos;
+    int32_t r_pos_end = left_pos;
     int i;
-    for (i = 0; i < n_cigar; i++){
+    for (i = 0; i < (int)n_cigar; i++){
         
-        uint32_t cigar_op = bam_cigar_op(cigar_raw[i]);
-        uint32_t cigar_oplen = bam_cigar_oplen(cigar_raw[i]);
+        uint32_t cigar_op = (uint32_t)bam_cigar_op(cigar_raw[i]);
+        uint32_t cigar_oplen = (uint32_t)bam_cigar_oplen(cigar_raw[i]);
 
         int cr = bam_cigar_type(cigar_op)&2; // consumes ref seq.
         int cq = bam_cigar_type(cigar_op)&1; // consumes query seq.
@@ -324,9 +323,9 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
         // get overlapping variants from r_pos region.
         if ( cr && cq ){
             int ret = region_vars(gv, ref, r_pos_beg, r_pos_end, vars);
-            if (ret < 0)
+            if (ret < -1)
                 return err_msg(-1, 0, "bam1_vars_overlap: failed region overlap at "
-                        "%s:%"PRIhts_pos"-%"PRIhts_pos"\n", ref, r_pos_beg, r_pos_end);
+                        "%s:%"PRIi32"-%"PRIi32"\n", ref, r_pos_beg, r_pos_end);
             else n_vars += ret;
         }
 
@@ -355,7 +354,7 @@ int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, seq_blist_t **bl){
     for (tvar = ovars; tvar != NULL; tvar = tvar->next){
         // Get position of the variant
         int32_t v_rid = tvar->b->rid;
-        hts_pos_t v_pos = tvar->b->pos;
+        int32_t v_pos = tvar->b->pos;
         // const char *v_rstr = bcf_hdr_id2name(objs->vcf_hdr, v_rid);
 
         // Get base pair at overlapping site

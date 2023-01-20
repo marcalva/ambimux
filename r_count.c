@@ -470,7 +470,7 @@ int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn){
     return(0);
 }
 
-int bam_counts_write_rna_ac(bam_counts_t *agc, gene_anno_t *anno, char *fn){
+int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
     char delim[] = " ";
 
     if (agc == NULL)
@@ -592,7 +592,7 @@ int bam_counts_write_rna_ac(bam_counts_t *agc, gene_anno_t *anno, char *fn){
     return(0);
 }
 
-int bam_counts_write_rna_gc(bam_counts_t *agc, gene_anno_t *anno, char *fn){
+int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn){
     char delim[] = " ";
 
     if (mkpath(fn, 0755) == -1)
@@ -707,11 +707,11 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
         return err_msg(-1, 0, "bam_counts_write: agc is NULL");
 
     if (agc->has_rna_ac){
-        if (bam_counts_write_rna_gc(agc, anno, fn) < 0)
+        if (bam_counts_write_rna_gc(agc, fn) < 0)
             return -1;
     }
     if (agc->has_rna_ac){
-        if (bam_counts_write_rna_ac(agc, anno, fn) < 0)
+        if (bam_counts_write_rna_ac(agc, fn) < 0)
             return -1;
     }
     if (agc->has_atac_ac){
@@ -737,7 +737,7 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
             return -1;
         bgzf_close(fp);
         // int write_gene_data(BGZF *fp, gene_anno_t *anno, str_map *gene_ix){
-        //     if (write_str_map(agc->gene_ix, ofn, ' ', '\n') < 0)
+        //     if (write_str_map(agc->gene_ix, ofn) < 0)
         free(ofn);
     }
 
@@ -778,7 +778,7 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
     char bc_fn[] = ".barcodes.txt.gz";
     ofn = strcat2((const char*)fn, (const char*)bc_fn);
     if (ofn == NULL) return -1;
-    if (write_str_map(agc->bc_ix, ofn, ' ', '\n') < 0)
+    if (write_str_map(agc->bc_ix, ofn) < 0)
         return -1;
     free(ofn);
     return 0;

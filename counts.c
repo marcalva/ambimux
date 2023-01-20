@@ -271,7 +271,7 @@ int seq_base_call_var(seq_base_t *b, vacs_t *vacs, g_var_t *gv,
     const char *b_ref = cm_ix_to_chr(cmap, b_rid);
     if (b_ref == NULL)
         return err_msg(-1, 0, "seq_base_call_var: cannot find chromosome ID %i", b_rid);
-    hts_pos_t b_beg = b->pos.pos, b_end = b_beg + 1;
+    int32_t b_beg = b->pos.pos, b_end = b_beg + 1;
 
     /* base call */
     uint8_t b_base = b->base;
@@ -292,7 +292,7 @@ int seq_base_call_var(seq_base_t *b, vacs_t *vacs, g_var_t *gv,
     // debugging
     // if (1){
     if (n_v > 1){
-        err_msg(0, 1, "%i variants found at position %s:%"PRIhts_pos"\n", 
+        err_msg(0, 1, "%i variants found at position %s:%"PRIi32"\n", 
                 n_v, b_ref, b_beg);
     }
     // }

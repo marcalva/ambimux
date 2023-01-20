@@ -22,11 +22,11 @@
  *
  * @param b Pointer to bam1_t object.
  * @param tid Pointer to int32_t object to update chromosome ID.
- * @param start Pointer to hts_pos_t object to update start coordinate.
- * @param end Pointer to hts_pos_t object to update end coordinate.
+ * @param start Pointer to int32_t object to update start coordinate.
+ * @param end Pointer to int32_t object to update end coordinate.
  * @return 0 on success, -1 on error.
  */
-int get_rcoord_bam(const bam1_t *b, int32_t *tid, hts_pos_t *start, hts_pos_t *end, 
+int get_rcoord_bam(const bam1_t *b, int32_t *tid, int32_t *start, int32_t *end, 
         int adj_soft_clip);
 
 /* Check if bam read is unmapped.
@@ -68,7 +68,7 @@ int ovrlp_tid(sam_hdr_t *sam_hdr, bcf_hdr_t *bcf_hdr, int **t1, int **t2);
 
 // Return the base that overlaps the BAM record. If no overlap, return 'N'
 // base_ref is the tid chromosome that corresponds to the BAM record
-int get_ovrlp_base(const bam1_t *b, int32_t base_ref, hts_pos_t base_pos, 
+int get_ovrlp_base(const bam1_t *b, int32_t base_ref, int32_t base_pos, 
         char *base, uint8_t *qual);
 
 /* Get base pair of aligned bam query given reference position.
@@ -90,7 +90,7 @@ int get_ovrlp_base(const bam1_t *b, int32_t base_ref, hts_pos_t base_pos,
  *
  * @return -1 on error, 0 if not found, 1 if found.
  */
-int bam1_site_base(const bam1_t *b, int32_t ref, hts_pos_t pos, 
+int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos, 
         uint8_t *base, uint8_t *qual);
 
 char *get_tag(const bam1_t *b, char tag[2]);

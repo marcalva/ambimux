@@ -474,8 +474,8 @@ float *bcf1_ap_gt(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra){
     void *p = gt_arr;
     int n_miss = 0;
     for (s = 0; s < n_samples; s++){ // each sample
-        float gt = 0, total = 0;
-        int t;
+        float gt = 0;
+        int t, total = 0;
         for (t = 0; t < n_val; t++){ // each allele
             int32_t *a = (int32_t *)p;
             a = a + (s * n_val) + t;
@@ -487,7 +487,7 @@ float *bcf1_ap_gt(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra){
             if ( bcf_gt_is_missing(*a) ) {
                 n_miss++;
                 gt = -1.0;
-                total = 1.0;
+                total = 1;
                 break;
             }
 
@@ -658,8 +658,8 @@ cleanup:
     return NULL;
 }
 
-int region_vars(g_var_t *gv, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, var_t **vars){
+int region_vars(g_var_t *gv, const char* ref, int32_t beg, 
+        int32_t end, var_t **vars){
     if (gv == NULL)
         return err_msg(-2, 0, "region_vars: gv must not be NULL");
 

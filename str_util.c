@@ -282,17 +282,17 @@ str_map *str_map_copy(str_map *sm){
     return cpy;
 }
 
-int write_str_map(str_map *sm, char *fn, char delim, char nl){
+int write_str_map(str_map *sm, char *fn){
     BGZF *fp = bgzf_open(fn, "wg1");
     if (fp == 0)
         return err_msg(-1, 0, "write_str_map: could not open file %s\n", fn);
     
-    size_t ret;
+    int ret;
     int k, total = 0;
     for (k = 0; k < sm->n; ++k){
         ret = bgzf_write(fp, sm->strs[k], strlen(sm->strs[k]));
         ret = bgzf_write(fp, "\n", 1);
-        if (ret < 0) return(write_fail());
+        if (ret < 0) err_msg(-1, 0, "write_str_map: failed write");
         else total += ret;
     }
     bgzf_close(fp);
@@ -359,7 +359,7 @@ char **str_map_ca(str_map *sm){
  *****************************/
 
 char *aloc_sprintf(const char *format, ...){
-    size_t r_size;
+    int r_size;
 
     va_list args;
     va_start(args, format);
@@ -416,7 +416,7 @@ char *int2str(int x, size_t *len){
 int int2strp(int x, char **strp, size_t *strp_size){
     int xlen;
 
-    if ( (xlen = snprintf(*strp, *strp_size, "%i", x)) >= *strp_size ){
+    if ( (xlen = snprintf(*strp, *strp_size, "%i", x)) >= (int)*strp_size ){
         *strp_size = xlen + 1;
         *strp = realloc(*strp, *strp_size * sizeof(char));
         if (*strp == NULL)
@@ -431,7 +431,7 @@ int int2strp(int x, char **strp, size_t *strp_size){
 
 int htspos2strp(hts_pos_t x, char **strp, size_t *strp_size){
     int xlen;
-    if ( (xlen = snprintf(*strp, *strp_size, "%" PRIhts_pos, x)) >= *strp_size ){
+    if ( (xlen = snprintf(*strp, *strp_size, "%" PRIhts_pos, x)) >= (int)*strp_size ){
         *strp_size = xlen + 1;
         *strp = realloc(*strp, *strp_size * sizeof(char));
         if (*strp == NULL)
@@ -466,7 +466,7 @@ char *double2str(double x, size_t *len){
 
 int double2str_in(double x, char **pstr, size_t *buf_size, int decp){
     int pstr_len = 0;
-    while ( (pstr_len = snprintf(*pstr, *buf_size, "%.*g", decp, x)) >= *buf_size){
+    while ( (pstr_len = snprintf(*pstr, *buf_size, "%.*g", decp, x)) >= (int)*buf_size){
         *buf_size *= 2;
         void *tmp = realloc(*pstr, *buf_size * sizeof(char));
         if (tmp != NULL) *pstr = tmp;
@@ -521,7 +521,7 @@ int get_line(FILE *fp, char **line, size_t *m){
     }
     char c;
     while ( (c = fgetc(fp)) != EOF && c != '\n' && !ferror(fp) ){
-        while (n >= *m){
+        while (n >= (int)*m){
             *m = (*m)<<1;
             *line = (char *)realloc(*line, (*m) * sizeof(char));
             if (*line == NULL)
@@ -529,7 +529,7 @@ int get_line(FILE *fp, char **line, size_t *m){
         }
         (*line)[n++] = c;
     }
-    while (n >= *m){
+    while (n >= (int)*m){
         *m = (*m) + 1;
         *line = (char *)realloc(*line, (*m) * sizeof(char));
         if (*line == NULL)
@@ -541,7 +541,7 @@ int get_line(FILE *fp, char **line, size_t *m){
 
 char **read_lines(const char *fn, int *len){
     *len = 0;
-    size_t lines_alloc = 1;
+    int lines_alloc = 1;
     char **lines = (char **)calloc(lines_alloc, sizeof(char *));
     if (lines == NULL){
         err_msg(-1, 0, "read_lines: %s", strerror(errno));

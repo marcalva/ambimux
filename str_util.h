@@ -182,7 +182,7 @@ static inline void str_map_resize(str_map *sm){
 /* write str_map to file 
  * @return total number of bytes written, -1 on error
  * */
-int write_str_map(str_map *sm, char *fn, char delim, char nl);
+int write_str_map(str_map *sm, char *fn);
 
 /* read str_map from file */
 str_map * read_str_map(const char *fn);

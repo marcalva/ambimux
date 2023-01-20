@@ -291,12 +291,12 @@ int write_gene_data(BGZF *fp, gene_anno_t *anno, str_map *gene_ix);
  * The object @p genes must be allocated before the function is called, and freed after the call.
  */
 int feats_from_region_p(const gene_anno_t *a, const char* ref, 
-        int64_t beg, int64_t end, uint8_t stranded, char strand, 
+        int32_t beg, int32_t end, uint8_t stranded, char strand, 
         gene_t ***genes, int *genes_len, double p);
 
 /* Get features that overlap completely with @p set to 1 in the above company */
-static inline int feats_from_region(const gene_anno_t *a, const char* ref, hts_pos_t beg, 
-        hts_pos_t end, uint8_t stranded, char strand, gene_t ***genes, int *genes_len){
+static inline int feats_from_region(const gene_anno_t *a, const char* ref, int32_t beg, 
+        int32_t end, uint8_t stranded, char strand, gene_t ***genes, int *genes_len){
     return feats_from_region_p(a, ref, beg, end, stranded, strand, genes, genes_len, 1.0);
 }
 

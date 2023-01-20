@@ -739,7 +739,7 @@ int write_gene_data(BGZF *fp, gene_anno_t *anno, str_map *gene_ix){
 
 
 int feats_from_region_p(const gene_anno_t *a, const char* ref, 
-        int64_t beg, int64_t end, uint8_t stranded, char strand, 
+        int32_t beg, int32_t end, uint8_t stranded, char strand, 
         gene_t ***genes, int *genes_len, double p){
 
     // overlap chromosomes
@@ -750,7 +750,7 @@ int feats_from_region_p(const gene_anno_t *a, const char* ref,
     // region length
     double reg_len = (double)end - (double)beg;
     if (reg_len < 0) 
-        return err_msg(-1, 0, "feats_from_region_p: end (%lli) < beg (%lli)", (int64_t)end, (int64_t)beg);
+        return err_msg(-1, 0, "feats_from_region_p: end (%li) < beg (%li)", (int32_t)end, (int32_t)beg);
 
     int ngenes = 0;
 

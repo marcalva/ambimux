@@ -10,6 +10,9 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <math.h>
+#include <float.h>
+
+#define deps DBL_MIN
 
 void ix2indices(int ix, int M, int *s1, int *s2){
     if (ix < M){
@@ -243,7 +246,7 @@ int mdl_pars_est_alpha(mdl_pars_t *gp, bam_data_t *bam_data, str_map *flt_bcs,
     double ttl_umi[2] = {0,0};
 
     // add smoothing prior to alpha and ttl_umi
-    int i, j;
+    unsigned int i, j;
     for (i = 0; i < 2; ++i){
         for (j = 0; j < gs; ++j){
             gp->alpha[j + (i * gs)] = smooth;
@@ -394,7 +397,7 @@ int p_b_gce(int allele, int v, mdl_pars_t *gp, int s, int e, int c,
         return err_msg(-1, 0, "p_b_gce: e must be 0 or 1");
     if (allele != 0 && allele != 1)
         return err_msg(-1, 0, "p_b_gce: allele must be 0 or 1");
-    if (v < 0 || v >= gp->V)
+    if (v < 0 || v >= (int)gp->V)
         return err_msg(-1, 0, "p_b_gce: v must be between 0 and %i", gp->V);
 
     if (e == 1){
@@ -421,7 +424,7 @@ int p_b_gce(int allele, int v, mdl_pars_t *gp, int s, int e, int c,
 
     // if any missing, return 1
     int pret;
-    if (gprb[0] == -1 || gprb[1] == -1){
+    if (gprb[0] < 0 || gprb[1] < 0){
         *prob = 1;
         pret = 0;
     } else {
@@ -445,7 +448,7 @@ int p_e(int e, double eps, double *prob){
 }
 
 int p_f_c(int f, int spl, mdl_pars_t *gp, int c, double *prob){
-    if (f < 0 || f >= gp->G)
+    if (f < 0 || f >= (int)gp->G)
         return err_msg(-1, 0, "p_f_c: f must be between 0 and %i", gp->G);
     if (spl != SPLICE && spl != UNSPLICE && spl != AMBIG)
         return err_msg(-1, 0, "p_f_c: spl must be 0, 1, or 2");
@@ -539,7 +542,7 @@ int mdl_llk(mdl_t *mdl, bam_data_t *bam_dat, int verbose){
                             fret = p_f_c(g_ix, sp, mdl->mp, c_stat, &tmp_p);
                             if (fret < 0) return -1;
                             prb_uc[c_stat] *= tmp_p;
-                            if (tmp_p == 0){
+                            if (tmp_p < deps){
                                 log_msg("warning: barcode %s has p_f_c of %f", bc_name, tmp_p);
                             }
                         }
@@ -566,14 +569,14 @@ int mdl_llk(mdl_t *mdl, bam_data_t *bam_dat, int verbose){
                             prb_e1 *= tmp_p;
 
                             double prb_v = prb_e0 + prb_e1;
-                            if (prb_v == 0){
+                            if (prb_v < deps){
                                 log_msg("warning: barcode %s has prb_v of %f", bc_name, prb_v);
                             }
                             prb_uc[c_stat] *= prb_v;
                         }
                     }
                     double prb_u = prb_uc[0] + prb_uc[1];
-                    if (prb_u == 0){
+                    if (prb_u < deps){
                         log_msg("warning: barcode %s has prb_u of %f", bc_name, prb_u);
                     }
                     mdl->mf->bc_llks[CMI( (bc_i), (s_ix), (bcs->n) )] += log(prb_u);
@@ -620,14 +623,14 @@ int mdl_llk(mdl_t *mdl, bam_data_t *bam_dat, int verbose){
                             prb_e1 *= tmp_p;
 
                             double prb_v = prb_e0 + prb_e1;
-                            if (prb_v == 0){
+                            if (prb_v < deps){
                                 log_msg("warning: barcode %s has prb_v of %f", bc_name, prb_v);
                             }
                             prb_uc[c_stat] *= prb_v;
                         }
                     }
                     double prb_u = prb_uc[0] + prb_uc[1];
-                    if (prb_u == 0){
+                    if (prb_u < deps){
                         log_msg("warning: barcode %s has prb_u of %f", bc_name, prb_u);
                     }
                     mdl->mf->bc_llks[CMI( (bc_i), (s_ix), (bcs->n) )] += log(prb_u);
@@ -652,8 +655,8 @@ int mdl_get_best_llk(mdl_t *mdl){
     mf->best_dbl_ix = calloc(mdl->test_bcs->n, sizeof(uint32_t));
     mf->llr = calloc(mdl->test_bcs->n, sizeof(double));
 
-    int M = mdl->samples->n;
-    int max_ix = M + (M * (M-1) / 2);
+    uint32_t M = mdl->samples->n;
+    uint32_t max_ix = M + (M * (M-1) / 2);
 
     int bcs_n = mdl->test_bcs->n;
     

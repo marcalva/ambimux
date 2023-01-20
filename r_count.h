@@ -80,8 +80,8 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data);
 int write_num(BGZF *fp, int n, char *c, char **intstrp, size_t *intstrp_m);
 
 int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn);
-int bam_counts_write_rna_gc(bam_counts_t *agc, gene_anno_t *anno, char *fn);
-int bam_counts_write_rna_ac(bam_counts_t *agc, gene_anno_t *anno, char *fn);
+int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn);
+int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn);
 int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn);
 int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn);
 

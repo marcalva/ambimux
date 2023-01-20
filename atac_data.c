@@ -250,7 +250,7 @@ atac_dups_t *atac_dups_init(){
 
 void atac_dups_free(atac_dups_t *d){
     if (d == NULL) return;
-    int i;
+    size_t i;
     for (i = 0; i < d->size; ++i)
         atac_rd_pair_free(&d->dups[i].rd); // free underlying reads
     free(d->dups);
@@ -266,7 +266,8 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp){
     if (d == NULL || rp == NULL)
         return err_msg(-1, 0, "atac_dups_add_pair: arguments must not be NULL");
 
-    int i, ret = 0, tcmp = 0;
+    size_t i;
+    int ret = 0, tcmp = 0;
     for (i = 0; i < d->size; ++i){
         tcmp = atac_rd_pair_equal(&d->dups[i].rd, rp);
         if (tcmp < 0)
@@ -341,11 +342,11 @@ int atac_frag_dedup(atac_frag_t *frag){
     if (dups->size == 0)
         return err_msg(-1, 0, "atac_frag_dedup: no duplicates present in frag");
 
-    int ix_best;
+    int ix_best = 0;
     size_t max_c = 0; // store read count
     size_t rp_w_max = 0; // number of read pairs with max_c read counts
 
-    int i;
+    size_t i;
     for (i = 0; i < dups->size; ++i){
         // check for bugs
         if (dups->dups[i].n_rd == 0)
@@ -423,11 +424,11 @@ atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret){
         return(NULL);
     }
 
-    int ix_best;
+    int ix_best = 0;
     size_t max_c = 0; // store read count
     size_t rp_w_max = 0; // number of read pairs with max_c read counts
 
-    int i;
+    size_t i;
     for (i = 0; i < d->size; ++i){
         // check for bugs
         if (d->dups[i].n_rd == 0){
@@ -524,10 +525,10 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, contig_map
     int rid = (int)reg.r1.rid;
     const char *chr = cm_ix_to_chr(cmap, rid);
 
-    hts_pos_t beg = reg.r1.start;
-    hts_pos_t end = reg.r2.end - 1;
+    int32_t beg = reg.r1.start;
+    int32_t end = reg.r2.end - 1;
     if (end < beg)
-        return err_msg(-1, 0, "atac_frag_peak_call: end %" PRIhts_pos " < beg %" PRIhts_pos, end, beg);
+        return err_msg(-1, 0, "atac_frag_peak_call: end %" PRIi32 " < beg %" PRIi32, end, beg);
 
     iregn_t overlaps = {NULL,0,0};
     int ret = iregs_overlap(pks, chr, beg, end, &overlaps);
@@ -535,11 +536,11 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, contig_map
 
     // check if peak overlaps by at least one base
     // if so, add to f->pks
-    int i;
+    size_t i;
     for (i = 0; i < overlaps.n; ++i){
         int ix = overlaps.ix[i];
         if (ix >= pks->n)
-            return err_msg(-1, 0, "atac_frag_peak_call: %i index >= num of peaks %i", ix, pks->n);
+            return err_msg(-1, 0, "atac_frag_peak_call: %zu index >= num of peaks %zu", ix, pks->n);
         g_region pk_reg = pks->reg[ix];
         int64_t ovrlp;
         // check cut site 1 (+4 based on 10X)

@@ -52,7 +52,7 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
         
         // coordinates are begin and end of alignment, excluding clipped bases.
         int32_t bam_rid;
-        hts_pos_t bam_beg, bam_end;
+        int32_t bam_beg, bam_end;
         if (get_rcoord_bam(bam_r, &bam_rid, &bam_beg, &bam_end, 0) < 0)
             return err_msg(-1, 0, "run_atac: failed get coordinates");
 
@@ -191,7 +191,7 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
 
         // coordinates are begin and end of alignment, excluding clipped bases.
         int32_t bam_rid;
-        hts_pos_t bam_beg, bam_end;
+        int32_t bam_beg, bam_end;
         if (get_rcoord_bam(bam_r, &bam_rid, &bam_beg, &bam_end, 0) < 0)
             return err_msg(-1, 0, "run_atac: failed get coordinates");
 

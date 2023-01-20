@@ -28,15 +28,15 @@
 typedef struct g_region {
     char strand;
     int32_t rid;
-    hts_pos_t start;
-    hts_pos_t end;
+    int32_t start;
+    int32_t end;
 } g_region;
 
 // hash function for a g_region
 static inline khint_t kh_g_region_hf(g_region reg) {
     khint_t h = (khint_t)kh_int_hash_func(reg.rid);
-    khint_t sh = kh_int64_hash_func(reg.start);
-    khint_t eh = kh_int64_hash_func(reg.end);
+    khint_t sh = kh_int_hash_func(reg.start);
+    khint_t eh = kh_int_hash_func(reg.end);
     h = ((h << 5) - h) + (khint_t)sh;
     h = ((h << 5) - h) + (khint_t)eh;
     return(h);
@@ -61,7 +61,7 @@ typedef struct g_reg_pair {
 typedef struct g_pos {
     char strand;
     int32_t rid;
-    hts_pos_t pos;
+    int32_t pos;
 } g_pos;
 
 typedef struct contig_map {
@@ -91,7 +91,7 @@ void init_g_region(g_region *reg);
  *
  * @return 0 on success, -1 on error.
  */
-int set_region(g_region *reg, int32_t rid, hts_pos_t start, hts_pos_t end, 
+int set_region(g_region *reg, int32_t rid, int32_t start, int32_t end, 
         char strand);
 
 /* Compare two regions for equality.
@@ -120,12 +120,12 @@ g_reg_pair get_reg_pair(g_region r1, g_region r2);
  *
  * @param p Pointer to g_pos object.
  * @param rid Integer ID of reference chromosome.
- * @param pos An hts_pos_t object giving the position.
+ * @param pos An int32_t object giving the position.
  * @param strand A char giving the strand.
  *
  * @return -1 on error, 0 on success
  */
-int set_pos(g_pos *p, int32_t rid, hts_pos_t pos, char strand);
+int set_pos(g_pos *p, int32_t rid, int32_t pos, char strand);
 
 /* Compare positions from two g_pos objects.
  *
@@ -290,8 +290,8 @@ void iregs_dstry(iregs_t *iregs);
  *
  * @return 0 on success, -1 on error.
  */
-int iregs_add2reghash(iregs_t *iregs, const char *chr, hts_pos_t beg, 
-        hts_pos_t end, char strand);
+int iregs_add2reghash(iregs_t *iregs, const char *chr, int32_t beg, 
+        int32_t end, char strand);
 
 /* Add iregs from a BED file
  *
@@ -325,7 +325,7 @@ int iregs_parse_bed(iregs_t *iregs);
  * @return The number of overlapping regions (stored in @p n as well), or
  *  -1 on error
  */
-int iregs_overlap(iregs_t *iregs, const char *chr, hts_pos_t beg, hts_pos_t end, 
+int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end, 
         iregn_t *overlaps);
 
 /* Test if a region has an overlapping region in iregs.
@@ -334,7 +334,7 @@ int iregs_overlap(iregs_t *iregs, const char *chr, hts_pos_t beg, hts_pos_t end,
  */
 static inline 
 int iregs_has_overlap(iregs_t *iregs, const char *chr, 
-        hts_pos_t beg, hts_pos_t end){
+        int32_t beg, int32_t end){
     iregn_t overlaps = {NULL,0,0};
     int ret = iregs_overlap(iregs, chr, beg, end, &overlaps);
     free(overlaps.ix);
