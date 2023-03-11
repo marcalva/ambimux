@@ -651,9 +651,9 @@ gene_anno_t *read_from_gtf(char *file, int basic){
 
         // filter basic tag from tx or exon gtf line
         int line_is_basic = has_key_val(gl, "tag", "basic");
+        int basic_flt = (!line_is_basic) && basic;
         if ((strcmp(gl->feature.s, GENE) != 0) && // not gene
-            (basic)                            && // filter for basic tx
-            (!line_is_basic)){ // line is not basic
+            basic_flt){                           // filter for basic tx
             clear_gtf1(gl);
             continue;
         }

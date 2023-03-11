@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <math.h>
+#include "g_list.h"
 
 /************************************************************************
  * VCF file
@@ -42,6 +43,29 @@ int sub_vcf_samples(bcf_hdr_t **vcf_hdr, const char *samplefn){
         return err_msg(-1, 0, "sub_vcf_samples: failed to subset samples in VCF");
     if (rets > 0)
         return err_msg(-1, 0, "sub_vcf_samples: failed to subset samples in VCF: sample %i not present", rets);
+    return(0);
+}
+
+int bcf_hdr_chr_ix(const bcf_hdr_t *hdr, str_map *cm){
+    if (hdr == NULL || cm == NULL)
+        return err_msg(-1, 0, "bcf_hdr_to_sm: hdr or sm is NULL");
+
+    int ret, i, n_chr = hdr->n[BCF_DT_CTG], found = 0;
+    for (i = 0; i < n_chr; ++i){
+        const char *hdr_chr = bcf_hdr_id2name(hdr, i);
+
+        // check that chr ix matches between hdr and i
+        int tmp_id = bcf_hdr_name2id(hdr, hdr_chr);
+        if (i != tmp_id)
+            return err_msg(-1, 0, "bcf_hdr_to_sm: index %i does not match "
+                    "vcf header rid %i", i, tmp_id);
+
+        ret = add2str_map(cm, hdr_chr, &found);
+        if (ret < 0) return(-1);
+        if (found)
+            return err_msg(-1, 0, "bcf_hdr_to_sm: chromosome %s found more "
+                    "than once", hdr_chr);
+    }
     return(0);
 }
 
@@ -135,10 +159,14 @@ uint8_t base_ref_alt(bcf1_t *b, char base){
     else return((uint8_t)OTHER);
 }
 
-var_t *init_var(){
+/************************************************************************
+ * var_t
+ ***********************************************************************/
+
+var_t *var_alloc(){
     var_t *v = (var_t*)calloc(1, sizeof(var_t));
     if (v == NULL){
-        err_msg(-1, 0, "init_var: %s", strerror(errno));
+        err_msg(-1, 0, "var_alloc: %s", strerror(errno));
         return NULL;
     }
     v->vix = -1;
@@ -155,6 +183,8 @@ g_var_t *init_genomevar(){
         return NULL;
     }
 
+    mv_init(&gv->chr_bins);
+
     gv->chrm_ix = init_str_map();
     gv->chrms = (chr_var_t**)calloc(init_n, sizeof(chr_var_t*));
 
@@ -163,6 +193,8 @@ g_var_t *init_genomevar(){
         return NULL;
     }
     gv->chrms_m = init_n;
+    
+    mv_init(&gv->vix2var);
 
     gv->n_v = 0;
     gv->n_e = 0;
@@ -174,6 +206,39 @@ g_var_t *init_genomevar(){
     }
 
     return gv;
+}
+
+chr_bins_t *chr_bins_alloc(){
+    chr_bins_t *bins = calloc(1, sizeof(chr_bins_t));
+    if (bins == NULL){
+        err_msg(-1, 0, "chr_bins_init: %s", strerror(errno));
+        return NULL;
+    }
+
+    int i;
+    for (i = 0; i < MAX_BIN; ++i){
+        if (vcfr_list_init(&bins->bins[i]) < 0){
+            err_msg(-1, 0, "chr_bins_init: failed to initialize list");
+            return(NULL);
+        }
+    }
+    return(bins);
+}
+
+void chr_bins_free(chr_bins_t *bins){
+    if (bins == NULL) return;
+
+    int i;
+
+    // free the bcf records, then the list
+    for (i = 0; i < MAX_BIN; ++i){
+        ml_node_t(vcfr_list) *rn;
+        for (rn = ml_begin(&bins->bins[i]); rn; rn = ml_node_next(rn)){
+            var_t var = ml_node_val(rn);
+            if (var.b) bcf_destroy(var.b);
+        }
+        vcfr_list_free(&bins->bins[i]);
+    }
 }
 
 chr_var_t *init_chr_var(){
@@ -201,9 +266,10 @@ int gv_add_hdr(g_var_t *gv, bcf_hdr_t *hdr){
 }
 
 int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
-    var_t *tv = init_var();
+    var_t *tv = var_alloc();
     if (tv == NULL) return -1;
     tv->b = bcf_dup(b);
+    tv->vix = gv->n_e;
     bcf_unpack(tv->b, BCF_UN_FLT); // unpack up to and including info field
 
     int bin = get_var_bin(b);
@@ -211,9 +277,22 @@ int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     int rid = tv->b->rid;
     const char *seqname = bcf_hdr_id2name(hdr, rid);
 
-    int chr_ix;
     // add chromosome ID
+    int chr_ix, bs = (int)mv_size(&gv->chr_bins);
     if ( (chr_ix = add2str_map(gv->chrm_ix, (const char*)seqname, &found)) < 0 ) return -1;
+
+    if (chr_ix >= bs || mv_i(&gv->chr_bins, chr_ix) == NULL){
+        chr_bins_t *p = chr_bins_alloc();
+        if (p == NULL)
+            return(-1);
+
+        int ret = mv_insert(cbin_vec, &gv->chr_bins, p, chr_ix);
+        if (ret < 0)
+            return err_msg(-1, 0, "add_var: failed to add chr bin");
+    }
+
+    printf("size=%zu chr_ix=%i\n", mv_size(&gv->chr_bins), chr_ix);
+
     if (found == 0){
         while (gv->chrm_ix->n >= gv->chrms_m){
             gv->chrms_m = (gv->chrms_m)<<1;
@@ -226,6 +305,10 @@ int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     }
 
     // add to bins
+    ml_vcfr_list_t *ll = &mv_i(&gv->chr_bins, chr_ix)->bins[bin];
+    if ( vcfr_list_insert(ll, *tv, 0, 0) < 0 )
+        return err_msg(-1, 0, "add_var: failed to insert to list");
+
     if (gv->chrms[chr_ix]->bins[bin]){
         var_t *gvv = gv->chrms[chr_ix]->bins[bin];
         while (gvv->next){
@@ -239,6 +322,9 @@ int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
     (gv->chrms[chr_ix]->vars_n[bin])++;
 
     // add to ix2var
+    if (mv_push(vcfr_vec, &gv->vix2var, *tv) < 0)
+        return err_msg(-1, 0, "add_var: failed to add var to vix2var");
+
     while (gv->n_e >= gv->n_a){
         gv->n_a <<= 1;
         gv->ix2var = realloc(gv->ix2var, (gv->n_a) * sizeof(var_t));
@@ -246,7 +332,6 @@ int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr){
             return err_msg(-1, 0, "add_var: %s", strerror(errno));
     }
     gv->ix2var[gv->n_e] = tv;
-    tv->vix = gv->n_e;
     ++gv->n_e;
     ++gv->n_v;
 
@@ -259,23 +344,28 @@ g_var_t *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut)
 
     gv->vcf_hdr = vcf_hdr;
 
+    size_t i;
+
     // add chromosomes from header
-    int i, n_chr = vcf_hdr->n[BCF_DT_CTG], found;
-    for (i = 0; i < n_chr; ++i){
-        const char *hdr_chr = bcf_hdr_id2name(vcf_hdr, i);
-        int chr_ix = bcf_hdr_name2id(vcf_hdr, hdr_chr);
+    if (bcf_hdr_chr_ix(vcf_hdr, gv->chrm_ix) < 0) return(NULL);
+    size_t n_chr = (size_t)gv->chrm_ix->n;
 
-        if (chr_ix != i){
-            err_msg(-1, 0, "vcf2gv: chromosome indexes don't match");
+    // create chromosome bin vector
+    if (mv_resize(cbin_vec, &gv->chr_bins, n_chr) < 0) return(NULL);
+
+    size_t cix;
+    for (cix = 0; cix < n_chr; ++cix){
+        chr_bins_t *p = chr_bins_alloc();
+        if (p == NULL)
+            return(NULL);
+
+        int ret = mv_insert(cbin_vec, &gv->chr_bins, p, cix);
+        if (ret < 0){
+            err_msg(-1, 0, "vcf2gv: failed to add chr bin");
             return(NULL);
         }
-
-        if ( add2str_map(gv->chrm_ix, hdr_chr, &found) < 0 ){
-            err_msg(-1, 0, "vcf2gv: failed to add chromosome %s", hdr_chr);
-            return(NULL);
-        }
-
     }
+
     // initialize chromosomes read from header
     if (n_chr > 0)
         gv->chrms = (chr_var_t **)realloc(gv->chrms, n_chr * sizeof(chr_var_t *));
@@ -329,6 +419,9 @@ void destroy_gv(g_var_t *gv){
     }
     free(gv->chrms);
     destroy_str_map(gv->chrm_ix);
+
+    mv_free(&gv->chr_bins);
+    mv_free(&gv->vix2var);
 
     free(gv->ix2var);
 
@@ -547,10 +640,10 @@ float *bcf1_ap_gp(bcf_hdr_t *vcf_hdr, bcf1_t *b, int extra){
             a = a + (s * n_val) + t;
 
             // if end, sample has smaller ploidy, break
-             if ( *a == bcf_float_vector_end ) break;
+             if ( (uint32_t)*a == bcf_float_vector_end ) break;
 
             // if any are missing, set to -1
-            if ( *a == bcf_float_missing ){
+            if ( (uint32_t)*a == bcf_float_missing ){
                 fprintf(stdout, "missing\n");
                 n_miss++;
                 gt = -1.0;
@@ -679,10 +772,11 @@ int region_vars(g_var_t *gv, const char* ref, int32_t beg,
     int i;
     for (i = 0; i < n_bin; ++i){
         uint16_t bin = list[i];
-        var_t *v = gv->chrms[tid]->bins[bin]; 
-        for (; v; v = v->next){
-            // Check if variant overlaps region.
-            bcf1_t *b = v->b;
+        ml_vcfr_list_t *ll = &mv_i(&gv->chr_bins, tid)->bins[bin];
+        ml_node_t(vcfr_list) *vn;
+        for (vn = ml_begin(ll); vn; vn = ml_node_next(vn)){
+            var_t var = ml_node_val(vn);
+            bcf1_t *b = var.b;
             int ovrlp = bp_overlap((int)beg, (int)end, '.', b->pos, b->pos + b->rlen, '.');
             if (ovrlp < 0)
                 return err_msg(-2, 0, "region_vars: failed to get bp_overlap");
@@ -694,7 +788,7 @@ int region_vars(g_var_t *gv, const char* ref, int32_t beg,
             if (cpy == NULL)
                 return err_msg(-2, 0, "region_vars: %s", strerror(errno));
 
-            *cpy = *v;
+            *cpy = var;
             cpy->next = NULL;
             if ( pv == NULL ){
                 pv = cpy;

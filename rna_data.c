@@ -15,8 +15,8 @@
 void rna_read1_init(rna_read1_t *r){
     if (r == NULL) return;
     init_g_region(&r->loc);
-    init_seq_blist(&r->bases);
-    seq_glist_init(&r->genes);
+    base_list_init(&r->bl);
+    gene_list_init(&r->gl);
 }
 
 rna_read1_t *rna_read1_alloc(){
@@ -31,8 +31,8 @@ rna_read1_t *rna_read1_alloc(){
 
 void rna_read1_free(rna_read1_t *r){
     if (r == NULL) return;
-    free_seq_blist(&r->bases);
-    seq_glist_free(&r->genes);
+    base_list_free(&r->bl);
+    gene_list_free(&r->gl);
 }
 
 void rna_read1_dstry(rna_read1_t *r){
@@ -54,25 +54,38 @@ rna_read1_t *rna_read1_cpy(const rna_read1_t *r, int *ret){
 
     cpy->loc = r->loc;
 
-    int cret;
-
-    seq_blist_t *b_cpy = copy_seq_blist(&r->bases, &cret);
-    if (cret < 0){
+    if (base_list_cpy(&cpy->bl, &r->bl) < 0){
         *ret = -1;
+        free(cpy);
         return(NULL);
     }
-    cpy->bases = *b_cpy;
-    free(b_cpy);
 
-    seq_glist_t *g_cpy = seq_glist_cpy(&r->genes, &cret);
-    if (cret < 0){
+    if (gene_list_cpy(&cpy->gl, &r->gl) < 0){
         *ret = -1;
+        free(cpy);
         return(NULL);
     }
-    cpy->genes = *g_cpy;
-    free(g_cpy);
 
     return(cpy);
+}
+
+int rna_read1_cmp(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual){
+    int rc = regioncmp(r1->loc, r2->loc);
+    if (rc != 0) return(rc);
+
+    int bsc = ml_size(&r1->bl) - ml_size(&r2->bl);
+    if (bsc != 0) return(bsc);
+
+    int gsc = ml_size(&r1->gl) - ml_size(&r2->gl);
+    if (gsc != 0) return(gsc);
+
+    int bc = base_list_cmp(r1->bl, r2->bl, cmp_qual);
+    if (bc != 0) return(bc);
+
+    int gc = gene_list_cmp(r1->gl, r2->gl);
+    if (gc != 0) return(gc);
+
+    return(0);
 }
 
 int rna_read1_equal(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual){
@@ -82,49 +95,17 @@ int rna_read1_equal(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual){
     if (regioncmp(r1->loc, r2->loc) != 0)
         return(0);
 
-    if (r1->bases.n != r2->bases.n)
+    if (ml_size(&r1->bl) != ml_size(&r2->bl))
         return(0);
 
-    if (r1->genes.n != r2->genes.n)
+    if (ml_size(&r1->gl) != ml_size(&r2->gl))
         return(0);
 
-    seq_base_t *b1 = r1->bases.head, *b2 = r2->bases.head;
-    while (b1 != NULL && b2 != NULL){
-        g_pos pos1 = b1->pos, pos2 = b2->pos;
-        if (poscmp(pos1, pos2) != 0)
-            return(0);
+    if ( base_list_equal(r1->bl, r2->bl, cmp_qual) != 1 )
+        return(0);
 
-        uint8_t base1 = b1->base, base2 = b2->base;
-        if (base1 != base2)
-            return(0);
-
-        uint8_t qual1 = b1->qual, qual2 = b2->qual;
-        if (cmp_qual != 0 && qual1 != qual2)
-            return(0);
-
-        b1 = b1->next;
-        b2 = b2->next;
-    }
-    if (b1 != NULL || b2 != NULL)
-        return err_msg(-1, 0, "rna_read1_equal: equal n but different num. of "
-                " bases, there is a bug");
-
-    seq_gene_t *g1 = r1->genes.head, *g2 = r2->genes.head;
-    while (g1 != NULL && g2 != NULL){
-        int32_t id1 = g1->gene_id, id2 = g2->gene_id;
-        if (id1 != id2)
-            return(0);
-
-        uint8_t s1 = g1->splice, s2 = g2->splice;
-        if (s1 != s2)
-            return(0);
-
-        g1 = g1->next;
-        g2 = g2->next;
-    }
-    if (g1 != NULL || g2 != NULL)
-        return err_msg(-1, 0, "rna_read1_equal: equal n but different num. of "
-                " genes, there is a bug");
+    if ( gene_list_equal(r1->gl, r2->gl) != 1 )
+        return(0);
 
     return(1);
 }
@@ -133,16 +114,16 @@ int rna_read1_add_gene(rna_read1_t *r, const seq_gene_t *gene){
     if (r == NULL || gene == NULL)
         return err_msg(-1, 0, "rna_read1_add_gene: argument is null");
 
-    if (seq_glist_add_gene(&r->genes, gene) < 0) return(-1);
+    if ( gene_list_insert(&r->gl, *gene, 0, 0) < 0 ) return(-1);
 
     return(0);
 }
 
-int rna_read1_add_base(rna_read1_t *r, const seq_base_t *base){
-    if (r == NULL || base == NULL)
-        return err_msg(-1, 0, "rna_read1_add_base: argument is nul");
+int rna_read1_add_base(rna_read1_t *r, seq_base_t base){
+    if (r == NULL)
+        return err_msg(-1, 0, "rna_read1_add_base: argument is null");
 
-    if (blist_add_base(&r->bases, base, 1, 1) < 0) return(-1);
+    if (base_list_insert(&r->bl, base, 1, 1) < 0) return(-1);
 
     return(0);
 }
@@ -151,7 +132,7 @@ int rna_read1_match_qual(rna_read1_t *r, const rna_read1_t *cmp){
     if (r == NULL || cmp == NULL)
         return err_msg(-1, 0, "rna_read1_match_qual: argument is null");
 
-    if (seq_blist_match_qual(&r->bases, &cmp->bases) < 0)
+    if (base_list_match_qual(&r->bl, &cmp->bl) < 0)
         return(-1);
 
     return(0);
@@ -209,13 +190,14 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     if (rd == NULL || r == NULL)
         return err_msg(-1, 0, "rna_dups_add_read: arguments are null");
 
+    if (rd->dups == NULL || rd->rds_per_dup == NULL)
+        return err_msg(-1, 0, "rna_dups_add_read: rd->dups or rds_per_dup is null");
+
     size_t i;
     int ret;
     for (i = 0; i < rd->size; ++i){
-        int rcmp = rna_read1_equal(&rd->dups[i], r, 0);
-        if (rcmp < 0)
-            return(-1);
-        if (rcmp == 1){
+        int rcmp = rna_read1_cmp(&rd->dups[i], r, 0);
+        if (rcmp == 0){
             if (rna_read1_match_qual(&rd->dups[i], r) < 0)
                 return(-1);
             ++rd->rds_per_dup[i];
@@ -235,6 +217,8 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     if (ret < 0)
         return(-1);
 
+    assert(tmp->loc.rid >= 0);
+
     rd->dups[rd->size] = *tmp;
     rd->rds_per_dup[rd->size] = 1;
     free(tmp);
@@ -252,10 +236,9 @@ int rna_mol_init(rna_mol_t *rmol){
     rmol->dups = rna_dups_alloc();
     if (rmol->dups == NULL)
         return(-1);
-    init_g_region(&rmol->loc);
-    init_seq_blist(&rmol->bases);
-    seq_glist_init(&rmol->genes);
-    init_vacs(&rmol->vacs);
+    base_list_init(&rmol->bl);
+    vac_list_init(&rmol->vl);
+    gene_list_init(&rmol->gl);
     rmol->n_reads = 0;
     rmol->_dedup = 0;
     return(0);
@@ -277,9 +260,9 @@ void rna_mol_free(rna_mol_t *rmol){
 
     rna_dups_dstry(rmol->dups);
     rmol->dups = NULL;
-    free_seq_blist(&rmol->bases);
-    seq_glist_free(&rmol->genes);
-    free_vacs(&rmol->vacs);
+    base_list_free(&rmol->bl);
+    vac_list_free(&rmol->vl);
+    gene_list_free(&rmol->gl);
     rmol->n_reads = 0;
     rmol->_dedup = 0;
 }
@@ -304,34 +287,38 @@ rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret){
     // copy dups
     cpy->dups = rna_dups_alloc();
     if (cpy->dups == NULL){
+        rna_mol_dstry(cpy);
         *ret = err_msg(-1, 0, "rna_mol_cpy: %s", strerror(errno));
         return(NULL);
     }
-    int i;
-    for (i = 0; i < m->dups->size; ++i){
-        if (rna_dups_add_read(cpy->dups, m->dups->dups + i) < 0)
+    size_t ix;
+    for (ix = 0; ix < m->dups->size; ++ix){
+        if (rna_dups_add_read(cpy->dups, m->dups->dups + ix) < 0){
+            *ret = -1;
+            rna_mol_dstry(cpy);
             return(NULL);
+        }
     }
 
     cpy->loc = m->loc;
 
-    int cret;
-
-    seq_blist_t *b_cpy = copy_seq_blist(&m->bases, &cret);
-    if (cret < 0){
+    if (base_list_cpy(&cpy->bl, &m->bl) < 0){
         *ret = -1;
+        rna_mol_dstry(cpy);
         return(NULL);
     }
-    cpy->bases = *b_cpy;
-    free(b_cpy);
 
-    seq_glist_t *g_cpy = seq_glist_cpy(&m->genes, &cret);
-    if (cret < 0){
+    if (vac_list_cpy(&cpy->vl, &m->vl) < 0){
         *ret = -1;
+        rna_mol_dstry(cpy);
         return(NULL);
     }
-    cpy->genes = *g_cpy;
-    free(g_cpy);
+
+    if (gene_list_cpy(&cpy->gl, &m->gl) < 0){
+        *ret = -1;
+        rna_mol_dstry(cpy);
+        return(NULL);
+    }
 
     cpy->n_reads = m->n_reads;
 
@@ -366,9 +353,7 @@ int rna_mol_dedup(rna_mol_t *mol){
     size_t i;
     for (i = 0; i < dups->size; ++i){
         // check for bugs
-        if (dups->rds_per_dup[i] == 0)
-            return err_msg(-1, 0, "rna_mol_dedup: a dup read has 0 "
-                    "supporting reads, there is a bug");
+        assert(dups->rds_per_dup[i] > 0);
 
         if (dups->rds_per_dup[i] == max_c){
             ++rd_w_max;
@@ -380,24 +365,18 @@ int rna_mol_dedup(rna_mol_t *mol){
     }
 
     // check for bugs
-    if (max_c == 0 || rd_w_max == 0)
-        return err_msg(-1, 0, "atac_rna_dedup: no best duplicate found "
-                ", there is a bug");
+    assert(max_c > 0 && rd_w_max > 0);
 
     // initialize molecule
     rna_read1_t rb = dups->dups[ix_best];
 
-    int cret;
+    mol->loc = rb.loc;
 
-    seq_blist_t *b_cpy = copy_seq_blist(&rb.bases, &cret);
-    if (cret < 0) return(-1);
-    mol->bases = *b_cpy;
-    free(b_cpy);
+    if ( base_list_cpy(&mol->bl, &rb.bl) < 0 )
+        return err_msg(-1, 0, "rna_mol_dedup: failed to copy base list");
 
-    seq_glist_t *g_cpy = seq_glist_cpy(&rb.genes, &cret);
-    if (cret < 0) return(-1);
-    mol->genes = *g_cpy;
-    free(g_cpy);
+    if ( gene_list_cpy(&mol->gl, &rb.gl) < 0 )
+        return err_msg(-1, 0, "rna_mol_dedup: failed to copy gene list");
 
     mol->n_reads = dups->rds_per_dup[ix_best];
 
@@ -410,17 +389,27 @@ int rna_mol_dedup(rna_mol_t *mol){
     return(0);
 }
 
-int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, contig_map *cmap, 
+int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual){
     if (m == NULL || gv == NULL || cmap == NULL){
         return err_msg(-1, 0, "rna_mol_var_call: argument is null");
     }
 
-    int ret = seq_blist_call_var(&m->bases, &m->vacs, gv, cmap, 
-            min_qual);
+    int ret = vac_list_call_var(&m->bl, &m->vl, gv, cmap, min_qual);
+
+    /*
+    if (1 && ml_size(&m->vl) > 0){
+        printf("var list::\n");
+        ml_node_t(vac_list) *nv;
+        for (nv = ml_begin(&m->vl); nv; nv = ml_node_next(nv)){
+            seq_vac_t vi = ml_node_val(nv);
+            printf("\tvix=%i,allele=%u,qual=%u\n", vi.vix, vi.allele, vi.qual);
+        }
+    }
+    */
 
     // free the bases
-    free_seq_blist(&m->bases);
+    base_list_free(&m->bl);
 
     return(ret);
 }
@@ -519,7 +508,7 @@ void print_bam_rna(bam_rna_t *b, gene_anno_t *anno, bcf_hdr_t *vcf_hdr,
             }
 
             // print variant calls
-            vac_t *va = f_i->vacs.head;
+            seq_vac_t *va = f_i->vacs.head;
             size_t va_n = f_i->vacs.n;
             fprintf(stdout, "\t%zu variants\n", va_n);
             while (va != NULL){

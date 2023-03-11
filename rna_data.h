@@ -24,8 +24,8 @@
  */
 typedef struct rna_read1_t {
     g_region loc;
-    seq_blist_t bases;
-    seq_glist_t genes;
+    ml_t(base_list) bl;
+    ml_t(gene_list) gl;
 } rna_read1_t;
 
 void rna_read1_init(rna_read1_t *r);
@@ -62,6 +62,7 @@ rna_read1_t *rna_read1_cpy(const rna_read1_t *r, int *ret);
  *
  * @return 1 if equal, 0 if not equal, -1 on error.
  */
+int rna_read1_cmp(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual);
 int rna_read1_equal(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual);
 
 /* Add gene to rna_read1_t object.
@@ -71,7 +72,7 @@ int rna_read1_equal(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual);
  * @return 0 on success, -1 on error.
  */
 int rna_read1_add_gene(rna_read1_t *r, const seq_gene_t *gene);
-int rna_read1_add_base(rna_read1_t *r, const seq_base_t *base);
+int rna_read1_add_base(rna_read1_t *r, seq_base_t base);
 
 /* Set highest base quality in an rna read
  *
@@ -121,9 +122,9 @@ KHASH_INIT(khrdn, char *, rna_dups_t *, 1, kh_str_hash_func, kh_str_hash_equal);
 typedef struct rna_mol_t {
     rna_dups_t *dups;
     g_region loc;
-    seq_blist_t bases;
-    seq_glist_t genes;
-    vacs_t vacs;
+    ml_t(base_list) bl;
+    ml_t(vac_list) vl;
+    ml_t(gene_list) gl;
     size_t n_reads;
     uint8_t _dedup;
 } rna_mol_t;
@@ -147,7 +148,7 @@ int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r);
  */
 int rna_mol_dedup(rna_mol_t *mol);
 
-int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, contig_map *cmap, 
+int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual);
 
 // store reads by name

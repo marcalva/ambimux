@@ -17,14 +17,20 @@ typedef struct bc_stats_t {
     uint32_t atac_counts;
     uint32_t rna_counts;
 
+    uint32_t n_atac_vars;
+    uint32_t n_rna_vars;
+
     uint32_t n_gene;
-    uint32_t n_var;
     uint32_t n_peak;
 
     float frip;
 
+    float rna_mt;
+    float atac_mt;
+
     khash_t(kh_cnt) *genes;
-    khash_t(kh_cnt) *vars;
+    khash_t(kh_cnt) *atac_vars;
+    khash_t(kh_cnt) *rna_vars;
     khash_t(kh_cnt) *peaks;
 } bc_stats_t;
 

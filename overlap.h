@@ -12,6 +12,7 @@
 #include "gtf_anno.h"
 #include "variants.h"
 #include "counts.h"
+#include "g_list.h"
 
 /* Overlap a bam1_t read with features given gene_anno_t Find the features that
  * the read fully intersects, i.e. is fully contained.  For each feature, give
@@ -21,10 +22,11 @@
  * The number of elements in the array are stored in @p n_feat, while the
  * allocated size of the array is stored in @p m_feat.
  *
+ * @param gl pointer to gene list, must be non-null and empty.
  * @return Number of genes overlapping, or -1 on error.
  */
 int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a, 
-        seq_glist_t **gl);
+        ml_t(gene_list) *gl);
 
 /* Calculate whether a read is spliced, unspliced, or ambiguous.
  * 
@@ -58,8 +60,11 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
 
 /* Get sequenced bases at overlapping variant sites in alignment.
  *
+ * @param bl pointer to initialized base list object of type ml_t(base_list). 
+ *  Must be empty. If NULL, return an error.
+ *  @return -1 on error, or the number of bases in @p bl.
  */
-int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, seq_blist_t **bl);
+int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(base_list) *bl);
 
 /* Return the number of bases that overlap between [a1,a2) and [b1,b2) features. 
  * a1 must be less than a2, and b1 must be less than b2.

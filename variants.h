@@ -13,6 +13,8 @@
 #include "htslib/vcf.h"
 #include "str_util.h"
 #include "bins.h"
+#include "g_list.h"
+#include "kvec.h"
 
 /* 
 #define REF 0
@@ -32,6 +34,18 @@ int load_vcf(const char *vcffn, const char *region, int region_set,
 
 int sub_vcf_samples(bcf_hdr_t **vcf_hdr, const char *samplefn);
 
+/* Create a contig map from a bcf header.
+ *
+ * Stores contigs from bcf hdr in a contig map. The resulting indexes 
+ * match the rids of the bcf header.
+ *
+ * @param hdr Pointer to bcf_hdr_t object.
+ * @param cm Pointer to cm object.
+ *
+ * @return 0 on success, -1 on error.
+ */
+int bcf_hdr_chr_ix(const bcf_hdr_t *hdr, str_map *cm);
+
 /************************************************************************
  * var_t
  ***********************************************************************/
@@ -42,8 +56,33 @@ typedef struct var_t {
     struct var_t *next;
 } var_t;
 
+/* var_t vector type
+ * mv_t(vcfr_vec)
+ */
+mv_declare(vcfr_vec, var_t);
+
+/* var_t list type
+ * ml_t(vcfr_list)
+ */
+#define var_t_cmp(p, q) ( ((q).vix < (p).vix) - ((p).vix < (q).vix) )
+ml_declare(vcfr_list, var_t, var_t_cmp);
+
+#define vcfr_list_init(ll) ml_init(vcfr_list, ll)
+#define vcfr_list_free(ll) ml_free(vcfr_list, ll)
+#define vcfr_list_insert(ll, vcfr, skip_dup, dup_ok) \
+    ml_insert(vcfr_list, ll, vcfr, skip_dup, dup_ok)
+
 // KHASH_INIT(var, var_id_t*, var_t*, 1, _var_id_t_hash_func, _var_id_t_hash_equal);
 KHASH_INIT(var, char*, var_t*, 1, kh_str_hash_func, kh_str_hash_equal);
+
+typedef struct chr_bins_t {
+    ml_t(vcfr_list) bins[MAX_BIN];
+} chr_bins_t;
+
+/* chr_bins_t vector type
+ * mv_t(cbin_vec)
+ */
+mv_declare(cbin_vec, chr_bins_t *);
 
 typedef struct chr_var_t {
     var_t *bins[MAX_BIN];
@@ -51,9 +90,11 @@ typedef struct chr_var_t {
 } chr_var_t;
 
 typedef struct {
-    str_map *chrm_ix; // chromosome index
+    str_map *chrm_ix; // chromosome  
+    mv_t(cbin_vec) chr_bins;
     chr_var_t **chrms; // array to array of chr_var_t
     int chrms_m; // max number of elements
+    mv_t(vcfr_vec) vix2var; // variant index to var_t object
     var_t **ix2var; // variant index to var_t object
     int32_t n_v, n_e, n_a; // num. variants, num. elements, num. allocated
     bcf_hdr_t *vcf_hdr;
@@ -93,9 +134,11 @@ int get_var_len(bcf1_t *b);
 
 int get_var_bin(bcf1_t *b);
 
-var_t *init_var();
+var_t *var_alloc();
 
 g_var_t *init_genomevar();
+
+chr_bins_t *chr_bins_alloc();
 
 /* initialize chr_var_t object
  * return NULL if memory wasn't allocated

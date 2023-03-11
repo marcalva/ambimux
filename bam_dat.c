@@ -1,5 +1,7 @@
 
 #include "bam_dat.h"
+#include "sam_read.h"
+#include "counts.h"
 
 bc_data_t *bc_data_init(){
     bc_data_t *bcdat = calloc(1, sizeof(bc_data_t));
@@ -11,6 +13,20 @@ bc_data_t *bc_data_init(){
     bcdat->atac_pairs = kh_init(khap);
     bcdat->atac_frags = kh_init(khaf);
     bcdat->bc_stats = NULL;
+
+    if (bcdat->rna_mols == NULL || 
+        bcdat->atac_pairs == NULL || 
+        bcdat->atac_frags == NULL){
+        err_msg(-1, 0, "bc_data_init: failed to initialize hash table");
+        return(NULL);
+    }
+
+    int err;
+    if ((err = pthread_mutex_init(&bcdat->bc_lock, NULL)) != 0){
+        err_msg(-1, 0, "bc_data_init: failed to initialize mutex %i", err);
+        return(NULL);
+    }
+
     return(bcdat);
 }
 
@@ -47,6 +63,8 @@ void bc_data_dstry(bc_data_t *bcdat){
     }
     bc_stats_dstry(bcdat->bc_stats);
 
+    pthread_mutex_destroy(&bcdat->bc_lock);
+
     free(bcdat);
 }
 
@@ -68,13 +86,13 @@ void bc_data_free_atac_pairs(bc_data_t *bcdat){
  * RNA
  ******************************************************************************/
 
-int bc_data_add_rna_read(bc_data_t *bcdat, const rna_read1_t *r, const char *name){
+int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, const char *name){
     // check input
     if (bcdat == NULL || r == NULL || name == NULL)
-        return err_msg(-1, 0, "bc_data_add_rna_read: argument is null");
+        return err_msg(-1, 0, "bc_data_rna_add_read: argument is null");
 
     if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_add_rna_read: bc 'rna_mols' is null");
+        return err_msg(-1, 0, "bc_data_rna_add_read: bdat->rna_mols is null");
 
     khash_t(khrmn) *mols = bcdat->rna_mols;
     khint_t k = kh_get(khrmn, mols, (char *)name); // add read by name (UMI barcode)
@@ -85,11 +103,11 @@ int bc_data_add_rna_read(bc_data_t *bcdat, const rna_read1_t *r, const char *nam
         // add a strdup copy of UMI name to hash table key
         char *name_cpy = strdup(name);
         if (name_cpy == NULL)
-            return err_msg(-1 , 0, "bc_data_add_rna_read: %s", strerror(errno));
+            return err_msg(-1 , 0, "bc_data_rna_add_read: %s", strerror(errno));
 
         k = kh_put(khrmn, mols, name_cpy, &kret);
         if (kret < 0)
-            return err_msg(-1, 0, "bc_data_add_rna_read: failed to add 'name' "
+            return err_msg(-1, 0, "bc_data_rna_add_read: failed to add 'name' "
                     "to mols hash table");
 
         if ( (kh_val(mols, k) = rna_mol_alloc()) == NULL )
@@ -104,10 +122,10 @@ int bc_data_add_rna_read(bc_data_t *bcdat, const rna_read1_t *r, const char *nam
 
 int bc_data_rna_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
-        return err_msg(-1, 0, "bc_data_rna_dedup: 'bcdat' is null");
+        return err_msg(-1, 0, "bc_data_rna_dedup: bcdat is null");
 
     if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_dedup: bc 'rna_mols' is null");
+        return err_msg(-1, 0, "bc_data_rna_dedup: bcdat->rna_mols is null");
 
     khash_t(khrmn) *mols = bcdat->rna_mols;
 
@@ -116,8 +134,7 @@ int bc_data_rna_dedup(bc_data_t *bcdat){
         if (!kh_exist(mols, kd)) continue;
 
         rna_mol_t *mol = kh_val(mols, kd);
-        if (mol == NULL)
-            return err_msg(-1, 0, "bc_data_rna_dedup: molecule is null");
+        assert(mol != NULL);
 
         // get best RNA molecule by majority
         if (rna_mol_dedup(mol) < 0) return(-1);
@@ -125,13 +142,13 @@ int bc_data_rna_dedup(bc_data_t *bcdat){
     return(0);
 }
 
-int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap, 
+int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual){
     if (bcdat == NULL || gv == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bc_data_rna_var_call: arguments are null");
+        return err_msg(-1, 0, "bc_data_rna_var_call: argument is null");
 
     if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_var_call: bc 'rna_mols' is null");
+        return err_msg(-1, 0, "bc_data_rna_var_call: bcdat->rna_mols is null");
 
     khash_t(khrmn) *mols = bcdat->rna_mols;
     int n_add = 0;
@@ -140,8 +157,7 @@ int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap,
         if (!kh_exist(mols, km)) continue;
 
         rna_mol_t *mol = kh_val(mols, km);
-        if (mol == NULL)
-            return err_msg(-1, 0, "bc_data_rna_var_call: molecule is null");
+        assert(mol != NULL);
 
         int a = rna_mol_var_call(mol, gv, cmap, min_qual);
         if (a < 0)
@@ -155,36 +171,35 @@ int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap,
  * ATAC
  ******************************************************************************/
 
-int bc_data_add_atac_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname){
+int bc_data_atac_add_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname){
     if (bcdat == NULL || ar == NULL)
-        return err_msg(-1, 0, "bc_data_add_atac_read: 'bcdat' or 'ar' is null");
+        return err_msg(-1, 0, "bc_data_atac_add_read: argument is null");
 
     khash_t(khap) *pairs = bcdat->atac_pairs;
     khash_t(khaf) *frags = bcdat->atac_frags;
 
     if (pairs == NULL || frags == NULL)
-        return err_msg(-1, 0, "bc_data_add_atac_read: 'pairs' or 'frags' "
-                "are null");
+        return err_msg(-1, 0, "bc_data_atac_add_read: 'pairs' or 'frags' "
+                "is null");
 
     int ret;
     khint_t kp;
-    atac_rd_pair_t *rp;
     kp = kh_get(khap, pairs, qname);
 
     // if read pair isn't present, allocate and add read pair t
     if (kp == kh_end(pairs)){
         kp = kh_put(khap, pairs, qname, &ret);
         if (ret < 0)
-            return err_msg(-1, 0, "bc_data_add_atac_read: failed to add "
+            return err_msg(-1, 0, "bc_data_atac_add_read: failed to add "
                     "'qname' to hash");
         
         if ( (kh_val(pairs, kp) = atac_rd_pair_init()) == NULL ) return(-1);
     }
-    rp = kh_val(pairs, kp);
+    atac_rd_pair_t *rp = kh_val(pairs, kp);
 
     // add read (copy) to read pair
     if ( atac_rd_pair_add_read(rp, ar) < 0 )
-        return err_msg(-1, 0, "bc_data_add_atac_read: failed to add read to pair");
+        return err_msg(-1, 0, "bc_data_atac_add_read: failed to add read to pair");
 
     // If a read pair was formed, add to duplicates and destroy read.
     if (rp->s == 2){
@@ -192,19 +207,16 @@ int bc_data_add_atac_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
             return(-1);
         atac_rd_pair_dstry(rp);
         kh_del(khap, pairs, kp);
-        if (kh_size(pairs) > 4 && 
-            (kh_n_buckets(pairs) > (10 * kh_size(pairs))) )
-            kh_resize(khap, pairs, kh_size(pairs));
     }
     return(0);
 }
 
-int bc_data_dedup_atac(bc_data_t *bcdat){
+int bc_data_atac_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
-        return err_msg(-1, 0, "bc_data_dedup_atac: 'bcdat' is null");
+        return err_msg(-1, 0, "bc_data_atac_dedup: bcdat is null");
 
     if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_dedup_atac: 'atac_frags' is null");
+        return err_msg(-1, 0, "bc_data_atac_dedup: bcdat->atac_frags is null");
 
     khint_t kf;
     khash_t(khaf) *frags = bcdat->atac_frags;
@@ -221,8 +233,7 @@ int bc_data_dedup_atac(bc_data_t *bcdat){
         }
 
         atac_frag_t *frag = kh_val(frags, kf);
-        if (frag == NULL)
-            return err_msg(-1, 0, "bc_data_dedup_atac: frag is NULL");
+        assert(frag != NULL);
 
         if (atac_frag_dedup(frag) < 0)
             return(-1);
@@ -230,13 +241,13 @@ int bc_data_dedup_atac(bc_data_t *bcdat){
     return 0;
 }
 
-int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap, 
+int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual){
     if (bcdat == NULL || gv == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bc_data_atac_var_call: bcdat is null");
+        return err_msg(-1, 0, "bc_data_atac_var_call: argument is null");
 
     if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_var_call: 'atac_frags' is null");
+        return err_msg(-1, 0, "bc_data_atac_var_call: bcdat->atac_frags is null");
 
     khash_t(khaf) *frags = bcdat->atac_frags;
     int n_add = 0;
@@ -249,19 +260,23 @@ int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, contig_map *cmap,
             return err_msg(-1, 0, "bc_data_atac_var_call: frag is NULL");
 
         int a = atac_frag_var_call(frag, gv, cmap, min_qual);
-        if (a < 0)
+        if (a < 0){
+            g_reg_pair greg = kh_key(frags, kf);
+            print_g_region(stderr, greg.r1);
+            print_g_region(stderr, greg.r2);
             return(-1);
+        }
         n_add += a;
     }
     return n_add;
 }
 
-int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, contig_map *cmap){
+int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, str_map *cmap){
     if (bcdat == NULL || pks == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bc_data_atac_peak_call: arguments are null");
+        return err_msg(-1, 0, "bc_data_atac_peak_call: argument is null");
 
     if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_peak_call: 'atac_frags' is null");
+        return err_msg(-1, 0, "bc_data_atac_peak_call: bcdat->atac_frags is null");
 
     khash_t(khaf) *frags = bcdat->atac_frags;
     int n_add = 0;
@@ -270,8 +285,7 @@ int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, contig_map *cmap){
         if (!kh_exist(frags, kf)) continue;
 
         atac_frag_t *frag = kh_val(frags, kf);
-        if (frag == NULL)
-            return err_msg(-1, 0, "bc_data_atac_peak_call: frag is NULL");
+        assert(frag != NULL);
         g_reg_pair reg = kh_key(frags, kf);
 
         int np;
@@ -302,6 +316,12 @@ bam_data_t *bam_data_init(){
     if (b->bcs == NULL)
         return(NULL);
 
+    int err;
+    if ((err = pthread_mutex_init(&b->bam_lock, NULL)) != 0){
+        err_msg(-1, 0, "bam_data_init: failed to initialize mutex errno=%i", err);
+        return(NULL);
+    }
+
     return(b);
 }
 
@@ -324,12 +344,14 @@ void bam_data_dstry(bam_data_t *bam_data){
 
     destroy_str_map(bam_data->bcs);
 
+    pthread_mutex_destroy(&bam_data->bam_lock);
+
     free(bam_data);
 }
 
 int bam_data_atac_free_pairs(bam_data_t *bam_data){
     if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_free_pairs: 'bam_data' is null");
+        return err_msg(-1, 0, "bam_data_atac_free_pairs: bam_data is null");
     if (bam_data->bc_data == NULL)
         return(0);
     khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
@@ -342,192 +364,12 @@ int bam_data_atac_free_pairs(bam_data_t *bam_data){
     return(0);
 }
 
-int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc, 
-        const rna_read1_t *r, const char *name){
-    if (bam_data == NULL || bc == NULL || r == NULL || name == NULL)
-        return err_msg(-1, 0, "bam_data_rna_add_read: arguments are NULL");
-
-    bam_data->has_rna = 1;
-
-    int ret;
-    khint_t kbc;
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    kbc = kh_get(kh_bc_dat, bcs_hash, (char *)bc);
-    // if barcode isn't present, add barcode and bc_data
-    if (kbc == kh_end(bcs_hash)){
-        char *bc_cpy = strdup(bc);
-        if (bc_cpy == NULL)
-            return err_msg(-1, 0, "bam_data_rna_add_read: %s", strerror(errno));
-
-        kbc = kh_put(kh_bc_dat, bcs_hash, bc_cpy, &ret);
-        if (ret < 0)
-            return err_msg(-1, 0, "bam_data_rna_add_read: failed to add read to bcs");
-
-        if ( (kh_val(bcs_hash, kbc) = bc_data_init()) == NULL )
-            return(-1);
-    }
-    bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
-    if (bc_data_add_rna_read(bc_dat, r, name) < 0)
-        return err_msg(-1, 0, "bam_data_rna_add_read: failed to add read to bam");
-    return(0);
-}
-
-int bam_data_rna_dedup(bam_data_t *bam_data){
-    if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_rna_dedup: 'bam_data' is null");
-
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_rna_dedup: 'bc_data' is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t k;
-    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
-        if (!kh_exist(bcs_hash, k)) continue;
-
-        bc_data_t *bc_dat = kh_val(bcs_hash, k);
-        if (bc_dat == NULL)
-            return err_msg(-1, 0, "bam_data_rna_dedup: a 'bc_dat' is null");
-
-        if (bc_data_rna_dedup(bc_dat) < 0)
-            return -1;
-    }
-    return 0;
-}
-
-int bam_data_rna_var_call(bam_data_t *bam_data, g_var_t *gv, 
-        contig_map *cmap, uint8_t min_qual){
-    if (bam_data == NULL || gv == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bam_data_rna_var_call: argument is null");
-
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_rna_var_call: 'bc_data' is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t k;
-    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
-        if (!kh_exist(bcs_hash, k)) continue;
-
-        bc_data_t *bc_dat = kh_val(bcs_hash, k);
-        if (bc_dat == NULL)
-            return err_msg(-1, 0, "bam_data_rna_var_call: barcode is null");
-
-        if (bc_data_rna_var_call(bc_dat, gv, cmap, min_qual) < 0)
-            return -1;
-    }
-    return 0;
-}
-
-int bam_data_atac_add_read(bam_data_t *bam_data, const char *bc, 
-        const atac_read1_t *r, qshort qname){
-    if (bam_data == NULL || bc == NULL || r == NULL)
-        return err_msg(-1, 0, "bam_data_atac_add_read: argument is null");
-
-    bam_data->has_atac = 1;
-
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_add_read: 'bc_data' is null");
-
-    int ret;
-    khint_t kbc;
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    kbc = kh_get(kh_bc_dat, bcs_hash, (char *)bc);
-    // if barcode isn't present, add barcode and bc_data
-    if (kbc == kh_end(bcs_hash)){
-        char *bc_cpy = strdup(bc);
-        if (bc_cpy == NULL)
-            return err_msg(-1, 0, "bam_data_atac_add_read: %s", strerror(errno));
-
-        kbc = kh_put(kh_bc_dat, bcs_hash, bc_cpy, &ret);
-        if (ret < 0)
-            return err_msg(-1, 0, "bam_data_atac_add_read: failed to add read to bcs");
-
-        if ( (kh_val(bcs_hash, kbc) = bc_data_init()) == NULL )
-            return(-1);
-    }
-
-    bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
-    if (bc_data_add_atac_read(bc_dat, r, qname) < 0)
-        return err_msg(-1, 0, "bam_data_atac_add_read: failed to add read to bam");
-    return(0);
-}
-
-int bam_data_atac_dedup(bam_data_t *bam_data){
-    if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_dedup: 'bam_data' is null");
-
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_dedup: 'bc_data' is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t kbc;
-    for (kbc = kh_begin(bcs_hash); kbc != kh_end(bcs_hash); ++kbc){
-        if (!kh_exist(bcs_hash, kbc)) continue;
-        bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
-        if (bc_dat == NULL)
-            return err_msg(-1, 0, "bam_data_atac_dedup: barcode is null");
-
-        if (bc_data_dedup_atac(bc_dat) < 0)
-            return -1;
-    }
-    return(0);
-}
-
-int bam_data_atac_var_call(bam_data_t *bam_data, g_var_t *gv, 
-        contig_map *cmap, uint8_t min_qual){
-    if (bam_data == NULL || gv == NULL || cmap == NULL)
-        return err_msg(-1, 0, "bam_data_atac_var_call: argument is null");
-
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_var_call: 'bc_data' is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t k;
-    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
-        if (!kh_exist(bcs_hash, k)) continue;
-
-        bc_data_t *bc_dat = kh_val(bcs_hash, k);
-        if (bc_dat == NULL)
-            return err_msg(-1, 0, "bam_data_atac_var_call: barcode is null");
-
-        if (bc_data_atac_var_call(bc_dat, gv, cmap, min_qual) < 0)
-            return -1;
-    }
-    return 0;
-}
-
-int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks, 
-        contig_map *cmap){
-    if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_peak_call: 'bam_data' is null");
-    if (pks == NULL)
-        return err_msg(-1, 0, "bam_data_atac_peak_call: 'gv' is null");
-    if (cmap == NULL)
-        return err_msg(-1, 0, "bam_data_atac_peak_call: 'cmap' is null");
-    if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_atac_peak_call: 'bc_data' is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t k;
-    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
-        if (!kh_exist(bcs_hash, k)) continue;
-
-        bc_data_t *bc_dat = kh_val(bcs_hash, k);
-        if (bc_dat == NULL)
-            return err_msg(-1, 0, "bam_data_atac_peak_call: barcode is null");
-
-        if (bc_data_atac_peak_call(bc_dat, pks, cmap) < 0)
-            return -1;
-    }
-
-    return 0;
-}
-
 int bam_data_fill_bcs(bam_data_t *bam_data, str_map *bcs){
     if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_fill_bcs: arguments are NULL");
+        return err_msg(-1, 0, "bam_data_fill_bcs: argument is NULL");
 
     if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_fill_bcs: 'bc_data' is null");
+        return err_msg(-1, 0, "bam_data_fill_bcs: bam_data->bc_data is null");
 
     if (bam_data->bcs){
         destroy_str_map(bam_data->bcs);
@@ -536,6 +378,7 @@ int bam_data_fill_bcs(bam_data_t *bam_data, str_map *bcs){
 
     // fill in barcodes from bcs argument if present
     if (bcs != NULL){
+        destroy_str_map(bam_data->bcs);
         bam_data->bcs = str_map_copy(bcs);
         return(0);
     }
@@ -555,10 +398,339 @@ int bam_data_fill_bcs(bam_data_t *bam_data, str_map *bcs){
 }
 
 /*******************************************************************************
+ * BAM RNA
+ ******************************************************************************/
+
+int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc, 
+        const rna_read1_t *r, const char *name){
+    if (bam_data == NULL || bc == NULL || r == NULL || name == NULL)
+        return err_msg(-1, 0, "bam_data_rna_add_read: argument is null");
+
+    bam_data->has_rna = 1;
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_rna_dedup: bam_data->bc_data is null");
+
+    if (pthread_mutex_lock(&bam_data->bam_lock) != 0)
+        return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex lock");
+
+    int ret;
+    khint_t kbc;
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    kbc = kh_get(kh_bc_dat, bcs_hash, (char *)bc);
+    // if barcode isn't present, add barcode and bc_data
+    if (kbc == kh_end(bcs_hash)){
+        char *bc_cpy = strdup(bc);
+        if (bc_cpy == NULL){
+            pthread_mutex_unlock(&bam_data->bam_lock);
+            return err_msg(-1, 0, "bam_data_rna_add_read: %s", strerror(errno));
+        }
+
+        kbc = kh_put(kh_bc_dat, bcs_hash, bc_cpy, &ret);
+        if (ret < 0){
+            pthread_mutex_unlock(&bam_data->bam_lock);
+            return err_msg(-1, 0, "bam_data_rna_add_read: failed to add read to bcs");
+        }
+
+        if ( (kh_val(bcs_hash, kbc) = bc_data_init()) == NULL ){
+            pthread_mutex_unlock(&bam_data->bam_lock);
+            return(-1);
+        }
+    }
+    bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
+    if (pthread_mutex_unlock(&bam_data->bam_lock) != 0)
+        return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex unlock");
+
+    if (pthread_mutex_lock(&bc_dat->bc_lock) != 0)
+        return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex lock");
+    ret = bc_data_rna_add_read(bc_dat, r, name);
+    if (pthread_mutex_unlock(&bc_dat->bc_lock) != 0)
+        return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex unlock");
+    if (ret < 0)
+        return err_msg(-1, 0, "bam_data_rna_add_read: failed to add read to bam");
+    return(0);
+}
+
+int bam_data_rna_dedup(bam_data_t *bam_data){
+    if (bam_data == NULL)
+        return err_msg(-1, 0, "bam_data_rna_dedup: bam_data is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_rna_dedup: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t k;
+    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
+        if (!kh_exist(bcs_hash, k)) continue;
+
+        bc_data_t *bc_dat = kh_val(bcs_hash, k);
+        assert(bc_dat != NULL);
+
+        if (bc_data_rna_dedup(bc_dat) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+int bam_data_rna_var_call(bam_data_t *bam_data, g_var_t *gv, 
+        str_map *cmap, uint8_t min_qual){
+    if (bam_data == NULL || gv == NULL || cmap == NULL)
+        return err_msg(-1, 0, "bam_data_rna_var_call: argument is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_rna_var_call: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t k;
+    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
+        if (!kh_exist(bcs_hash, k)) continue;
+
+        bc_data_t *bc_dat = kh_val(bcs_hash, k);
+        assert(bc_dat != NULL);
+
+        if (bc_data_rna_var_call(bc_dat, gv, cmap, min_qual) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+/*******************************************************************************
+ * BAM ATAC
+ ******************************************************************************/
+
+int bam_data_atac_add_read(bam_data_t *bam_data, const char *bc, 
+        const atac_read1_t *r, qshort qname){
+    if (bam_data == NULL || bc == NULL || r == NULL)
+        return err_msg(-1, 0, "bam_data_atac_add_read: argument is null");
+
+    bam_data->has_atac = 1;
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_add_read: 'bc_data' is null");
+
+    if (pthread_mutex_lock(&bam_data->bam_lock) != 0)
+        return err_msg(-1, 0, "bam_data_atac_add_read: failed bam mutex lock");
+
+    int ret;
+    khint_t kbc;
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    kbc = kh_get(kh_bc_dat, bcs_hash, (char *)bc);
+    // if barcode isn't present, add barcode and bc_data
+    if (kbc == kh_end(bcs_hash)){
+        char *bc_cpy = strdup(bc);
+        if (bc_cpy == NULL)
+            return err_msg(-1, 0, "bam_data_atac_add_read: %s", strerror(errno));
+
+        kbc = kh_put(kh_bc_dat, bcs_hash, bc_cpy, &ret);
+        if (ret < 0)
+            return err_msg(-1, 0, "bam_data_atac_add_read: failed to add read to bcs");
+
+        if ( (kh_val(bcs_hash, kbc) = bc_data_init()) == NULL )
+            return(-1);
+    }
+    if (pthread_mutex_unlock(&bam_data->bam_lock) != 0)
+        return err_msg(-1, 0, "bam_data_atac_add_read: failed bam mutex unlock");
+
+    bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
+    if (pthread_mutex_lock(&bc_dat->bc_lock) != 0)
+        return err_msg(-1, 0, "bam_data_atac_add_read: failed bc mutex lock");
+    ret = bc_data_atac_add_read(bc_dat, r, qname);
+    if (pthread_mutex_unlock(&bc_dat->bc_lock) != 0)
+        return err_msg(-1, 0, "bam_data_atac_add_read: failed bc mutex unlock");
+    if (ret < 0)
+        return err_msg(-1, 0, "bam_data_atac_add_read: failed to add read to bam");
+    return(0);
+}
+
+int bam_data_atac_dedup(bam_data_t *bam_data){
+    if (bam_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_dedup: bam_data is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_dedup: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t kbc;
+    for (kbc = kh_begin(bcs_hash); kbc != kh_end(bcs_hash); ++kbc){
+        if (!kh_exist(bcs_hash, kbc)) continue;
+        bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
+        assert(bc_dat != NULL);
+
+        if (bc_data_atac_dedup(bc_dat) < 0)
+            return -1;
+    }
+    return(0);
+}
+
+int bam_data_atac_var_call(bam_data_t *bam_data, g_var_t *gv, 
+        str_map *cmap, uint8_t min_qual){
+    if (bam_data == NULL || gv == NULL || cmap == NULL)
+        return err_msg(-1, 0, "bam_data_atac_var_call: argument is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_var_call: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t k;
+    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
+        if (!kh_exist(bcs_hash, k)) continue;
+
+        bc_data_t *bc_dat = kh_val(bcs_hash, k);
+        assert(bc_dat != NULL);
+
+        if (bc_data_atac_var_call(bc_dat, gv, cmap, min_qual) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks, 
+        str_map *cmap){
+    if (bam_data == NULL || pks == NULL || cmap == NULL)
+        return err_msg(-1, 0, "bam_data_atac_peak_call: argument is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_peak_call: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t k;
+    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
+        if (!kh_exist(bcs_hash, k)) continue;
+
+        bc_data_t *bc_dat = kh_val(bcs_hash, k);
+        assert(bc_dat != NULL);
+
+        if (bc_data_atac_peak_call(bc_dat, pks, cmap) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+/*******************************************************************************
  * bc_stats
  ******************************************************************************/
 
-int bam_data_fill_stats(bam_data_t *bam_data){
+int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t *bc_dat){
+    if (bcc == NULL || rna_hdr == NULL || bc_dat == NULL)
+        return err_msg(-1, 0, "bc_data_rna_fill: arguments are null");
+
+    if (bc_dat->rna_mols == NULL)
+        return err_msg(-1, 0, "bc_data_rna_fill: rna_mols is null");
+
+    khash_t(khrmn) *mols = bc_dat->rna_mols;
+
+    float n_mt = 0;
+    khint_t k_mol;
+    for (k_mol = kh_begin(mols); k_mol != kh_end(mols); ++k_mol){
+        if (!kh_exist(mols, k_mol)) continue;
+        rna_mol_t *mol = kh_val(mols, k_mol);
+        if (mol == NULL) continue;
+
+        // count genes
+        ml_node_t(gene_list) *gn;
+        for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
+            seq_gene_t gene = ml_node_val(gn);
+            int ret;
+            kh_put(kh_cnt, bcc->genes, gene.gene_id, &ret);
+            if (ret < 0)
+                return err_msg(-1, 0, "bc_data_rna_fill_stats: failed to add to gene ID");
+        }
+
+        // count variant calls
+        ml_node_t(vac_list) *vn;
+        for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
+            int ret;
+            seq_vac_t v = ml_node_val(vn);
+            kh_put(kh_cnt, bcc->rna_vars, v.vix, &ret);
+            if (ret < 0)
+                return err_msg(-1, 0, "bc_data_rna_fill_stats: failed to add to var ID");
+        }
+
+        ++bcc->counts;
+        ++bcc->rna_counts;
+
+        // count MT
+        const char *chr = sam_hdr_tid2name(rna_hdr, mol->loc.rid);
+        if (chr == NULL)
+            return err_msg(-1, 0, "bc_data_rna_fill_stats: could not get rna chromosome name for %i", mol->loc.rid);
+        int is_mt = 0;
+        if ( (is_mt = chr_is_mt(chr)) < 0 ) return(-1);
+        if (is_mt) n_mt = n_mt + 1.0;
+    }
+    if (bcc->rna_counts) bcc->rna_mt = n_mt / (float)bcc->rna_counts;
+    else bcc->rna_mt = 0;
+
+    bcc->n_gene = kh_size(bcc->genes);
+    bcc->n_rna_vars = kh_size(bcc->rna_vars);
+
+    return(0);
+}
+
+int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_t *bc_dat){
+    if (bcc == NULL || atac_hdr == NULL || bc_dat == NULL)
+        return err_msg(-1, 0, "bc_data_atac_fill: arguments are null");
+
+    if (bc_dat->atac_frags == NULL)
+        return err_msg(-1, 0, "bc_data_atac_fill: atac_frags is null");
+
+    uint32_t in_pk = 0;
+    khash_t(khaf) *frags = bc_dat->atac_frags;
+    float n_mt = 0;
+    khint_t k_f;
+    for (k_f = kh_begin(frags); k_f != kh_end(frags); ++k_f){
+        if (!kh_exist(frags, k_f)) continue;
+        atac_frag_t *frag = kh_val(frags, k_f);
+        g_reg_pair reg = kh_key(frags, k_f);
+        if (frag == NULL) continue;
+
+        // peak counts
+        size_t p_i;
+        for (p_i = 0; p_i < frag->pks.n; ++p_i){
+            int ret;
+            kh_put(kh_cnt, bcc->peaks, frag->pks.ix[p_i], &ret);
+            if (ret < 0)
+                return err_msg(-1, 0, "bc_data_atac_fill_stats: failed to add to peak ID");
+        }
+        if (frag->pks.n) ++in_pk;
+
+        // count variant calls
+        ml_node_t(vac_list) *vn;
+        for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
+            seq_vac_t v = ml_node_val(vn);
+            int ret;
+            kh_put(kh_cnt, bcc->atac_vars, v.vix, &ret);
+            if (ret < 0)
+                return err_msg(-1, 0, "bc_data_atac_fill_stats: failed to add to var ID");
+        }
+
+        ++bcc->counts;
+        ++bcc->atac_counts;
+
+        // count MT
+        const char *chr = sam_hdr_tid2name(atac_hdr, reg.r1.rid);
+        if (chr == NULL)
+            return err_msg(-1, 0, "bc_data_atac_fill_stats: could not get atac chromosome name for %i", reg.r1.rid);
+        int is_mt = 0;
+        if ( (is_mt = chr_is_mt(chr)) < 0 ) return(-1);
+        if (is_mt) n_mt = n_mt + 1.0;
+    }
+    if (bcc->atac_counts) bcc->atac_mt = n_mt / (float)bcc->atac_counts;
+    else bcc->atac_mt = 0;
+
+    if (bcc->atac_counts)
+        bcc->frip = (float)in_pk / (float)bcc->atac_counts;
+    else
+        bcc->frip = 0;
+
+    bcc->n_peak = kh_size(bcc->peaks);
+    bcc->n_atac_vars = kh_size(bcc->atac_vars);
+
+    return(0);
+}
+
+int bam_data_fill_stats(bam_data_t *bam_data, 
+        const sam_hdr_t *rna_hdr, const sam_hdr_t *atac_hdr){
     if (bam_data == NULL)
         return err_msg(-1, 0, "bam_data_fill_stats: 'bam_data' is null");
 
@@ -577,70 +749,11 @@ int bam_data_fill_stats(bam_data_t *bam_data){
         bc_stats_t *bcc = bc_stats_alloc();
 
         if (bam_data->has_rna){
-            khash_t(khrmn) *mols = bc_dat->rna_mols;
-            if (mols == NULL)
-                return err_msg(-1, 0, "bam_data_fill_stats: 'rna_mols' is null");
-            khint_t k_mol;
-            for (k_mol = kh_begin(mols); k_mol != kh_end(mols); ++k_mol){
-                if (!kh_exist(mols, k_mol)) continue;
-                rna_mol_t *mol = kh_val(mols, k_mol);
-                if (mol == NULL) continue;
-                seq_gene_t *gene = mol->genes.head;
-                for (; gene != NULL; gene = gene->next){
-                    int ret;
-                    kh_put(kh_cnt, bcc->genes, gene->gene_id, &ret);
-                    if (ret < 0)
-                        return err_msg(-1, 0, "bam_data_fill_stats: failed to add to gene ID");
-                }
-                vac_t *v = mol->vacs.head;
-                for (; v != NULL; v = v->next){
-                    int ret;
-                    kh_put(kh_cnt, bcc->vars, v->vix, &ret);
-                    if (ret < 0)
-                        return err_msg(-1, 0, "bam_data_fill_stats: failed to add to var ID");
-                }
-                ++bcc->counts;
-                ++bcc->rna_counts;
-            }
+            if (bc_data_rna_fill_stats(bcc, rna_hdr, bc_dat) < 0) return(-1);
         }
         if (bam_data->has_atac){
-            uint32_t in_pk = 0;
-            khash_t(khaf) *frags = bc_dat->atac_frags;
-            if (frags == NULL)
-                return err_msg(-1, 0, "bam_data_fill_stats: 'atac_frags' is null");
-            khint_t k_f;
-            for (k_f = kh_begin(frags); k_f != kh_end(frags); ++k_f){
-                if (!kh_exist(frags, k_f)) continue;
-                atac_frag_t *frag = kh_val(frags, k_f);
-                if (frag == NULL) continue;
-                int p_i;
-                for (p_i = 0; p_i < frag->pks.n; ++p_i){
-                    int ret;
-                    kh_put(kh_cnt, bcc->peaks, frag->pks.ix[p_i], &ret);
-                    if (ret < 0)
-                        return err_msg(-1, 0, "bam_data_fill_stats: failed to add to peak ID");
-                }
-                if (frag->pks.n) ++in_pk;
-                vac_t *v = frag->vacs.head;
-                for (v = frag->vacs.head; v != NULL; v = v->next){
-                    int ret;
-                    kh_put(kh_cnt, bcc->vars, v->vix, &ret);
-                    if (ret < 0)
-                        return err_msg(-1, 0, "bam_data_fill_stats: failed to add to var ID");
-                }
-                ++bcc->counts;
-                ++bcc->atac_counts;
-                if (bcc->atac_counts)
-                    bcc->frip = (float)in_pk / (float)bcc->atac_counts;
-                else
-                    bcc->frip = -1;
-            }
+            if (bc_data_atac_fill_stats(bcc, atac_hdr, bc_dat) < 0) return(-1);
         }
-
-        // fill n_gene and n_var
-        bcc->n_gene = kh_size(bcc->genes);
-        bcc->n_var = kh_size(bcc->vars);
-        bcc->n_peak = kh_size(bcc->peaks);
         bc_dat->bc_stats = bcc;
     }
     bam_data->has_stats = 1;

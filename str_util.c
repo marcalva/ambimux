@@ -475,14 +475,59 @@ int double2str_in(double x, char **pstr, size_t *buf_size, int decp){
     return pstr_len;
 }
 
+int float2str_ip(float x, char **pstr, size_t *buf_size, int decp){
+    if (decp < 0)
+        return err_msg(-1, 0, "float2str_ip: decp=%i must be nonnegative", decp);
+    if (pstr == NULL)
+        return err_msg(-1, 0, "float2str_ip: pstr is null");
+
+    if (*pstr == NULL){
+        *buf_size = 32;
+        *pstr = malloc(*buf_size * sizeof(char));
+        if (*pstr == NULL)
+            return err_msg(-1, 0, "float2str_ip: %s", strerror(errno));
+    }
+
+    int pstr_len = 0;
+    while ( (pstr_len = snprintf(*pstr, *buf_size, "%.*g", decp, x)) >= (int)*buf_size){
+        *buf_size = pstr_len + 1;
+        void *tmp = realloc(*pstr, *buf_size * sizeof(char));
+        if (tmp != NULL) *pstr = tmp;
+        else return err_msg(-1, 0, "float2str_ip: %s", strerror(errno));
+    }
+    return pstr_len;
+}
+
+// TODO finished writing this function
+int str2float(char *s, float *x){
+    if (s == NULL)
+        return err_msg(-1, 0, "str2float: string s is null");
+
+    char *p_end = NULL;
+
+    int save_errno = errno;
+    errno = 0;
+
+    double val = strtod(s, &p_end);
+
+    if ((int)val == 0 && errno > 0)
+        return err_msg(-1, 0, "str2float: %s", strerror(errno));
+
+    *x = val;
+    errno = save_errno;
+    return(0);
+}
+
 char *strcat2(const char *str1, const char *str2){
-    char *str3 = (char*)calloc(strlen(str1)+strlen(str2)+1, sizeof(char));
+    size_t s1 = strlen(str1), s2 = strlen(str2);
+    size_t s3 = s1 + s2 + 1;
+    char *str3 = (char *)malloc(s3 * sizeof(char));
     if (str3 == NULL){
         err_msg(-1, 0, "strcat2: %s", strerror(errno));
         return NULL;
     }
-    strcpy(str3, str1);
-    strcat(str3, str2);
+    memcpy(str3, str1, s1);
+    memcpy(str3 + s1, str2, s2 + 1);
     return str3;
 }
 

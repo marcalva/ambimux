@@ -8,6 +8,7 @@
 #include "variants.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
+#include "g_list.h"
 
 #define count_t uint16_t
 #define n_bases 16 // 2^4
@@ -32,35 +33,54 @@ typedef struct seq_base_t {
     g_pos pos;
     uint8_t base;
     uint8_t qual;
-    struct seq_base_t *next;
 } seq_base_t;
 
-/*! @typedef
- * @abstract Store multiple pbc_t objects
- *
- * To get the next seq_base_t object, use p = p->next.
- *
- * @field head Pointer to the first seq_base_t object.
- * @field n The number of seq_base_t objects.
+static inline int base_cmp(seq_base_t b1, seq_base_t b2){
+    return( poscmp(b1.pos, b2.pos) );
+}
+
+static inline int seq_base_cmp(seq_base_t b1, seq_base_t b2, int cmp_qual){
+    int pc = poscmp(b1.pos, b2.pos);
+    if (pc != 0) return(pc);
+    int bc = b1.base - b2.base;
+    if (bc != 0) return(bc);
+    if (cmp_qual){
+        int qc = b1.qual - b2.qual;
+        if (qc != 0) return(qc);
+    }
+    return(0);
+}
+
+// return 1 if equal, 0 if not
+static inline int seq_base_equal(seq_base_t b1, seq_base_t b2, int cmp_qual){
+    int qe = cmp_qual ? b1.qual == b2.qual : 1;
+    if ( (poscmp(b1.pos, b2.pos) == 0) && 
+         b1.base == b2.base && 
+         qe ){
+        return(1);
+    } else {
+        return(0);
+    }
+}
+
+/* initialize sbase.
+ * Undefined behaviour if sbase is null.
  */
-typedef struct seq_blist_t {
-    seq_base_t *head;
-    size_t n;
-} seq_blist_t;
+void seq_base_init(seq_base_t *sbase);
 
 /* Properly initialize a seq_base_t object.
  *
  * @param sbase Pointer o seq_base_t object to initialize.
  */
-void init_seq_base(seq_base_t *sbase);
-seq_base_t *alloc_seq_base();
+void seq_base_init(seq_base_t *sbase);
+seq_base_t *seq_base_alloc();
 
 /* Destroy a seq_base_t object
  *
  * @param b Pointer to seq_base_t object to destroy.
  * @return Pointer ot the next seq_base_t object in the list.
  */
-seq_base_t *dstry_seq_base(seq_base_t *b);
+void seq_base_dstry(seq_base_t *b);
 
 /* Allocate and return a copy of a seq_base_t object.
  *
@@ -69,72 +89,42 @@ seq_base_t *dstry_seq_base(seq_base_t *b);
  * @return Pointer to copy of seq_base_t object.
  *  NULL on error.
  */
-seq_base_t *copy_seq_base(const seq_base_t *b, int *ret);
+seq_base_t *seq_base_dup(const seq_base_t *b, int *ret);
 
-/* Allocate and initialize a seq_blist_t object.
+/*******************************************************************************
+ * base list
+ ******************************************************************************/
+
+/* declare base_list type
+ * list type: ml_t(base_list)
+ * node type: ml_node_t(base_list)
  *
- * @return Pointer to allocated seq_blist_t object.
  */
-void init_seq_blist(seq_blist_t *s);
-seq_blist_t *alloc_seq_blist();
+ml_declare(base_list, seq_base_t, base_cmp);
 
-/* Free the memory underlying a blist */
-void free_seq_blist(seq_blist_t *s);
+// base_list functions
+#define base_list_init(ll) ml_init(base_list, ll)
+#define base_list_free(ll) ml_free(base_list, ll)
 
-/* Check if two seq_blist objects are the same.
- *
- * @param l1 A seq_blist_t object.
- * @param l2 A seq_blist_t object.
- * @param qual_cmp Integer flag indicating whether to compare base quality
- *  in addition to observed base. To ignore qual, set to 0.
- * @return 1 if they are equal, 0 if not.
+/* insert seq_base_t into base list object.
+ * @param ll list of bases of type ml_t(base_list)
+ * @param base base of type seq_base_t
+ * @param skip_dup if base already found and skip_dup=1, then do nothing
+ * @param dup_ok if dup_ok=0 and base already found, return error.
  */
-int seq_blist_equal(seq_blist_t l1, seq_blist_t l2, int qual_cmp);
+#define base_list_insert(ll, base, skip_dup, dup_ok) \
+    ml_insert(base_list, ll, base, skip_dup, dup_ok)
 
-/* Add seq_base_t to a seq_blist_t object.
- *
- * First checks to see if position is present. If the position is present and 
- * if dup_ok != 0, there is no error. If dup_ok = 0, then 
- * will return -1 in error.
- *
- * If skip_dup = 1, then nothing is added if the position was already present. 
- * If skip_dup = 0, then the seq_base_t object is added anyways.
- *
- * If @p s or @p b are NULL, return -1 as error.
- *
- * The seq_base_t object is always copied if added.
- *
- * @param s Pointer to seq_blist_t to add @pb  to.
- * @param b Pointer to seq_base_t to add.
- * @param dup_ok Integer flag to indicate if duplicate position is OK. If 
- *  0, then return -1 on error if duplicate encountered.
- * @param skip_dup Integer flag to indicate whether to skip adding @p b when 
- * it is a duplicate position.
- *
- * @return -1 on error, 0 if the position was present and not added (when 
- *  skip_dup = 1), 1 if the position was present and added anyways, and 
- *  2 if the position was not present and added.
- * @note The seq_base_t object is always copied when added.
- */
-int blist_add_base(seq_blist_t *s, const seq_base_t *b, int dup_ok, int skip_dup);
+#define base_list_cpy(dest, src) ml_cpy(base_list, dest, src)
 
-/* Copy a seq_blist_t object.
- *
- * @param s A pointer to a seq_blist_t object.
- * @param ret Pointer to int to hold return status. 0 on success, -1 on error.
- *
- * @return A pointer to the copied seq_blist_t object, or NULL on error.
- */
-seq_blist_t *copy_seq_blist(const seq_blist_t *s, int *ret);
+int base_list_cmp(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
+int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
+int base_list_match_qual(ml_t(base_list) *bl, const ml_t(base_list) *cmp);
 
-/* Set highest base quality in seq_blist
- *
- * Expects both arguments to be equal, possibly differing by base quality 
- * at the bases.
- *
- * @return 0 if success, -1 on error.
- */
-int seq_blist_match_qual(seq_blist_t *bl, const seq_blist_t *cmp);
+/*******************************************************************************
+ * base_listist
+ ******************************************************************************/
+
 
 /*******************************************************************************
  * variant allele calls
@@ -156,19 +146,11 @@ int seq_blist_match_qual(seq_blist_t *bl, const seq_blist_t *cmp);
  *  Missing values are encoded as 15 (0xf)
  * @field allele Index of variant allele. Ref is 0, first alt allele is 1, second is 2, ... 
  */
-typedef struct vac_t {
+typedef struct seq_vac_t {
     int32_t vix;
     uint8_t allele;
     uint8_t qual;
-    struct vac_t *next;
-} vac_t;
-
-/* An unsorted list of vac_t objects.
- */
-typedef struct vacs_t {
-    vac_t *head;
-    size_t n;
-} vacs_t;
+} seq_vac_t;
 
 /* Initialize/allocate vac object.
  *
@@ -177,49 +159,58 @@ typedef struct vacs_t {
  *
  * @return Pointer to vac object.
  */
-void init_vac(vac_t *v);
-vac_t *alloc_vac();
-vac_t *dstry_vac(vac_t *v);
+void seq_vac_init(seq_vac_t *v);
+seq_vac_t *seq_vac_alloc();
+void seq_vac_dstry(seq_vac_t *v);
 
-/* Initialize members of a vacs object.
- *
- * If @p vacs is null, do nothing.
- *
- * @param vacs Pointer to a vacs object.
- */
-void init_vacs(vacs_t *vacs);
+/*******************************************************************************
+ * vac list
+ ******************************************************************************/
 
-/* Free memory underlying a vacs_t object.
- *
- * Free the vac_t objects in a vacs_t object.
- * Does not free the vacs_t object itself.
- *
- * @param vacs Pointer to vacs_t object.
- */
-void free_vacs(vacs_t *vacs);
+#define vac_cmp(v1, v2) ((v1).vix - (v2).vix)
 
-/* Add a vac to vacs
+/* declare vac_list type
+ * list type: ml_t(vac_list)
+ * node type: ml_node_t(vac_list)
  *
- * @param vacs Pointer to vacs object to add vac to.
- * @param v Pointer to a vac_t object to add
- *
- * @return 0 on success, -1 on error
  */
-int vacs_add(vacs_t *vacs, vac_t *v);
+ml_declare(vac_list, seq_vac_t, vac_cmp);
+
+// base_list functions
+#define vac_list_init(ll) ml_init(vac_list, ll)
+#define vac_list_free(ll) ml_free(vac_list, ll)
+
+/* insert seq_base_t into base list object.
+ * @param ll list of bases of type ml_t(base_list)
+ * @param base base of type seq_base_t
+ * @param skip_dup if base already found and skip_dup=1, then do nothing
+ * @param dup_ok if dup_ok=0 and base already found, return error.
+ */
+#define vac_list_insert(ll, vac, skip_dup, dup_ok) \
+    ml_insert(vac_list, ll, vac, skip_dup, dup_ok)
+
+#define vac_list_cpy(dest, src) ml_cpy(vac_list, dest, src)
+
 
 /* Call variants from sequenced bases
  *
- * For each overlapping SNV, record the allele in a vac_t object 
+ * For each overlapping SNV, record the allele in a seq_vac_t object 
  * as the integer of the allele (0 for ref, 1 for first alt, ...).
- * Then add the vac_t object to @p vacs.
+ * Then add the seq_vac_t object to @p vacs.
  * If the vase in @p b is 'N', skip and return 0.
  * If the base quality is < min_qual, skip and return 0.
  */
-int seq_base_call_var(seq_base_t *b, vacs_t *vacs, g_var_t *gv, 
-    contig_map *cmap, uint8_t min_qual);
 
-int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, g_var_t *gv, 
-        contig_map *cmap, uint8_t min_qual);
+int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv, 
+        str_map *cmap, uint8_t min_qual);
+
+int vac_list_call_var(ml_t(base_list) *bl, ml_t(vac_list) *vl, g_var_t *gv, 
+        str_map *cmap, uint8_t min_qual);
+
+// int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
+
+/*******************************************************************************
+ ******************************************************************************/
 
 /*******************************************************************************
  * sequencing gene
@@ -235,7 +226,6 @@ int seq_blist_call_var(seq_blist_t *s, vacs_t *vacs, g_var_t *gv,
 typedef struct seq_gene_t {
    int32_t gene_id;
    uint8_t splice;
-   struct seq_gene_t *next;
 } seq_gene_t;
 
 /* Initialize/allocate a seq_gene_t object.
@@ -243,7 +233,12 @@ typedef struct seq_gene_t {
 void seq_gene_init(seq_gene_t *g);
 seq_gene_t *seq_gene_alloc();
 
-seq_gene_t *seq_gene_dstry(seq_gene_t *g);
+void seq_gene_dstry(seq_gene_t *g);
+
+/* compare two genes
+ * return -1 if g1 < g2, 0 if g1 == g2, 1 if g1 > g2
+ */
+int seq_gene_cmp(seq_gene_t g1, seq_gene_t g2);
 
 /* copy a seq_gene_t object.
  *
@@ -255,20 +250,42 @@ seq_gene_t *seq_gene_dstry(seq_gene_t *g);
  * The return status is set in @p ret. The variable is modified, where 
  * 0 indicates success, -1 indiciates error (no memory).
  */
-seq_gene_t *seq_gene_cpy(const seq_gene_t *src, int *ret);
+seq_gene_t *seq_gene_dup(const seq_gene_t *src, int *ret);
 
-typedef struct seq_glist_t {
-    seq_gene_t *head;
-    size_t n;
-} seq_glist_t;
+/*******************************************************************************
+ * gene list
+ ******************************************************************************/
 
-void seq_glist_init(seq_glist_t *gl);
-seq_glist_t *seq_glist_alloc();
+#define gene_cmp(g1, g2) ((g1).gene_id - (g2).gene_id)
 
-void seq_glist_free(seq_glist_t *gl);
+/* declare gene_list type
+ * list type: ml_t(gene_list)
+ * node type: ml_node_t(gene_list)
+ *
+ */
+ml_declare(gene_list, seq_gene_t, gene_cmp);
 
-seq_glist_t *seq_glist_cpy(const seq_glist_t *src, int *ret);
+// base_list functions
+#define gene_list_init(ll) ml_init(gene_list, ll)
+#define gene_list_free(ll) ml_free(gene_list, ll)
 
-int seq_glist_add_gene(seq_glist_t *gl, const seq_gene_t *gene);
+/* insert seq_base_t into base list object.
+ * @param ll list of bases of type ml_t(base_list)
+ * @param base base of type seq_base_t
+ * @param skip_dup if base already found and skip_dup=1, then do nothing
+ * @param dup_ok if dup_ok=0 and base already found, return error.
+ */
+#define gene_list_insert(ll, gene, skip_dup, dup_ok) \
+    ml_insert(gene_list, ll, gene, skip_dup, dup_ok)
+
+#define gene_list_cpy(dest, src) ml_cpy(gene_list, dest, src)
+
+int gene_list_cmp(ml_t(gene_list) gl1, ml_t(gene_list) gl2);
+int gene_list_equal(ml_t(gene_list) gl1, ml_t(gene_list) gl2);
+
+// int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
+
+/*******************************************************************************
+ ******************************************************************************/
 
 #endif // COUNTS_H

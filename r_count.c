@@ -143,7 +143,7 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
             return -1;
         bc_key = str_map_str(agc->bc_ix, bci);
 
-        // add barcode to hash table
+        // add barcode to kbtree
         int ret;
         khint_t k_bt = kh_put(kh_bc_cnode, agc->bc_counts, bc_key, &ret);
         if (ret == -1){
@@ -162,15 +162,13 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                 if (!kh_exist(mols, k_m)) continue;
                 rna_mol_t *mol = kh_val(mols, k_m);
                 if (mol == NULL) continue;
-                seq_gene_t *gene = mol->genes.head;
-                size_t n_feat = mol->genes.n;
-                if (n_feat > 1) continue; // only count UMIs overlapping one gene
-                for (; gene != NULL; gene = gene->next){
-                    int32_t fix = gene->gene_id;
-                    uint8_t spl = gene->splice;
-                    if (spl > N_SPL)
-                        return err_msg(-1, 0, "bam_counts_count: "
-                                "spl %u > %i", spl, N_SPL);
+                ml_node_t(gene_list) *gn;
+                if (ml_size(&mol->gl) != 1) continue; // discard multigene UMIs
+                for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
+                    seq_gene_t gene = ml_node_val(gn);
+                    int32_t fix = gene.gene_id;
+                    uint8_t spl = gene.splice;
+                    assert(spl <= N_SPL);
                     cnt_node_t *p, t = {0};
                     t.ix = (int)fix;
                     t.counts[spl] = 1;
@@ -182,10 +180,11 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     else ++p->counts[spl];
                     agc->has_rna_gc = 1;
                 }
-                vac_t *vac = mol->vacs.head;
-                for (; vac != NULL; vac = vac->next){
-                    int32_t vix = vac->vix;
-                    uint8_t allele = vac->allele;
+                ml_node_t(vac_list) *vn;
+                for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
+                    seq_vac_t vac = ml_node_val(vn);
+                    int32_t vix = vac.vix;
+                    uint8_t allele = vac.allele;
                     if (allele >= MAX_ALLELE)
                         return err_msg(-1, 0, "bam_counts_count: "
                                 "allele %u > %i", allele, MAX_ALLELE);
@@ -214,10 +213,10 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                 }
                 uint32_t c_add = 1;
                 iregn_t pk = frag->pks; // can be empty
-                int i;
-                for (i = 0; i < pk.n; ++i){
+                size_t ip;
+                for (ip = 0; ip < pk.n; ++ip){
                     cnt_node_t *p, t = {0};
-                    t.ix = pk.ix[i];
+                    t.ix = pk.ix[ip];
                     t.counts[0] = c_add;
                     p = kb_getp(kh_cnode, bcc->atac_pc, &t);
                     if (p == NULL){
@@ -228,10 +227,11 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     }
                     agc->has_atac_pc = 1;
                 }
-                vac_t *vac = frag->vacs.head;
-                for (; vac != NULL; vac = vac->next){
-                    int32_t vix = vac->vix;
-                    uint8_t allele = vac->allele;
+                ml_node_t(vac_list) *vn;
+                for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
+                    seq_vac_t vac = ml_node_val(vn);
+                    int32_t vix = vac.vix;
+                    uint8_t allele = vac.allele;
                     if (allele >= MAX_ALLELE)
                         return err_msg(-1, 0, "bam_atac_ac_count: "
                                 "allele %u > %i", allele, MAX_ALLELE);

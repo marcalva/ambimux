@@ -222,6 +222,8 @@ char *int2str(int x, size_t *len);
 char *double2str(double x, size_t *len);
 int double2str_in(double x, char **pstr, size_t *buf_size, int decp);
 
+int float2str_ip(float x, char **pstr, size_t *buf_size, int decp);
+
 /* place string representation of an int into a char array
  *
  * convert the int to a string, and place in an array 

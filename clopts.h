@@ -40,8 +40,6 @@ typedef struct {
     char *sample_fn;
 
     // filtered barcodes, if any
-    uint32_t flt_n_bcs;
-    char *flt_bc_fn; // flt barcoes
     char *wl_bc_fn; // whitelist of barcodes
 
     // options
@@ -59,6 +57,10 @@ typedef struct {
     int counts_only;
     char *region;
     int region_set;
+    uint32_t seed;
+    float eps;
+    uint16_t max_iter;
+    uint16_t threads;
 
     int verbose;
 } cl_opts;
@@ -86,7 +88,7 @@ typedef struct {
     bcf_srs_t *sr;
     bcf_hdr_t *vcf_hdr;
     g_var_t *gv;
-    contig_map *cmap;
+    str_map *cmap;
 
     // GTF
     gene_anno_t *anno;
@@ -98,9 +100,10 @@ typedef struct {
     iregs_t *exclude;
 
     // Barcodes
-    uint32_t flt_n_bcs;
-    str_map *flt_bcs;
     str_map *wl_bcs;
+
+    // samples
+    str_map *samples;
 
     // options
     int out_min;
@@ -115,12 +118,15 @@ typedef struct {
     int min_phred;
     int rna_mapq;
     int atac_mapq;
+    uint32_t seed;
+    float eps;
+    uint16_t max_iter;
+
+    uint16_t threads;
 
     char *out_fn;
 
     int verbose;
-
-    str_map *samples;
 
 } obj_pars;
 

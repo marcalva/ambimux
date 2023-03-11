@@ -70,7 +70,7 @@ typedef struct gene_t {
     char *name; // gene_name attribute in GTF
     char *type; // gene_type attribute in GTF
     int beg; // 0-based start (inclusive)
-    int end; // 0-based start (exclusive)
+    int end; // 0-based end (exclusive)
     char strand;
     int chrm; // chromosome index
     int bin;

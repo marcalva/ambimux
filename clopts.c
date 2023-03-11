@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "clopts.h"
 
 cl_opts *init_cl_opts(){
@@ -10,6 +11,7 @@ cl_opts *init_cl_opts(){
         return(NULL);
     }
 
+    // file names
     opts->rna_bam_fn = NULL;
     opts->atac_bam_fn = NULL;
     opts->vcf_fn = NULL;
@@ -19,10 +21,9 @@ cl_opts *init_cl_opts(){
     opts->out_fn = strdup("ambimux");
     opts->sample_fn = NULL;
 
-    opts->flt_n_bcs = 5000;
-    opts->flt_bc_fn = NULL;
     opts->wl_bc_fn = NULL;
 
+    // parameters
     opts->out_min = 100;
     opts->min_phred = 30;
     opts->max_nh = 0;
@@ -41,6 +42,13 @@ cl_opts *init_cl_opts(){
     opts->region = strdup(".");
     opts->region_set = 0;
 
+    time_t t;
+    opts->seed = (uint32_t)time(&t);
+    opts->eps = 1e-5;
+    opts->max_iter = 20;
+
+    opts->threads = 1;
+
     opts->verbose = 0;
 
     return(opts);
@@ -54,7 +62,6 @@ void dstry_cl_opts(cl_opts *opts){
     free(opts->exclude_fn);
     free(opts->peaks_fn);
     free(opts->out_fn);
-    free(opts->flt_bc_fn);
     free(opts->wl_bc_fn);
     free(opts->sample_fn);
     free(opts->region);
@@ -92,17 +99,36 @@ obj_pars *init_obj_pars(){
 
     p->anno = NULL;
 
-    p->flt_n_bcs = 5000;
-    p->flt_bcs = NULL;
     p->wl_bcs = NULL;
 
     p->out_min = 100;
     p->max_nh = 0;
+
+    strcpy(p->rna_bc_tag, "CB");
+    strcpy(p->atac_bc_tag, "CB");
+    strcpy(p->rna_umi_tag, "UB");
+    strcpy(p->rna_nh_tag, "NH");
+    strcpy(p->atac_nh_tag, "NH");
+
+    p->region = strdup(".");
+    p->region_set = 0;
+
     p->min_phred = 30;
     p->rna_mapq = 30;
     p->atac_mapq = 30;
 
+    time_t t;
+    p->seed = (uint32_t)time(&t);
+    p->eps = 1e-5;
+    p->max_iter = 20;
+
+    p->threads = 1;
+
     p->out_fn = NULL;
+
+    p->verbose = 0;
+
+    p->samples = NULL;
 
     return(p);
 }
@@ -119,7 +145,6 @@ void dstry_obj_pars(obj_pars *objs){
     if (objs->atac_bam_idx) hts_idx_destroy(objs->atac_bam_idx);
 
     if (objs->sr) bcf_sr_destroy(objs->sr);
-    free(objs->region);
     // if (objs->vcf_hdr) bcf_hdr_destroy(objs->vcf_hdr);
 
     if (objs->anno) destroy_anno(objs->anno);
@@ -128,12 +153,13 @@ void dstry_obj_pars(obj_pars *objs){
 
     if (objs->exclude) iregs_dstry(objs->exclude);
 
-    if (objs->flt_bcs) destroy_str_map(objs->flt_bcs);
     if (objs->wl_bcs) destroy_str_map(objs->wl_bcs);
+
+    if (objs->region) free(objs->region);
 
     destroy_gv(objs->gv);
     
-    dstry_contig_map(objs->cmap);
+    destroy_str_map(objs->cmap);
 
     if (objs->out_fn) free(objs->out_fn);
 
@@ -192,12 +218,13 @@ int load_vars(cl_opts *opts, obj_pars *objs){
     }
 
     objs->gv = vcf2gv(objs->sr, objs->vcf_hdr, 0, 0);
+    if (objs->gv == NULL) return(-1);
 
     // chr map
-    objs->cmap = init_contig_map();
-    if (objs->cmap == NULL || objs->cmap->chr_map == NULL) return(-1);
+    objs->cmap = init_str_map();
+    if (objs->cmap == NULL) return(-1);
 
-    ret = bcf_hdr_to_cm(objs->vcf_hdr, objs->cmap);
+    ret = bcf_hdr_chr_ix(objs->vcf_hdr, objs->cmap);
     if (ret < 0) return(-1);
 
     /*
@@ -247,19 +274,10 @@ int load_samples(cl_opts *opts, obj_pars *objs){
 
 int load_bcs(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
-        return err_msg(-1, 0, "load_flt_bcs: 'opts' or 'objs' is null");
+        return err_msg(-1, 0, "load_bcs: 'opts' or 'objs' is null");
 
     if (opts->verbose)
         log_msg("loading barcodes");
-
-    objs->flt_n_bcs = opts->flt_n_bcs;
-
-    if (opts->flt_bc_fn != NULL){
-        objs->flt_bcs = read_str_map(opts->flt_bc_fn);
-        if (objs->flt_bcs == NULL)
-            return err_msg(-1, 0, "load_bcs: failed to read flt_bcs "
-                    "from %s", opts->flt_bc_fn);
-    }
 
     if (opts->wl_bc_fn != NULL){
         objs->wl_bcs = read_str_map(opts->wl_bc_fn);
@@ -304,6 +322,7 @@ int load_exclude(cl_opts *opts, obj_pars *objs){
 int copy_options(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
         return err_msg(-1, 0, "copy_options: 'opts' or 'objs' is null");
+    objs->out_min = opts->out_min;
     objs->max_nh = opts->max_nh;
     strcpy(objs->rna_bc_tag, opts->rna_bc_tag);
     strcpy(objs->atac_bc_tag, opts->atac_bc_tag);
@@ -312,12 +331,15 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     free(objs->region);
     if (opts->region) objs->region = strdup(opts->region);
     objs->region_set = opts->region_set;
-    objs->out_min = opts->out_min;
     objs->min_phred = opts->min_phred;
     objs->rna_mapq = opts->rna_mapq;
     objs->atac_mapq = opts->atac_mapq;
+    objs->seed = opts->seed;
+    objs->eps = opts->eps;
+    objs->max_iter = opts->max_iter;
+    objs->threads = opts->threads;
     if (opts->out_fn) objs->out_fn = strdup(opts->out_fn);
     objs->verbose = opts->verbose;
 
-    return(1);
+    return(0);
 }

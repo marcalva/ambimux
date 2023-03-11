@@ -11,15 +11,26 @@ int bc_stats_init(bc_stats_t *bcc){
     bcc->counts = 0;
     bcc->atac_counts = 0;
     bcc->rna_counts = 0;
-    bcc->genes = kh_init(kh_cnt);
-    bcc->vars = kh_init(kh_cnt);
-    bcc->peaks = kh_init(kh_cnt);
-    if (bcc->genes == NULL || bcc->vars == NULL || bcc->peaks == NULL)
-        return err_msg(-1, 0, "bc_stats_init: could not initialize hash tables");
+
+    bcc->n_atac_vars = 0;
+    bcc->n_rna_vars = 0;
+
     bcc->n_gene = 0;
-    bcc->n_var = 0;
     bcc->n_peak = 0;
+
     bcc->frip = -1;
+
+    bcc->rna_mt = 0;
+    bcc->atac_mt = 0;
+
+    bcc->genes = kh_init(kh_cnt);
+    bcc->atac_vars = kh_init(kh_cnt);
+    bcc->rna_vars = kh_init(kh_cnt);
+    bcc->peaks = kh_init(kh_cnt);
+
+    if (bcc->genes == NULL || bcc->atac_vars == NULL 
+        || bcc->rna_vars == NULL || bcc->peaks == NULL)
+        return err_msg(-1, 0, "bc_stats_init: could not initialize hash tables");
 
     return(0);
 }
@@ -40,7 +51,8 @@ void bc_stats_free(bc_stats_t *bcc){
         return;
 
     kh_destroy(kh_cnt, bcc->genes);
-    kh_destroy(kh_cnt, bcc->vars);
+    kh_destroy(kh_cnt, bcc->rna_vars);
+    kh_destroy(kh_cnt, bcc->atac_vars);
     kh_destroy(kh_cnt, bcc->peaks);
 }
 

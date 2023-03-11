@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <ctype.h>
 #include "htslib/sam.h"
 #include "htslib/vcf.h"
 #include "htslib/vcfutils.h"
@@ -39,6 +40,39 @@ int get_rcoord_bam(const bam1_t *b, int32_t *tid, int32_t *start, int32_t *end,
         }
     }
     return(0);
+}
+
+int chr_is_mt(const char *chr){
+    if (chr == NULL)
+        return err_msg(-1, 0, "chr_is_mt: chr is null");
+
+    char *chrcpy = strdup(chr);
+    if (chrcpy == NULL)
+        return err_msg(-1, 0, "bam1_is_mt: %s", strerror(errno));
+
+    char *c;
+    for (c = chrcpy; *c; ++c)
+        *c = tolower(*c);
+
+    int ret;
+    if (strcmp(chrcpy, "chrmt") == 0 || 
+        strcmp(chrcpy, "chrm") == 0 || 
+        strcmp(chrcpy, "m") == 0 || 
+        strcmp(chrcpy, "mt") == 0)
+        ret = 1;
+    else
+        ret = 0;
+
+    free(chrcpy);
+    return(ret);
+}
+
+int bam1_is_mt(const bam1_t *b, const sam_hdr_t *sam_hdr){
+    if (b == NULL || sam_hdr == NULL)
+        return err_msg(-1, 0, "bam1_is_mt: b or sam_hdr is null");
+
+    const char *chr = sam_hdr_tid2name(sam_hdr, b->core.tid);
+    return chr_is_mt(chr);
 }
 
 int load_bam(const char *bamfn, samFile **bam, sam_hdr_t **bam_hdr, hts_idx_t **bam_idx){
@@ -177,7 +211,7 @@ int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos,
      * both are 0-based, [beg, end) */
     uint64_t q_pos_beg = 0;
     uint64_t q_pos_end = 0;
-    int qlen = bam_cigar2qlen(n_cigar, cigar_raw);
+    uint64_t qlen = bam_cigar2qlen(n_cigar, cigar_raw);
     int32_t r_pos_beg = left_pos;
     int32_t r_pos_end = left_pos;
     for (i = 0; i < n_cigar; i++){
@@ -208,7 +242,7 @@ int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos,
             int32_t add_to = pos - r_pos_beg;
             uint64_t q_ix = q_pos_beg + add_to;
             if (q_ix >= qlen)
-                return err_msg(-1, 0, "bam1_site_base: q index (%llu) is greater than query length (%i), "
+                return err_msg(-1, 0, "bam1_site_base: q index (%llu) is greater than query length (%llu), "
                         "probable bug in program", q_ix, qlen);
             uint8_t *p = bam_get_seq(b);
             uint8_t *q = bam_get_qual(b);

@@ -64,10 +64,6 @@ typedef struct g_pos {
     int32_t pos;
 } g_pos;
 
-typedef struct contig_map {
-    str_map *chr_map;
-} contig_map;
-
 /*******************************************************************************
  * g_region g_pos
  ******************************************************************************/
@@ -105,7 +101,7 @@ int set_region(g_region *reg, int32_t rid, int32_t start, int32_t end,
 int regioncmp(g_region r1, g_region r2);
 
 /* Print a g_region */
-void print_g_region(g_region g);
+void print_g_region(FILE *f, g_region g);
 
 void init_g_pos(g_pos *p);
 void init_reg_pair(g_reg_pair *rp);
@@ -170,55 +166,6 @@ khint_t kh_reg_pair_hash(g_reg_pair p);
  */
 int kh_reg_pair_equal(g_reg_pair p1, g_reg_pair p2);
 
-/* Allocate and initialize a contig map
- *
- * Must be freed by caller.
- *
- * @return Allocated contig_map object, or NULL on error.
- */
-contig_map *init_contig_map();
-void dstry_contig_map(contig_map *cm);
-
-/* Add chr to contig_map
- *
- * @param cm Pointer to contig_map
- * @param chr Character array with string for contig.
- *
- * @return index of chromosome on success, -1 on error.
- */
-int add_to_cm(contig_map *cm, const char *chr);
-
-/* Get contig index from name.
- *
- * @return -1 if not found or error, or index if found 
- */
-int cm_chr_to_ix(contig_map *cm, const char *chr);
-
-/* Get contig name from index/rid.
- *
- * Return the string in a contig_map given the index.
- * The returned string is not copied and references the 
- * array in cm.
- *
- * @param cm Pointer to contig_map.
- * @param ix Index of contig.
- *
- * @return Character array of contig, or NULL on error.
- */
-const char *cm_ix_to_chr(contig_map *cm, int ix);
-
-/* Create a contig_map from a bcf header.
- *
- * Stores contigs from bcf hdr in a contig map. The resulting indexes 
- * match the rids of the bcf header.
- *
- * @param hdr Pointer to bcf_hdr_t object.
- * @param cm Pointer to cm object.
- *
- * @return 0 on success, -1 on error.
- */
-int bcf_hdr_to_cm(const bcf_hdr_t *hdr, contig_map *cm);
-
 /*******************************************************************************
  * indexed region
  ******************************************************************************/
@@ -267,7 +214,7 @@ typedef struct iregs_t {
 
     khash_t(kh_reg) *hash;
 
-    contig_map *chr_map;
+    str_map *chr_map;
 } iregs_t;
 
 /* Initialize or destroy an iregs_t object.

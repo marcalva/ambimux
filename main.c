@@ -1,41 +1,22 @@
 
+/*
 #include <string.h>
-#include <stdio.h>
-#include <string.h>
+*/
 #include <stdlib.h>
-#include <time.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <getopt.h>
 #include <errno.h>
-#include "htslib/sam.h"
-#include "htslib/vcf.h"
-#include "htslib/vcfutils.h"
-#include "htslib/synced_bcf_reader.h"
-#include "htslib/klist.h"
-#include "htslib/khash.h"
-#include "htslib/hts.h"
-#include "htslib/kstring.h"
-#include "htslib/khash_str2int.h"
-#include "sam_read.h"
-#include "str_util.h"
-#include "variants.h"
-#include "gtf_anno.h"
-#include "overlap.h"
-#include "atac_data.h"
-#include "rna_data.h"
-#include "counts.h"
-#include "region.h"
-#include "clopts.h"
-#include "bc_stats.h"
 #include "mod.h"
-#include "bam_dat.h"
-#include "r_count.h"
 #include "bam_proc.h"
 
-#define Er(x, r) \
-    if ((x) < 0){ \
-        r = EXIT_FAILURE; \
+#define HOPT 1000
+
+#define ER(ret) \
+    if ((ret) < 0){ \
+        ret = EXIT_FAILURE; \
         goto cleanup; \
-    }
+    } \
 
 static void usage(FILE *fp, int exit_status){
     fprintf(fp, 
@@ -63,12 +44,6 @@ static void usage(FILE *fp, int exit_status){
             "\n"
             "Alignment options\n"
             "\n"
-            "  -f, --flt-bcs       File containing list of filtered barcodes for alpha estimation\n"
-            "                      These correspond to nonempty droplets. If set, --flt-n is ignored.\n"
-            "                      Likelihood and summary results will be output only for these filtered barcodes,\n"
-            "                      whereas counts will be generated for all barcodes.\n"
-            "  -n, --flt-n         Alternative to flt-bcs, estimate alpha by assuming the top n barcodes\n"
-            "                      ranked by number or RNA+ATAC reads are non-empty [2000].\n"
             "  -w, --bc-wl         Optional file containing a whitelist of barcodes.\n"
             "  -u, --rna-umi-tag   RNA BAM tag for UMI [UB].\n"
             "  -b, --rna-bc-tag    RNA BAM tag for cell barcode [CB].\n"
@@ -85,11 +60,20 @@ static void usage(FILE *fp, int exit_status){
             "  -Z, --atac-mapq     Minimum MAPQ (mapping quality) of an ATAC alignment [30].\n"
             "  -R, --region        Region (hts format), for example 'chr21,chr21:10-,chr21-10-20'.\n"
             "\n"
+            "EM options\n"
+            "\n"
+            "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
+            "                      must be less than this value [1e-5].\n"
+            "  -q, --max-iter      Maximum number of iterations to perform for EM [20].\n"
+            "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
+            "  -T, --threads       Optional number of threads to use [1].\n"
+            "\n"
             "GTF options\n"
             "\n"
             "  -t, --tx-basic      Read only transcripts tagged as 'basic' in the GTF file.\n"
             "\n"
             "  -V, --verbose       Write status on output.\n"
+            "      --help          Print this help screen.\n"
             "\n");
     exit(exit_status);
 }
@@ -110,8 +94,6 @@ int main(int argc, char *argv[]){
         {"out", required_argument, NULL, 'o'},
         {"counts-only", no_argument, NULL, 'C'}, 
         {"out-min", required_argument, NULL, 'x'}, 
-        {"flt-bcs", required_argument, NULL, 'f'}, 
-        {"flt-n-bcs", required_argument, NULL, 'n'}, 
         {"bc-wl", required_argument, NULL, 'w'}, 
         {"rna-umi-tag", required_argument, NULL, 'u'}, 
         {"rna-bc-tag", required_argument, NULL, 'b'}, 
@@ -122,27 +104,30 @@ int main(int argc, char *argv[]){
         {"rna-mapq", required_argument, NULL, 'z'},
         {"atac-mapq", required_argument, NULL, 'Z'},
         {"region", required_argument, NULL, 'R'},
+        {"eps", required_argument, NULL, 'h'},
+        {"max-iter", required_argument, NULL, 'q'},
+        {"seed", required_argument, NULL, 'd'},
+        {"threads", required_argument, NULL, 'T'},
         {"tx-basic", no_argument, NULL, 't'}, 
         {"verbose", no_argument, NULL, 'V'},
+        {"help", no_argument, NULL, HOPT},
         {NULL, 0, NULL, 0}
     };
 
     cl_opts *opts = init_cl_opts();
     obj_pars *objs = init_obj_pars();
 
-    /* parameters */
+    // parameters
     int ret = EXIT_SUCCESS;
-    /* */
 
-    /* local variables */
+    // local variables
     bam_data_t *bam_dat = NULL;
     mdl_t *mdl = NULL;
-    /* */
 
     char *p_end = NULL;
     int option_index = 0;
-    int cm;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x:f:n:w:u:b:c:H:m:P:z:Z:tR:V", loptions, &option_index)) != -1){
+    int cm, eno;
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:q:d:T:V", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -205,22 +190,6 @@ int main(int argc, char *argv[]){
                       }
                       if (opts->out_min <= 0){
                           ret = err_msg(EXIT_FAILURE, 0, "--out-min must be greater than 0"); 
-                          goto cleanup;
-                      }
-                      break;
-            case 'f': opts->flt_bc_fn = strdup(optarg);
-                      if (opts->flt_bc_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'n': errno = 0;
-                      opts->flt_n_bcs = (uint32_t)strtoul(optarg, &p_end, 10);
-                      int eno = errno;
-                      if (eno == EINVAL || eno == ERANGE){
-                          ret = err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --flt_n_bcs %s to int: %s", 
-                                  optarg, strerror(errno));
                           goto cleanup;
                       }
                       break;
@@ -313,7 +282,60 @@ int main(int argc, char *argv[]){
                       opts->region = strdup(optarg);
                       opts->region_set = 1;
                       break;
+            case 'h':
+                      errno = 0;
+                      float eps = strtof(optarg, &p_end);
+                      if (errno == ERANGE){
+                          ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --eps %s to int: %s", 
+                                  optarg, strerror(errno));
+                          goto cleanup;
+                      }
+                      if (eps <= 0 || eps >= 1){
+                          ret = err_msg(EXIT_FAILURE, 0, "--eps must be between 0 and 1"); 
+                          goto cleanup;
+                      }
+                      opts->eps = eps;
+                      break;
+            case 'q': errno = 0;
+                      opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);
+                      eno = errno;
+                      if (eno == EINVAL || eno == ERANGE){
+                          ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --max-iter %s to int: %s", 
+                                  optarg, strerror(errno));
+                          goto cleanup;
+                      }
+                      break;
+            case 'd':
+                      errno = 0;
+                      int seed = (int)strtol(optarg, &p_end, 10);
+                      if (seed == 0 && errno > 0){
+                          ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --seed %s to int: %s", 
+                                  optarg, strerror(errno));
+                          goto cleanup;
+                      }
+                      if (seed < 0){
+                          ret = err_msg(EXIT_FAILURE, 0, "--seed must be >= 0"); 
+                          goto cleanup;
+                      }
+                      opts->seed = (uint32_t)seed;
+                      break;
+            case 'T': errno = 0;
+                      opts->threads = (uint16_t)strtoul(optarg, &p_end, 10);
+                      eno = errno;
+                      if (eno == EINVAL || eno == ERANGE){
+                          ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --threads %s to int: %s", 
+                                  optarg, strerror(errno));
+                          goto cleanup;
+                      }
+                      break;
             case 'V': opts->verbose = 1;
+                      break;
+            case HOPT:
+                      usage(stdout, EXIT_SUCCESS);
                       break;
             default: 
                       err_msg(EXIT_FAILURE, 0, 
@@ -326,56 +348,34 @@ int main(int argc, char *argv[]){
 
     /* Load in BAM files */
     ret = load_atac_bam(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     ret = load_rna_bam(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     /* Load samples */
     ret = load_samples(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     /* Load in VCF file */
     ret = load_vars(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     /* Load GTF file */
     ret = load_gtf(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     /* Load peaks */
-    if (load_peaks(opts, objs) < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ret = load_peaks(opts, objs);
+    ER(ret);
 
     /* load exclusion */
-    if (load_exclude(opts, objs) < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ret = load_exclude(opts, objs);
+    ER(ret);
     
-    // Load/set barcodes
+    /* Load/set barcodes */
     ret = load_bcs(opts, objs);
-    if (ret < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ER(ret);
 
     // init bam data object.
     if ( (bam_dat = bam_data_init()) == NULL ){
@@ -387,44 +387,37 @@ int main(int argc, char *argv[]){
     // Run ATAC
     if (objs->atac_bam != NULL){
         ret = run_atac(objs, bam_dat);
-        if (ret < 0){
-            ret = EXIT_FAILURE;
-            goto cleanup;
-        }
+        ER(ret);
     }
 
     // Run RNA
     if (objs->rna_bam != NULL){
         ret = run_rna(objs, bam_dat);
-        if (ret < 0){
-            ret = EXIT_FAILURE;
-            goto cleanup;
-        }
+        ER(ret);
     }
 
-    if (bam_data_fill_bcs(bam_dat, objs->wl_bcs) < 0)
-        goto cleanup;
-    if (bam_data_fill_stats(bam_dat) < 0)
-        goto cleanup;
+    if (objs->verbose) log_msg("setting barcode whitelist");
+    ret = bam_data_fill_bcs(bam_dat, objs->wl_bcs);
+    ER(ret);
+
+    if (objs->verbose) log_msg("getting barcode stats");
+    ret = bam_data_fill_stats(bam_dat, objs->rna_bam_hdr, objs->atac_bam_hdr);
+    ER(ret);
 
     // generate gene counts
-    if (bam_count(bam_dat, objs, objs->out_fn) < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
+    ret = bam_count(bam_dat, objs, objs->out_fn);
+    ER(ret);
 
     if (opts->counts_only)
         goto cleanup;
 
     // fit model
-    if (fit_mdl_pars(bam_dat, objs) < 0){
-        ret = EXIT_FAILURE;
-        goto cleanup;
-    }
-
-cleanup:
+    ret = mdl_fit(bam_dat, objs);
+    ER(ret);
 
     if ( ret == EXIT_SUCCESS && opts->verbose) log_msg("done");
+
+cleanup:
 
     bam_data_dstry(bam_dat);
     dstry_obj_pars(objs);

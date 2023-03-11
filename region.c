@@ -41,8 +41,8 @@ int regioncmp(g_region r1, g_region r2){
     return(0);
 }
 
-void print_g_region(g_region g){
-    fprintf(stdout, "%i:%" PRIi32 "-%" PRIi32 " (%c)\n", g.rid, g.start, g.end, g.strand);
+void print_g_region(FILE *f, g_region g){
+    fprintf(f, "%i:%" PRIi32 "-%" PRIi32 " (%c)\n", g.rid, g.start, g.end, g.strand);
 }
 
 void init_g_pos(g_pos *p){
@@ -128,88 +128,6 @@ int kh_reg_pair_equal(g_reg_pair p1, g_reg_pair p2){
     return(1);
 }
 
-contig_map *init_contig_map(){
-    contig_map *cm = (contig_map *)calloc(1, sizeof(contig_map));
-    if (cm == NULL){
-        err_msg(-1, 0, "init_contig_map: %s", strerror(errno));
-        return(NULL);
-    }
-
-    cm->chr_map = init_str_map();
-    if (cm->chr_map == NULL){
-        err_msg(-1, 0, "init_contig_map: %s", strerror(errno));
-        return(NULL);
-    }
-
-    return(cm);
-}
-
-void dstry_contig_map(contig_map *cm){
-    if (cm == NULL) return;
-
-    destroy_str_map(cm->chr_map);
-    free(cm);
-}
-
-int add_to_cm(contig_map *cm, const char *chr){
-    if (cm == NULL)
-        return err_msg(-1, 0, "add_to_cm: cm is NULL");
-
-    if (cm->chr_map == NULL)
-        return err_msg(-1, 0, "add_to_cm: cm chr map is NULL");
-
-    if (chr == NULL)
-        return err_msg(-1, 0, "add_to_cm: chr is NULL");
-
-    int found;
-    int ret = add2str_map(cm->chr_map, chr, &found);
-    return(ret);
-}
-
-int cm_chr_to_ix(contig_map *cm, const char *chr){
-    if (cm == NULL || cm->chr_map == NULL)
-        return err_msg(-1, 0, "cm_chr_to_ix: cm is NULL");
-    if (chr == NULL)
-        return err_msg(-1, 0, "cm_chr_to_ix: chr is NULL");
-
-    return str_map_ix(cm->chr_map, (char *)chr);
-}
-
-const char *cm_ix_to_chr(contig_map *cm, int ix){
-    if (cm == NULL || cm->chr_map == NULL){
-        err_msg(-1, 0, "cm_ix_to_chr: cm is NULL");
-        return(NULL);
-    }
-
-    char *s = str_map_str(cm->chr_map, ix);
-    if (s == NULL){
-        err_msg(-1, 0, "cm_ix_to_chr: ix %i not found", ix);
-        return(NULL);
-    }
-
-    return(s);
-}
-
-int bcf_hdr_to_cm(const bcf_hdr_t *hdr, contig_map *cm){
-    if (hdr == NULL || cm == NULL)
-        return err_msg(-1, 0, "bcf_hdr_to_cm: hdr or cm is NULL");
-
-    int ret, i, n_chr = hdr->n[BCF_DT_CTG];
-    for (i = 0; i < n_chr; ++i){
-        const char *hdr_chr = bcf_hdr_id2name(hdr, i);
-
-        // check that chr ix matches between hdr and i
-        int tmp_id = bcf_hdr_name2id(hdr, hdr_chr);
-        if (i != tmp_id)
-            return err_msg(-1, 0, "bcf_hdr_to_cm: index %i does not match "
-                    "vcf header rid %i", i, tmp_id);
-
-        ret = add_to_cm(cm, hdr_chr);
-        if (ret < 0) return(-1);
-    }
-    return(0);
-}
-
 /*******************************************************************************
  * indexed region
  ******************************************************************************/
@@ -238,7 +156,7 @@ iregs_t *iregs_init(){
     iregs->n = 0;
     iregs->m = 0;
     iregs->hash = kh_init(kh_reg);
-    iregs->chr_map = init_contig_map();
+    iregs->chr_map = init_str_map();
     if (iregs->chr_map == NULL || iregs->hash == NULL){
         err_msg(0, 0, "iregs_init: %s", strerror(errno));
         return NULL;
@@ -253,7 +171,7 @@ void iregs_dstry(iregs_t *iregs){
     iregs->itr = NULL;
     free(iregs->reg);
     kh_destroy(kh_reg, iregs->hash);
-    dstry_contig_map(iregs->chr_map);
+    destroy_str_map(iregs->chr_map);
     free(iregs);
 }
 
@@ -273,9 +191,10 @@ int iregs_add2reghash(iregs_t *iregs, const char *chr, int32_t beg, int32_t end,
             return err_msg(-1, 0, "iregs_add2reghash:  %s", strerror(errno));
     }
 
-    if (iregs->chr_map == NULL && (iregs->chr_map = init_contig_map()) == NULL)
+    if (iregs->chr_map == NULL && (iregs->chr_map = init_str_map()) == NULL)
         return err_msg(-1, 0, "iregs_add2reghash: %s", strerror(errno));
-    int cix = add_to_cm(iregs->chr_map, chr);
+    int found;
+    int cix = add2str_map(iregs->chr_map, chr, &found);
     if (cix < 0) return(-1);
 
     // add to reg
@@ -329,7 +248,7 @@ int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end,
 
     while ( regitr_overlap(iregs->itr) ){
         g_region tmp;
-        tmp.rid = cm_chr_to_ix(iregs->chr_map, iregs->itr->seq);
+        tmp.rid = str_map_ix(iregs->chr_map, iregs->itr->seq);
         if (tmp.rid < 0)
             return err_msg(-1, 0, "iregs_overlap: could not find chromosome %s in iregs, "
                     "improper initialization", chr);
@@ -360,7 +279,7 @@ int iregs_write(iregs_t *iregs, BGZF *fp){
     int i, len;
     for (i = 0; i < iregs->n; ++i){
         g_region reg = iregs->reg[i];
-        const char *chr = cm_ix_to_chr(iregs->chr_map, (int)(reg.rid));
+        const char *chr = str_map_str(iregs->chr_map, (int)(reg.rid));
 
         len = bgzf_write(fp, chr, strlen(chr));
         len = bgzf_write(fp, "\t", 1);

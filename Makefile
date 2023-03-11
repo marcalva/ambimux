@@ -1,6 +1,7 @@
 
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -Wfloat-equal -Wno-unused-function
+# CFLAGS = -g -O1 -Wall -Wextra -Wfloat-equal -Wno-unused-function -fsanitize=address -fno-omit-frame-pointer
+CFLAGS = -g -O0 -Wall -Wextra -Wfloat-equal -Wno-unused-function
 
 all : ambimux
 
@@ -14,10 +15,10 @@ CPPFLAGS = -I. -I$(HTSDIR)
 OBJS = main.o atac_data.o str_util.o sam_read.o \
 	   variants.o bins.o overlap.o gtf_anno.o counts.o region.o \
 	   clopts.o rna_data.o bc_stats.o mod.o bam_dat.o r_count.o \
-	   bam_proc.o
+	   bam_proc.o math_util.o array_util.o
 
 LDFLAGS = -L$(HTSDIR)
-LIBS = -lhts -lpthread $(HTSLIB_static_LIBS)
+LIBS = -lm -lhts -lpthread $(HTSLIB_static_LIBS)
 
 ambimux : $(OBJS) $(HTSLIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)

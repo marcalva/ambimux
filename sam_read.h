@@ -29,6 +29,10 @@
 int get_rcoord_bam(const bam1_t *b, int32_t *tid, int32_t *start, int32_t *end, 
         int adj_soft_clip);
 
+// return 1 if read aligns to mitochondria, 0 if no match, -1 on error
+int chr_is_mt(const char *chr);
+int bam1_is_mt(const bam1_t *b, const sam_hdr_t *sam_hdr);
+
 /* Check if bam read is unmapped.
  *
  * @param b Pointer to bam1_t object.
