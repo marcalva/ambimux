@@ -27,6 +27,7 @@ void mdl_mlcl_init(mdl_mlcl_t *mlcl){
 }
 
 void mdl_mlcl_free(mdl_mlcl_t *mlcl){
+    if (mlcl == NULL) return;
     mv_free(&mlcl->feat_ixs);
     mv_free(&mlcl->var_ixs);
     mlcl->counts = 0;
@@ -49,6 +50,7 @@ int mdl_bc_init(mdl_bc_t *mdl_bc){
 }
 
 void mdl_bc_free(mdl_bc_t *mdl_bc){
+    if (mdl_bc == NULL) return;
     kbitr_t itr;
     kbtree_t(kb_mdl_mlcl) *bt;
 
@@ -114,6 +116,29 @@ void destroy_mdl_fit(mdl_fit_t *mf){
     free(mf);
 }
 
+int c_probs_init(c_probs_t *c_probs){
+    c_probs->p_x = -1;
+    c_probs->lp_hs = NULL;
+    c_probs->cp_hs = NULL;
+
+    if (mdl_bc_init(&c_probs->bc) < 0)
+        return(-1);
+
+    return(0);
+}
+
+void c_probs_free(c_probs_t *c_probs){
+    if (c_probs == NULL) return;
+    c_probs->p_x = -1;
+    free(c_probs->lp_hs);
+    c_probs->lp_hs = NULL;
+    free(c_probs->cp_hs);
+    c_probs->cp_hs = NULL;
+
+    mdl_bc_free(&c_probs->bc);
+    c_probs->n_bc = 0;
+}
+
 mdl_t *mdl_alloc(){
     mdl_t *mdl = (mdl_t *)calloc(1, sizeof(mdl_t));
     if (mdl == NULL){
@@ -126,6 +151,8 @@ mdl_t *mdl_alloc(){
     mdl->samples = NULL;
 
     mdl->fix_flag = NULL;
+
+    mv_init(&mdl->bc_dat);
 
     mdl->c_probs_len = 0;
     mdl->c_probs = NULL;
@@ -161,6 +188,11 @@ void mdl_dstry(mdl_t *m){
     free(m->absent_bc);
 
     uint32_t i;
+    for (i = 0; i < mv_size(&m->bc_dat); ++i){
+        c_probs_free(&mv_i(&m->bc_dat, i));
+    }
+    mv_free(&m->bc_dat);
+
     for (i = 0; i < m->c_probs_len; ++i){
         free(m->c_probs[i].cp_hs);
         free(m->c_probs[i].lp_hs);
@@ -172,6 +204,178 @@ void mdl_dstry(mdl_t *m){
     destroy_mdl_pars(m->mp);
     destroy_mdl_fit(m->mf);
     free(m);
+}
+
+int mdl_add_bc(mdl_t *mdl, char *bc_key, int *found){
+    if (mdl == NULL || bc_key == NULL)
+        return err_msg(-1, 0, "mdl_add_bc: argument is null");
+    int bc_ix;
+    if ( (bc_ix = add2str_map(mdl->all_bcs, bc_key, found)) < 0)
+        return(-1);
+    if (found == 0){
+        c_probs_t c_probs;
+        c_probs_init(&c_probs);
+        if (mv_insert(mdl_bc_v, &mdl->bc_dat, c_probs, bc_ix) < 0)
+            return(-1);
+    }
+    return(bc_ix);
+}
+
+// TODO initialize whole mdl struct
+int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
+    if (mdl == NULL || bam_data == NULL || objs == NULL)
+        return err_msg(-1, 0, "mdl_from_bam_data: arguments are null");
+
+    khint_t k_bc;
+
+    uint32_t n_genes = 0;
+    if (objs->anno)
+        n_genes = (uint32_t)objs->anno->gene_ix->n;
+    uint16_t n_samples = 0;
+    if (objs->vcf_hdr)
+        (uint16_t)bcf_hdr_nsamples(objs->vcf_hdr);
+    if (n_samples == 0)
+        return err_msg(-1, 0, "mdl_init_all: no samples");
+    uint32_t n_vars = 0;
+    if (objs->gv)
+        n_vars = (uint32_t)mv_size(&objs->gv->vix2var);
+
+    uint32_t c_thresh = (uint32_t)(objs->out_min);
+    mdl->all_bcs = init_str_map();
+    mdl->test_bcs = init_str_map();
+
+    mdl->fix_flag = calloc(1, sizeof(bflg_t));
+    mdl->absent_bc = calloc(1, sizeof(bflg_t));
+    bflg_init_empty(mdl->fix_flag);
+    bflg_init_empty(mdl->absent_bc);
+
+    // add the empty droplets bc to strmap
+    char bc_empty[] = "Empty";
+    int found = 0, bc_ix = mdl_add_bc(mdl, bc_empty, &found);
+    if (bc_ix < 0)
+        return(-1);
+    if (found == 1) // if already found
+        return err_msg(-1, 0, "mdl_from_bam_data: mdl already initialized");
+
+    if (bflg_resize(mdl->fix_flag, 1) < 0)
+        return(-1);
+
+
+    khash_t(kh_bc_dat) *bam_bcs = bam_data->bc_data;
+
+    for (k_bc = kh_begin(bam_bcs); k_bc != kh_end(bam_bcs); ++k_bc){
+        if (!kh_exist(bam_bcs, k_bc)) continue;
+
+        char *bc_key = kh_key(bam_bcs, k_bc);
+
+        bc_data_t *bc_data = kh_val(bam_bcs, k_bc);
+        assert(bc_data != NULL);
+
+        bc_stats_t *bc_stat = bc_data->bc_stats;
+        assert(bc_stat != NULL);
+
+        int low_count = (bc_stat->atac_counts < c_thresh) && (bc_stat->rna_counts < c_thresh);
+
+        // if low count fixed, set barcode to empty
+        if (low_count)
+            bc_key = bc_empty;
+
+        if ( (bc_ix = add2str_map(mdl->all_bcs, bc_key, &found)) < 0)
+            return(-1);
+        if ( (!low_count) && found )
+            return err_msg(-1, 0, "mdl_from_bam_data: mdl already initialized");
+
+        // if not low count, set unfixed and add to test_bcs
+        if ( !low_count ){
+            if (bflg_resize(mdl->fix_flag, mdl->all_bcs->n) < 0)
+                return(-1);
+            bflg_unset(mdl->fix_flag, bc_ix); // a bit repetitive but more clear
+            if (add2str_map(mdl->test_bcs, bc_key, &found) < 0)
+                return(-1);
+        }
+
+        c_probs_t *c_probs = &mv_i(&mdl->bc_dat, bc_ix);
+
+        // loop through RNA
+        khint_t k_rna, k_atac;
+        for (k_rna = kh_begin(bc_data->rna_mols); k_rna != kh_end(bc_data->rna_mols); ++k_rna){
+            if (!kh_exist(bc_data->rna_mols, k_rna)) continue;
+            rna_mol_t *mol = kh_val(bc_data->rna_mols, k_rna);
+
+            // skip RNA molecules with no data, and only consider unique feature
+            size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
+            if ( (mol_n_genes != 1) && (mol_n_vars == 0) )
+                continue;
+
+            // initialize mlcl to all 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+
+            // add gene
+            ml_node_t(seq_gene_l) *g_n;
+            for (g_n = ml_begin(&mol->gl); g_n; g_n = ml_node_next(g_n)){
+                seq_gene_t gene = ml_node_val(g_n);
+                int32_t f_ix = gene.gene_id + (n_genes * gene.splice);
+                if (mv_push(i32, &mlcl.feat_ixs, f_ix) < 0)
+                    return(-1);
+            }
+
+            // add variant(s)
+            ml_node_t(seq_vac_l) *v_n;
+            for (v_n = ml_begin(&mol->vl); v_n; v_n = ml_node_next(v_n)){
+                seq_vac_t vac = ml_node_val(v_n);
+                // set allele to 0:ref, 1:alt, 2:any other
+                uint8_t allele = vac.allele < 2 ? vac.allele : 2;
+                int32_t v_ix = vac.vix + (n_vars * allele);
+                if (mv_push(i32, &mlcl.var_ixs, v_ix) < 0)
+                    return(-1);
+            }
+
+            mdl_mlcl_t *p; // pointer for btree add
+            p = kb_getp(kb_mdl_mlcl, c_probs->bc.rna, &mlcl);
+            if (!p)
+                kb_putp(kb_mdl_mlcl, c_probs->bc.rna, &mlcl);
+            else
+                p->counts += 1;
+        }
+
+        // loop through atac
+        for (k_atac = kh_begin(bc_data->atac_frags); k_atac != kh_end(bc_data->atac_frags); ++ k_atac){
+            if (!kh_exist(bc_data->atac_frags, k_atac)) continue;
+
+            atac_frag_t *frag = kh_val(bc_data->atac_frags, k_atac);
+
+            // always add peak since feature is always 1 or 0
+            // initialize mlcl to all 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+
+            // add peak
+            int32_t pk_ix = mv_size(&frag->pks) > 0 ? 1 : 0;
+            if (mv_push(i32, &mlcl.feat_ixs, pk_ix) < 0)
+                return(-1);
+
+            // variant(s)
+            ml_node_t(seq_vac_l) *v_n;
+            for (v_n = ml_begin(&frag->vl); v_n; v_n = ml_node_next(v_n)){
+                seq_vac_t vac = ml_node_val(v_n);
+                // set allele to 0:ref, 1:alt, 2:any other
+                uint8_t allele = vac.allele < 2 ? vac.allele : 2;
+                int32_t v_ix = vac.vix + (n_vars * allele);
+                if (mv_push(i32, &mlcl.var_ixs, v_ix) < 0)
+                    return(-1);
+            }
+
+            mdl_mlcl_t *p;
+            p = kb_getp(kb_mdl_mlcl, c_probs->bc.atac, &mlcl);
+            if (!p)
+                kb_putp(kb_mdl_mlcl, c_probs->bc.atac, &mlcl);
+            else
+                p->counts += 1;
+        }
+    }
+
+    return(0);
 }
 
 int mdl_set_bcs(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){

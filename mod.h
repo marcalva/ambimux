@@ -134,7 +134,12 @@ typedef struct {
     f_t p_x; // P(X_d | Theta) data probability
     f_t *lp_hs; // log P(H_d, S_d | Theta) length: _nrow_hs
     f_t *cp_hs; // P(H_d, S_d | X_d, Theta) length: _nrow_hs
+
+    mdl_bc_t bc; // barcode molecule data
+    uint32_t n_bc; // number of barcodes
 } c_probs_t;
+
+mv_declare(mdl_bc_v, c_probs_t);
 
 /*! @typedef mdl_t
  */
@@ -147,6 +152,8 @@ typedef struct {
     // all length of all_bcs
     bflg_t *fix_flag; // 0: unfixed, 1: fixed (ambient)
     bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
+
+    mv_t(mdl_bc_v) bc_dat;
 
     uint32_t c_probs_len;
     c_probs_t *c_probs; // length of all_bcs
@@ -180,6 +187,9 @@ void destroy_mdl_fit(mdl_fit_t *mf);
 /* initialize/destroy mdl_t struct */
 mdl_t *mdl_alloc();
 void mdl_dstry(mdl_t *m);
+
+int mdl_add_bc(mdl_t *mdl, char *bc_key, int *found);
+int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
 
 /* Set filtered and all barcodes in the mdl struct
  *
