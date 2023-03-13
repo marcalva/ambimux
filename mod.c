@@ -20,6 +20,57 @@
 
 #define feps (FLT_EPSILON * 100e3)
 
+void mdl_mlcl_init(mdl_mlcl_t *mlcl){
+    mv_init(&mlcl->feat_ixs);
+    mv_init(&mlcl->var_ixs);
+    mlcl->counts = 0;
+}
+
+void mdl_mlcl_free(mdl_mlcl_t *mlcl){
+    mv_free(&mlcl->feat_ixs);
+    mv_free(&mlcl->var_ixs);
+    mlcl->counts = 0;
+}
+
+int mdl_bc_init(mdl_bc_t *mdl_bc){
+    kbtree_t(kb_mdl_mlcl) *p;
+    p = kb_init(kb_mdl_mlcl, KB_DEFAULT_SIZE);
+    if (p == NULL){
+        return err_msg(-1, 0, "mdl_bc_init: %s", strerror(errno));
+    }
+    mdl_bc->rna = p;
+
+    p = kb_init(kb_mdl_mlcl, KB_DEFAULT_SIZE);
+    if (p == NULL){
+        return err_msg(-1, 0, "mdl_bc_init: %s", strerror(errno));
+    }
+    mdl_bc->atac = p;
+    return 0;
+}
+
+void mdl_bc_free(mdl_bc_t *mdl_bc){
+    kbitr_t itr;
+    kbtree_t(kb_mdl_mlcl) *bt;
+
+    bt = mdl_bc->rna;
+    kb_itr_first(kb_mdl_mlcl, bt, &itr); 
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
+        mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+        mdl_mlcl_free(mlcl);
+    }
+    kb_destroy(kb_mdl_mlcl, mdl_bc->rna);
+    mdl_bc->rna = NULL;
+
+    bt = mdl_bc->atac;
+    kb_itr_first(kb_mdl_mlcl, bt, &itr); 
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
+        mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+        mdl_mlcl_free(mlcl);
+    }
+    kb_destroy(kb_mdl_mlcl, mdl_bc->atac);
+    mdl_bc->atac = NULL;
+}
+
 mdl_pars_t *mdl_pars_init(){
     mdl_pars_t *gp = calloc(1, sizeof(mdl_pars_t));
     int err;

@@ -304,7 +304,7 @@
 
 #define mv_init(v) ( (v)->n = (v)->m = 0, (v)->a = NULL )
 
-#define mv_free(v) free((v)->a)
+#define mv_free(v) ( free((v)->a), (v)->a = NULL , (v)->n = (v)->m = 0 )
 
 #define mv_i(v, ix) (v)->a[(ix)]
 
@@ -317,5 +317,7 @@
 #define mv_insert(name, v, x, ix) __mv_insert_##name(v, x, ix)
 
 #define mv_resize(name, v, n) __mv_resize_##name(v, n)
+
+mv_declare(i32, int32_t)
 
 #endif // G_LIST_H

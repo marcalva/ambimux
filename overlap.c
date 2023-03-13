@@ -200,8 +200,10 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
                     /*********************************************************
                      * check splice junction N
                      *********************************************************/
-                    if (c_op == BAM_CREF_SKIP && ex1.end == r_beg && ex2.beg == r_end)
+                    if (c_op == BAM_CREF_SKIP && ex1.end == r_beg && ex2.beg == r_end){
                         sj[iso_i] = 1;
+                        break;
+                    }
 
                     /*********************************************************
                      * check intron overlap
@@ -230,9 +232,11 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
         }
 
         pt[iso_i] = qr_len ? (double)rl[iso_i] / (double)qr_len : 0;
+        assert(iro[iso_i] <= rl[iso_i]);
+        assert(ero[iso_i] <= rl[iso_i]);
         if (rl[iso_i] > 0){
-            pi[iso_i] = rl[iso_i] < 1 ? iro[iso_i] / rl[iso_i] : 0;
-            pe[iso_i] = rl[iso_i] < 1 ? ero[iso_i] / rl[iso_i] : 0;
+            pi[iso_i] = rl[iso_i] >= 1 ? iro[iso_i] / rl[iso_i] : 0;
+            pe[iso_i] = rl[iso_i] >= 1 ? ero[iso_i] / rl[iso_i] : 0;
         }
         iso_i++;
     }

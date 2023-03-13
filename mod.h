@@ -32,6 +32,47 @@
 
 #define TAU 0.01
 
+/*******************************************************************************
+ * hold bam barcode counts
+ ******************************************************************************/
+
+typedef struct mdl_mlcl_t {
+    mv_t(i32) feat_ixs; // vector of feature indices (length 1 for now)
+                      // For RNA, it is the gene index.
+                      // For ATAC, it is peak (1) or not (0)
+    mv_t(i32) var_ixs; // vector of variant indices
+    uint32_t counts; // number of molecules with this feature-variant comb.
+} mdl_mlcl_t;
+
+static inline int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2){
+    size_t i;
+    if (mv_size(&m1.feat_ixs) != mv_size(&m2.feat_ixs))
+        return( mv_size(&m1.feat_ixs) - mv_size(&m2.feat_ixs));
+
+    for (i = 0; i < mv_size(&m1.feat_ixs); ++i){
+        if (mv_i(&m1.feat_ixs, i) != mv_i(&m2.feat_ixs, i))
+            return( mv_i(&m1.feat_ixs, i) - mv_i(&m2.feat_ixs, i) );
+    }
+
+    if (mv_size(&m1.var_ixs) != mv_size(&m2.var_ixs))
+        return( mv_size(&m1.var_ixs) - mv_size(&m2.var_ixs));
+
+    for (i = 0; i < mv_size(&m1.var_ixs); ++i){
+        if (mv_i(&m1.var_ixs, i) != mv_i(&m2.var_ixs, i))
+            return( mv_i(&m1.var_ixs, i) - mv_i(&m2.var_ixs, i) );
+    }
+
+    return(0);
+}
+
+// btree to hold molecules per barcode
+KBTREE_INIT(kb_mdl_mlcl, mdl_mlcl_t, mdl_mlcl_cmp);
+
+typedef struct mdl_bc_t {
+    kbtree_t(kb_mdl_mlcl) *rna;
+    kbtree_t(kb_mdl_mlcl) *atac;
+} mdl_bc_t;
+
 /*********************
  * parameters
  *********************/
