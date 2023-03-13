@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <string.h>
 
-
 static inline size_t _bsize(size_t x){
     x = x >> 3;
     ++x;
@@ -19,7 +18,15 @@ typedef struct {
     size_t n_buckets; // length of f
 } bflg_t;
 
+#define bflg_init_empty(flg, n) ( (flg)->f = NULL, (flg)->n = 0, (flg)->n_buckets = 0 ) 
+
+#define bflg_free(flg) ( free((flg)->f), (flg)->n = 0, (flg)->n_buckets = 0 )
+#define bflg_unset(flg, ix) ( flg->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
+#define bflg_set(flg, ix) ( flg->f[(ix) >> 3] |= (1UL << ((ix) & 0x7U)) )
+#define bflg_get(flg, ix) ( ( flg->f[(ix) >> 3] >> ((ix) & 0x7U) ) & 1 ) 
+
 static inline int bflg_resize(bflg_t *bflg, size_t n){
+    if (n <= bflg->n) return(0);
     bflg->n = n;
     size_t m = _bsize(n);
     bflg->f = realloc(bflg->f, m * sizeof(uint8_t));
@@ -28,6 +35,9 @@ static inline int bflg_resize(bflg_t *bflg, size_t n){
         return(-1);
     }
     bflg->n_buckets = m;
+    // set allocated bits to 0
+    size_t i;
+    for (i = bflg->n; i < n; ++i) bflg_unset(bflg, i);
     return(0);
 }
 
@@ -43,13 +53,6 @@ static inline int bflg_init(bflg_t *bflg, size_t n){
     bflg->n_buckets = m;
     return(0);
 }
-
-#define bflg_init_empty(flg, n) 
-
-#define bflg_free(flg) free((flg)->f)
-#define bflg_unset(flg, ix) ( flg->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
-#define bflg_set(flg, ix) ( flg->f[(ix) >> 3] |= (1UL << ((ix) & 0x7U)) )
-#define bflg_get(flg, ix) ( ( flg->f[(ix) >> 3] >> ((ix) & 0x7U) ) & 1 ) 
 
 #endif // BITS_H
 
