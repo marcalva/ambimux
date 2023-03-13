@@ -29,7 +29,7 @@ int reg2bin(int beg, int end)
 }
 
 int reg2bins(int beg, int end, uint16_t list[MAX_BIN]){
-    int i = 0,k;
+    int i = 0, k;
     --end;
     list[i++] = 0;
     for (k =    1 + (beg>>26); k <=    1 + (end>>26); ++k) list[i++] = k;

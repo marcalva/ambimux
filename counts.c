@@ -56,12 +56,12 @@ seq_base_t *seq_base_dup(const seq_base_t *b, int *ret){
  * base list
  ******************************************************************************/
 
-int base_list_cmp(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual){
+int seq_base_l_cmp(ml_t(seq_base_l) bl1, ml_t(seq_base_l) bl2, int cmp_qual){
     int sc = ml_size(&bl1) - ml_size(&bl2);
     if (sc != 0) return(sc);
 
-    ml_node_t(base_list) *n1 = ml_begin(&bl1);
-    ml_node_t(base_list) *n2 = ml_begin(&bl2);
+    ml_node_t(seq_base_l) *n1 = ml_begin(&bl1);
+    ml_node_t(seq_base_l) *n2 = ml_begin(&bl2);
     while (n1 != NULL && n2 != NULL){
         seq_base_t b1 = ml_node_val(n1);
         seq_base_t b2 = ml_node_val(n2);
@@ -73,12 +73,12 @@ int base_list_cmp(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual){
     return(0);
 }
 
-int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual){
+int seq_base_l_equal(ml_t(seq_base_l) bl1, ml_t(seq_base_l) bl2, int cmp_qual){
     if (ml_size(&bl1) != ml_size(&bl2))
         return(0);
 
-    ml_node_t(base_list) *n1 = ml_begin(&bl1);
-    ml_node_t(base_list) *n2 = ml_begin(&bl2);
+    ml_node_t(seq_base_l) *n1 = ml_begin(&bl1);
+    ml_node_t(seq_base_l) *n2 = ml_begin(&bl2);
     while (n1 != NULL && n2 != NULL){
         seq_base_t b1 = ml_node_val(n1);
         seq_base_t b2 = ml_node_val(n2);
@@ -90,19 +90,19 @@ int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual){
     return(1);
 }
 
-int base_list_match_qual(ml_t(base_list) *bl, const ml_t(base_list) *cmp){
+int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp){
     if (bl == NULL || cmp == NULL)
-        return err_msg(-1, 0, "base_list_match_qual: argument is null");
+        return err_msg(-1, 0, "seq_base_l_match_qual: argument is null");
 
     if (ml_size(bl) != ml_size(cmp))
-        return err_msg(-1, 0, "base_list_match_qual: "
+        return err_msg(-1, 0, "seq_base_l_match_qual: "
                 "number of bases don't match (%zu != %zu)", 
                 ml_size(bl), ml_size(cmp));
 
-    ml_node_t(base_list) *n1 = ml_begin(bl), *n2 = ml_begin(cmp);
+    ml_node_t(seq_base_l) *n1 = ml_begin(bl), *n2 = ml_begin(cmp);
     while (n2 != NULL){
         if (seq_base_cmp(ml_node_val(n1), ml_node_val(n2), 0) != 0)
-            return err_msg(-1, 0, "base_list_match_qual: bases don't match");
+            return err_msg(-1, 0, "seq_base_l_match_qual: bases don't match");
         if ( ml_node_val(n2).qual > ml_node_val(n1).qual )
             ml_node_val(n1).qual = ml_node_val(n2).qual;
 
@@ -138,7 +138,7 @@ void seq_vac_dstry(seq_vac_t *v){
     free(v);
 }
 
-int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv, 
+int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv, 
         str_map *cmap, uint8_t min_qual){
     if (vl == NULL || gv == NULL || cmap == NULL)
         return err_msg(-1, 0, "seq_base_call_var: argument is null");
@@ -162,21 +162,24 @@ int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv,
         return(0);
 
     /* Get overlapping variants */
-    var_t *v_a = NULL, *v_hd = NULL;
     int n_added = 0;
-    int n_v = region_vars(gv, b_ref, b_beg, b_end, &v_hd);
+    ml_t(vcfr_list) vars;
+    ml_init(vcfr_list, &vars);
+    int n_v = g_var_get_region_vars(gv, b_ref, b_beg, b_end, &vars);
     if (n_v < 0) return(-1);
-    // debugging
+    // debugging to check for mutliple snps at same site
     // if (1){
-    if (n_v > 1){
+    if (n_v > 1 || ml_size(&vars) > 1){
         err_msg(0, 1, "seq_base_call_var: %i variants found at position %s:%"PRIi32"\n", 
                 n_v, b_ref, b_beg);
     }
     // }
 
-    /* loop through overlapping variants */
-    for (v_a = v_hd; v_a != NULL; v_a = v_a->next){
-        bcf1_t *rec = v_a->b;
+    /* loop through overlapping variants (should just be one) */
+    ml_node_t(vcfr_list) *vn;
+    for (vn = ml_begin(&vars); vn; vn = ml_node_next(vn)){
+        var_t var = ml_node_val(vn);
+        bcf1_t *rec = var.b;
         // skip if position doesn't overlap
         if (rec->pos != b_beg)
             continue;
@@ -188,13 +191,13 @@ int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv,
         // throw error if more alleles than present than can be stored.
         // last allele is reserved for missing/other
         if (rec->n_allele > (MAX_ALLELE-1))
-            return err_msg(-1, 0, "seq_base_call_var: variant has %u alleles, "
-                    "more than %i that is allowed", rec->n_allele, MAX_ALLELE-1);
+            return err_msg(-1, 0, "seq_base_call_var: too many alleles: "
+                    "%i > %i", rec->n_allele, MAX_ALLELE-1);
 
         // set up vac
         seq_vac_t v_i;
-        v_i.vix = v_a->vix;
-        assert(v_i.vix >= 0 && v_i.vix < gv->n_e);
+        v_i.vix = var.vix;
+        assert(v_i.vix >= 0 && v_i.vix < (int32_t)mv_size(&gv->vix2var));
         v_i.allele = 0xf; // missing value
         v_i.qual = b_qual;
 
@@ -214,22 +217,18 @@ int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv,
 
         // add variant
         // TODO: change back to 0,0 
-        if (vac_list_insert(vl, v_i, 1, 1) < 0)
+        if (seq_vac_l_insert(vl, v_i, 1, 1) < 0)
             return err_msg(-1, 0, "seq_base_call_var: error adding variant call, %i vars", n_v);
         ++n_added;
     }
     // free allocated var_t objects.
-    v_a = v_hd;
-    while (v_a != NULL){
-        var_t *v_tmp = v_a->next;
-        free(v_a);
-        v_a = v_tmp;
-    }
+    ml_free(vcfr_list, &vars);
+
     /* debug */
     /*
     if (1){
         printf("var list:\n");
-        ml_node_t(vac_list) *nv;
+        ml_node_t(seq_vac_l) *nv;
         for (nv = ml_begin(vl); nv; nv = ml_node_next(nv)){
             seq_vac_t vi = ml_node_val(nv);
             printf("\tvix=%i,allele=%u,qual=%u\n", vi.vix, vi.allele, vi.qual);
@@ -239,14 +238,14 @@ int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv,
     return(n_added);
 }
 
-int vac_list_call_var(ml_t(base_list) *bl, ml_t(vac_list) *vl, g_var_t *gv, 
+int seq_vac_l_call_var(ml_t(seq_base_l) *bl, ml_t(seq_vac_l) *vl, g_var_t *gv, 
         str_map *cmap, uint8_t min_qual){
     if (bl == NULL || vl == NULL || gv == NULL || cmap == NULL){
-        return err_msg(-1, 0, "vac_list_call_var: arguments cannot be NULL");
+        return err_msg(-1, 0, "seq_vac_l_call_var: arguments cannot be NULL");
     }
 
     int n_added = 0;
-    ml_node_t(base_list) *vn;
+    ml_node_t(seq_base_l) *vn;
     for (vn = ml_begin(bl); vn; vn = ml_node_next(vn)){
         seq_base_t b = ml_node_val(vn);
         int nadd = seq_base_call_var(b, vl, gv, cmap, min_qual);
@@ -308,12 +307,12 @@ seq_gene_t *seq_gene_dup(const seq_gene_t *src, int *ret){
     return(cpy);
 }
 
-int gene_list_cmp(ml_t(gene_list) gl1, ml_t(gene_list) gl2){
+int seq_gene_l_cmp(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2){
     int sc = ml_size(&gl1) - ml_size(&gl2);
     if (sc != 0) return(sc);
 
-    ml_node_t(gene_list) *n1 = ml_begin(&gl1);
-    ml_node_t(gene_list) *n2 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n1 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl1);
     while (n1 != NULL && n2 != NULL){
         seq_gene_t g1 = ml_node_val(n1);
         seq_gene_t g2 = ml_node_val(n2);
@@ -326,12 +325,12 @@ int gene_list_cmp(ml_t(gene_list) gl1, ml_t(gene_list) gl2){
     return(0);
 }
 
-int gene_list_equal(ml_t(gene_list) gl1, ml_t(gene_list) gl2){
+int seq_gene_l_equal(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2){
     if (ml_size(&gl1) != ml_size(&gl2))
         return(0);
 
-    ml_node_t(gene_list) *n1 = ml_begin(&gl1);
-    ml_node_t(gene_list) *n2 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n1 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl1);
     while (n1 != NULL && n2 != NULL){
         seq_gene_t g1 = ml_node_val(n1);
         seq_gene_t g2 = ml_node_val(n2);

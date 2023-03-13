@@ -18,7 +18,7 @@ void atac_read_set0(atac_read1_t *ar){
     if (ar == NULL) return;
 
     init_g_region(&ar->loc);
-    base_list_init(&ar->bl);
+    seq_base_l_init(&ar->bl);
 }
 
 atac_read1_t *atac_read_init(){
@@ -37,7 +37,7 @@ atac_read1_t *atac_read_init(){
 void atac_read_free(atac_read1_t *ar){
     if (ar == NULL) return;
 
-    base_list_free(&ar->bl);
+    seq_base_l_free(&ar->bl);
 }
 
 void atac_read_dstry(atac_read1_t *ar){
@@ -58,7 +58,7 @@ atac_read1_t *atac_read1_dup(const atac_read1_t *r, int *ret){
 
     cpy->loc = r->loc;
 
-    if ( base_list_cpy(&cpy->bl, &r->bl) < 0 ){
+    if ( seq_base_l_cpy(&cpy->bl, &r->bl) < 0 ){
         *ret = -1;
         free(cpy);
         return(NULL);
@@ -75,7 +75,7 @@ int atac_read1_cpy(atac_read1_t *dest, const atac_read1_t *src){
 
     dest->loc = src->loc;
     
-    if ( base_list_cpy(&dest->bl, &src->bl) < 0 )
+    if ( seq_base_l_cpy(&dest->bl, &src->bl) < 0 )
         return(-1);
 
     return(0);
@@ -89,7 +89,7 @@ int atac_read_equal(atac_read1_t r1, atac_read1_t r2){
         return(0);
 
     /* compare bases, ignore qual */
-    int bcmp = base_list_equal(r1.bl, r2.bl, 0);
+    int bcmp = seq_base_l_equal(r1.bl, r2.bl, 0);
     if (bcmp != 1)
         return(0);
     return(1);
@@ -99,7 +99,7 @@ int atac_read1_add_base(atac_read1_t *r, seq_base_t base){
     if (r == NULL)
         return err_msg(-1, 0, "atac_read1_add_base: arguments are NULL");
 
-    if (base_list_insert(&r->bl, base, 1, 1) < 0) return(-1);
+    if (seq_base_l_insert(&r->bl, base, 1, 1) < 0) return(-1);
 
     return(0);
 }
@@ -248,9 +248,9 @@ int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp){
     if (rp->s == 0)
         return(0);
 
-    if (base_list_match_qual(&rp->r1.bl, &cmp->r1.bl) < 0)
+    if (seq_base_l_match_qual(&rp->r1.bl, &cmp->r1.bl) < 0)
         return(-1);
-    if (rp->s == 2 && base_list_match_qual(&rp->r2.bl, &cmp->r2.bl) < 0)
+    if (rp->s == 2 && seq_base_l_match_qual(&rp->r2.bl, &cmp->r2.bl) < 0)
         return(-1);
 
     return(0);
@@ -337,11 +337,9 @@ atac_frag_t *atac_frag_init(){
     }
     f->dups = atac_dups_init();
     if (f->dups == NULL) return(NULL);
-    base_list_init(&f->bl);
-    vac_list_init(&f->vl);
-    f->pks.ix = NULL;
-    f->pks.n = 0;
-    f->pks.m = 0;
+    seq_base_l_init(&f->bl);
+    seq_vac_l_init(&f->vl);
+    mv_init(&f->pks);
     f->_dedup = 0;
     f->s = 0;
     return(f);
@@ -351,9 +349,9 @@ void atac_frag_dstry(atac_frag_t *f){
     if (f == NULL) return;
 
     atac_dups_dstry(f->dups);
-    base_list_free(&f->bl);
-    vac_list_free(&f->vl);
-    free(f->pks.ix);
+    seq_base_l_free(&f->bl);
+    seq_vac_l_free(&f->vl);
+    mv_free(&f->pks);
     free(f);
 }
 
@@ -396,20 +394,20 @@ int atac_frag_dedup(atac_frag_t *frag){
 
     atac_rd_pair_t rpb = dups->dups[ix_best].rd;
 
-    ml_node_t(base_list) *bn;
+    ml_node_t(seq_base_l) *bn;
 
     assert(rpb.s == 2);
 
     /* add bases from read 1 */
     for (bn = ml_begin(&rpb.r1.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
-        if (base_list_insert(&frag->bl, base, 1, 1) < 0) return(-1);
+        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) return(-1);
     }
 
     /* add bases from read 2 */
     for (bn = ml_begin(&rpb.r2.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
-        if (base_list_insert(&frag->bl, base, 1, 1) < 0) return(-1);
+        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) return(-1);
     }
 
     /* add number of supporting reads */
@@ -430,10 +428,10 @@ int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap,
         return err_msg(-1, 0, "atac_frag_var_call: arguments must not be NULL");
     }
 
-    int ret = vac_list_call_var(&f->bl, &f->vl, gv, cmap, min_qual);
+    int ret = seq_vac_l_call_var(&f->bl, &f->vl, gv, cmap, min_qual);
     // TODO: remove this
     if (ret < 0){
-        ml_node_t(base_list) *n = ml_begin(&f->bl);
+        ml_node_t(seq_base_l) *n = ml_begin(&f->bl);
         while (n != NULL){
             seq_base_t b = ml_node_val(n);
             fprint_g_pos(stderr, b.pos);
@@ -443,7 +441,7 @@ int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap,
     }
 
     // free the bases since we don't need them anymore
-    base_list_free(&f->bl);
+    seq_base_l_free(&f->bl);
 
     return(ret);
 }
@@ -464,35 +462,38 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     if (end < beg)
         return err_msg(-1, 0, "atac_frag_peak_call: end %" PRIi32 " < beg %" PRIi32, end, beg);
 
-    iregn_t overlaps = {NULL,0,0};
+    mv_t(int_vec) overlaps;
+    mv_init(&overlaps);
     int ret = iregs_overlap(pks, chr, beg, end, &overlaps);
     if (ret < 0) return(-1);
 
     // check if peak overlaps by at least one base
     // if so, add to f->pks
     size_t i;
-    for (i = 0; i < overlaps.n; ++i){
-        int ix = overlaps.ix[i];
+    for (i = 0; i < mv_size(&overlaps); ++i){
+        int ix = mv_i(&overlaps, i);
         if (ix >= pks->n)
             return err_msg(-1, 0, "atac_frag_peak_call: %zu index >= num of peaks %zu", ix, pks->n);
         g_region pk_reg = pks->reg[ix];
+
         int64_t ovrlp;
+
         // check cut site 1 (+4 based on 10X)
         ovrlp = bp_overlap(beg+4, beg+5, '.', pk_reg.start, pk_reg.end, '.');
         if (ovrlp < 0) return(-1);
-        if (ovrlp > 0 && iregn_add_ix(&f->pks, overlaps.ix[i]) < 0)
+        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0)
             return(-1);
 
         // check cut site 2 (-5 based on 10X)
         ovrlp = bp_overlap(end-5, end-4, '.', pk_reg.start, pk_reg.end, '.');
         if (ovrlp < 0) return(-1);
-        if (ovrlp > 0 && iregn_add_ix(&f->pks, overlaps.ix[i]) < 0)
+        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0)
             return(-1);
     }
 
-    free(overlaps.ix);
+    mv_free(&overlaps);
 
-    return(f->pks.n);
+    return(mv_size(&f->pks));
 }
 
 /*******************************************************************************

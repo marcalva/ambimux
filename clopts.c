@@ -147,7 +147,7 @@ void dstry_obj_pars(obj_pars *objs){
     if (objs->sr) bcf_sr_destroy(objs->sr);
     // if (objs->vcf_hdr) bcf_hdr_destroy(objs->vcf_hdr);
 
-    if (objs->anno) destroy_anno(objs->anno);
+    if (objs->anno) gene_anno_dstry(objs->anno);
 
     if (objs->pks) iregs_dstry(objs->pks);
 
@@ -157,7 +157,7 @@ void dstry_obj_pars(obj_pars *objs){
 
     if (objs->region) free(objs->region);
 
-    destroy_gv(objs->gv);
+    g_var_dstry(objs->gv);
     
     destroy_str_map(objs->cmap);
 
@@ -173,9 +173,6 @@ int load_rna_bam(cl_opts *opts, obj_pars *objs){
         return err_msg(-1, 0, "load_rna_bam: 'opts' or 'objs' is null");
     if (opts->rna_bam_fn == NULL) return(0);
 
-    if (opts->verbose)
-        log_msg("loading RNA BAM file");
-
     int ret = load_bam(opts->rna_bam_fn, &objs->rna_bam, &objs->rna_bam_hdr, &objs->rna_bam_idx);
     if (ret < 0) return(-1);
     else return(1);
@@ -185,9 +182,6 @@ int load_atac_bam(cl_opts *opts, obj_pars *objs){
     if (opts == NULL || objs == NULL)
         return err_msg(-1, 0, "load_atac_bam: 'opts' or 'objs' is null");
     if (opts->atac_bam_fn == NULL) return(0);
-
-    if (opts->verbose)
-        log_msg("loading ATAC BAM file");
 
     int ret = load_bam(opts->atac_bam_fn, &objs->atac_bam, &objs->atac_bam_hdr, &objs->atac_bam_idx);
     if (ret < 0) return(-1);
@@ -202,7 +196,7 @@ int load_vars(cl_opts *opts, obj_pars *objs){
     int ret;
 
     if (opts->verbose)
-        log_msg("loading variants");
+        log_msg("reading VCF file");
 
     /* Load in VCF file */
     ret = load_vcf(opts->vcf_fn, opts->region, opts->region_set, &objs->sr, &objs->vcf_hdr);
@@ -217,7 +211,7 @@ int load_vars(cl_opts *opts, obj_pars *objs){
                 "from %s", opts->vcf_fn, opts->sample_fn);
     }
 
-    objs->gv = vcf2gv(objs->sr, objs->vcf_hdr, 0, 0);
+    objs->gv = g_var_read_vcf(objs->sr, objs->vcf_hdr, 0, 0);
     if (objs->gv == NULL) return(-1);
 
     // chr map
@@ -245,7 +239,7 @@ int load_gtf(cl_opts *opts, obj_pars *objs){
         return(0);
 
     if (opts->verbose)
-        log_msg("loading GTF file");
+        log_msg("reading GTF file");
 
     objs->anno = read_from_gtf(opts->gtf_fn, opts->tx_basic);
     if (objs->anno == NULL)
@@ -261,9 +255,6 @@ int load_samples(cl_opts *opts, obj_pars *objs){
     if (opts->sample_fn == NULL)
         return(0);
 
-    if (opts->verbose)
-        log_msg("loading samples");
-
     objs->samples = read_str_map(opts->sample_fn);
     if (objs->samples == NULL)
         return err_msg(-1, 0, "load_samples: failed to read samples "
@@ -277,7 +268,7 @@ int load_bcs(cl_opts *opts, obj_pars *objs){
         return err_msg(-1, 0, "load_bcs: 'opts' or 'objs' is null");
 
     if (opts->verbose)
-        log_msg("loading barcodes");
+        log_msg("reading barcode whitelist");
 
     if (opts->wl_bc_fn != NULL){
         objs->wl_bcs = read_str_map(opts->wl_bc_fn);
@@ -295,7 +286,7 @@ int load_peaks(cl_opts *opts, obj_pars *objs){
 
     if (opts->peaks_fn == NULL) return(0);
 
-    if (opts->verbose) log_msg("loading peaks");
+    if (opts->verbose) log_msg("reading peaks");
 
     if ((objs->pks = iregs_init()) == NULL) return(-1);
     if (iregs_add_bed(objs->pks, opts->peaks_fn) < 0) return(-1);
@@ -310,7 +301,7 @@ int load_exclude(cl_opts *opts, obj_pars *objs){
 
     if (opts->exclude_fn == NULL) return(0);
 
-    if (opts->verbose) log_msg("loading exclusion regions");
+    if (opts->verbose) log_msg("reading exclusion regions");
 
     if ((objs->exclude = iregs_init()) == NULL) return(-1);
     if (iregs_add_bed(objs->exclude, opts->exclude_fn) < 0) return(-1);

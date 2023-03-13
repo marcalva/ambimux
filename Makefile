@@ -26,6 +26,10 @@ ambimux : $(OBJS) $(HTSLIB)
 %.o: %.c %.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $< 
 
+cleano :
+	rm -f *o
+	rm -f ambimux
+
 clean:
 	rm -f *o
 	rm -f ambimux

@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include "str_util.h"
+#include "g_list.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
 #include "htslib/vcf.h"
@@ -11,6 +12,10 @@
 
 #define count_t uint16_t
 #define n_bases 16 // 2^4
+
+/*******************************************************************************
+ * g_region
+ ******************************************************************************/
 
 /*! @typedef
  * @abstrac Structure to hold read region
@@ -33,6 +38,7 @@ typedef struct g_region {
 } g_region;
 
 // hash function for a g_region
+// kh_g_region_hf
 static inline khint_t kh_g_region_hf(g_region reg) {
     khint_t h = (khint_t)kh_int_hash_func(reg.rid);
     khint_t sh = kh_int_hash_func(reg.start);
@@ -53,41 +59,15 @@ static inline khint_t kh_g_region_he(g_region reg1, g_region reg2){
 // collision check
 KHASH_INIT(kh_reg, g_region, int, 1, kh_g_region_hf, kh_g_region_he);
 
-typedef struct g_reg_pair {
-    g_region r1;
-    g_region r2;
-} g_reg_pair;
-
-typedef struct g_pos {
-    char strand;
-    int32_t rid;
-    int32_t pos;
-} g_pos;
-
-/*******************************************************************************
- * g_region g_pos
- ******************************************************************************/
-
 /* initialize members of a g_region object
  * Sets the rid, start, and end members to -1.
- *
- * @param reg Pointer to g_region object.
  */
 void init_g_region(g_region *reg);
 
 /* Set the coordinates of a g_region object.
- *
  * The parameter start must be less than or equal to parameter end.
- *
- * @param reg Pointer to g_region object.
- * @param rid Integer ID of reference contig.
- * @param start Integer position of start coordinate.
- * @param end Integer position of end coordinate.
- * @param strand Character of strand.
- *
- * @return 0 on success, -1 on error.
  */
-int set_region(g_region *reg, int32_t rid, int32_t start, int32_t end, 
+void set_region(g_region *reg, int32_t rid, int32_t start, int32_t end, 
         char strand);
 
 /* Compare two regions for equality.
@@ -103,25 +83,17 @@ int regioncmp(g_region r1, g_region r2);
 /* Print a g_region */
 void print_g_region(FILE *f, g_region g);
 
+/*******************************************************************************
+ * g_pos
+ ******************************************************************************/
+
+typedef struct g_pos {
+    char strand;
+    int32_t rid;
+    int32_t pos;
+} g_pos;
+
 void init_g_pos(g_pos *p);
-void init_reg_pair(g_reg_pair *rp);
-
-/* Create a g_reg_pair object from two g_region objects.
- *
- * @return g_reg_pair object.
- */
-g_reg_pair get_reg_pair(g_region r1, g_region r2);
-
-/* Set position in g_pos object.
- *
- * @param p Pointer to g_pos object.
- * @param rid Integer ID of reference chromosome.
- * @param pos An int32_t object giving the position.
- * @param strand A char giving the strand.
- *
- * @return -1 on error, 0 on success
- */
-int set_pos(g_pos *p, int32_t rid, int32_t pos, char strand);
 
 /* Compare positions from two g_pos objects.
  *
@@ -146,6 +118,20 @@ char *str_g_pos(g_pos p);
  * Prints (Chr ID) %ID (Pos) %POS (Strand) %STRAND
  */
 void fprint_g_pos(FILE *f, g_pos p);
+
+/*******************************************************************************
+ * g_reg_pair
+ ******************************************************************************/
+
+typedef struct g_reg_pair {
+    g_region r1;
+    g_region r2;
+} g_reg_pair;
+
+void init_reg_pair(g_reg_pair *rp);
+
+/* Create a g_reg_pair object from two g_region objects. */
+g_reg_pair get_reg_pair(g_region r1, g_region r2);
 
 /* Hash function for g_reg_pair object.
  *
@@ -183,6 +169,10 @@ typedef struct iregn_t {
     int *ix;
     size_t n, m;
 } iregn_t;
+
+// vector of ints (for indices)
+// mv_t(int_vec)
+mv_declare(int_vec, int);
 
 /* Add ix to iregn_t object.
  *
@@ -273,7 +263,7 @@ int iregs_parse_bed(iregs_t *iregs);
  *  -1 on error
  */
 int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end, 
-        iregn_t *overlaps);
+        mv_t(int_vec) *overlaps);
 
 /* Test if a region has an overlapping region in iregs.
  *
@@ -282,9 +272,10 @@ int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end,
 static inline 
 int iregs_has_overlap(iregs_t *iregs, const char *chr, 
         int32_t beg, int32_t end){
-    iregn_t overlaps = {NULL,0,0};
-    int ret = iregs_overlap(iregs, chr, beg, end, &overlaps);
-    free(overlaps.ix);
+    mv_t(int_vec) v;
+    mv_init(&v);
+    int ret = iregs_overlap(iregs, chr, beg, end, &v);
+    mv_free(&v);
     return(ret);
 }
 

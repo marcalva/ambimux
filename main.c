@@ -396,16 +396,19 @@ int main(int argc, char *argv[]){
         ER(ret);
     }
 
-    if (objs->verbose) log_msg("setting barcode whitelist");
+    if (objs->verbose) log_msg("getting barcode data from BAM records ");
     ret = bam_data_fill_bcs(bam_dat, objs->wl_bcs);
     ER(ret);
 
-    if (objs->verbose) log_msg("getting barcode stats");
     ret = bam_data_fill_stats(bam_dat, objs->rna_bam_hdr, objs->atac_bam_hdr);
     ER(ret);
 
     // generate gene counts
     ret = bam_count(bam_dat, objs, objs->out_fn);
+    ER(ret);
+
+    // fill list
+    ret = bam_data_fill_list(bam_dat);
     ER(ret);
 
     if (opts->counts_only)

@@ -21,6 +21,9 @@ bc_data_t *bc_data_init(){
         return(NULL);
     }
 
+    ml_init(mlaf, &bcdat->frags_l);
+    ml_init(mlar, &bcdat->mols_l);
+
     int err;
     if ((err = pthread_mutex_init(&bcdat->bc_lock, NULL)) != 0){
         err_msg(-1, 0, "bc_data_init: failed to initialize mutex %i", err);
@@ -38,10 +41,9 @@ void bc_data_dstry(bc_data_t *bcdat){
     if (bcdat->rna_mols != NULL){
         for (k = kh_begin(bcdat->rna_mols); k != kh_end(bcdat->rna_mols); ++k){
             if (!kh_exist(bcdat->rna_mols, k)) continue;
-            char *bc_key = kh_key(bcdat->rna_mols, k);
+            umishort umih = kh_key(bcdat->rna_mols, k);
             rna_mol_t *mol = kh_val(bcdat->rna_mols, k);
             rna_mol_dstry(mol);
-            free(bc_key);
         }
         kh_destroy(khrmn, bcdat->rna_mols);
     }
@@ -63,6 +65,9 @@ void bc_data_dstry(bc_data_t *bcdat){
     }
     bc_stats_dstry(bcdat->bc_stats);
 
+    ml_free(mlaf, &bcdat->frags_l);
+    ml_free(mlar, &bcdat->mols_l);
+
     pthread_mutex_destroy(&bcdat->bc_lock);
 
     free(bcdat);
@@ -82,32 +87,53 @@ void bc_data_free_atac_pairs(bc_data_t *bcdat){
     bcdat->atac_pairs = NULL;
 }
 
+int bc_data_fill_list(bc_data_t *bcdat){
+    if (bcdat == NULL)
+        return err_msg(-1, 0, "bc_data_fill_list: argument is null");
+
+    khash_t(khrmn) *mol_hash = bcdat->rna_mols;
+    khash_t(khaf) *frag_hash = bcdat->atac_frags;
+
+    khint_t k_bc;
+    for (k_bc = kh_begin(mol_hash); k_bc != kh_end(mol_hash); ++k_bc){
+        if (!kh_exist(mol_hash, k_bc)) continue;
+        rna_mol_t *mol = kh_val(mol_hash, k_bc);
+
+        if (ml_insert(mlar, &bcdat->mols_l, mol, 1, 1) < 0)
+            return(-1);
+    }
+
+    for (k_bc = kh_begin(frag_hash); k_bc != kh_end(frag_hash); ++k_bc){
+        if (!kh_exist(frag_hash, k_bc)) continue;
+        atac_frag_t *frag = kh_val(frag_hash, k_bc);
+
+        if (ml_insert(mlaf, &bcdat->frags_l, frag, 1, 1) < 0)
+            return(-1);
+    }
+    return(1);
+}
+
 /*******************************************************************************
  * RNA
  ******************************************************************************/
 
-int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, const char *name){
+int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, umishort umih){
     // check input
-    if (bcdat == NULL || r == NULL || name == NULL)
+    if (bcdat == NULL || r == NULL)
         return err_msg(-1, 0, "bc_data_rna_add_read: argument is null");
 
     if (bcdat->rna_mols == NULL)
         return err_msg(-1, 0, "bc_data_rna_add_read: bdat->rna_mols is null");
 
     khash_t(khrmn) *mols = bcdat->rna_mols;
-    khint_t k = kh_get(khrmn, mols, (char *)name); // add read by name (UMI barcode)
+    khint_t k = kh_get(khrmn, mols, umih); // add read by UMI hash
 
     // if mol isn't present, allocate and add
     int kret = 0;
     if (k == kh_end(mols)){
-        // add a strdup copy of UMI name to hash table key
-        char *name_cpy = strdup(name);
-        if (name_cpy == NULL)
-            return err_msg(-1 , 0, "bc_data_rna_add_read: %s", strerror(errno));
-
-        k = kh_put(khrmn, mols, name_cpy, &kret);
+        k = kh_put(khrmn, mols, umih, &kret);
         if (kret < 0)
-            return err_msg(-1, 0, "bc_data_rna_add_read: failed to add 'name' "
+            return err_msg(-1, 0, "bc_data_rna_add_read: failed to add UMI key "
                     "to mols hash table");
 
         if ( (kh_val(mols, k) = rna_mol_alloc()) == NULL )
@@ -402,8 +428,8 @@ int bam_data_fill_bcs(bam_data_t *bam_data, str_map *bcs){
  ******************************************************************************/
 
 int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc, 
-        const rna_read1_t *r, const char *name){
-    if (bam_data == NULL || bc == NULL || r == NULL || name == NULL)
+        const rna_read1_t *r, umishort umih){
+    if (bam_data == NULL || bc == NULL || r == NULL)
         return err_msg(-1, 0, "bam_data_rna_add_read: argument is null");
 
     bam_data->has_rna = 1;
@@ -443,7 +469,7 @@ int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc,
 
     if (pthread_mutex_lock(&bc_dat->bc_lock) != 0)
         return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex lock");
-    ret = bc_data_rna_add_read(bc_dat, r, name);
+    ret = bc_data_rna_add_read(bc_dat, r, umih);
     if (pthread_mutex_unlock(&bc_dat->bc_lock) != 0)
         return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex unlock");
     if (ret < 0)
@@ -607,6 +633,25 @@ int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks,
     return 0;
 }
 
+int bam_data_fill_list(bam_data_t *bam_data){
+    if (bam_data == NULL)
+        return err_msg(-1, 0, "bam_data_fill_list: argument is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t k;
+    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
+        if (!kh_exist(bcs_hash, k)) continue;
+
+        bc_data_t *bc_dat = kh_val(bcs_hash, k);
+        assert(bc_dat != NULL);
+
+        if (bc_data_fill_list(bc_dat) < 0)
+            return(-1);
+    }
+
+    return(0);
+}
+
 /*******************************************************************************
  * bc_stats
  ******************************************************************************/
@@ -628,7 +673,7 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
         if (mol == NULL) continue;
 
         // count genes
-        ml_node_t(gene_list) *gn;
+        ml_node_t(seq_gene_l) *gn;
         for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
             seq_gene_t gene = ml_node_val(gn);
             int ret;
@@ -638,7 +683,7 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
         }
 
         // count variant calls
-        ml_node_t(vac_list) *vn;
+        ml_node_t(seq_vac_l) *vn;
         for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
             int ret;
             seq_vac_t v = ml_node_val(vn);
@@ -686,16 +731,16 @@ int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_
 
         // peak counts
         size_t p_i;
-        for (p_i = 0; p_i < frag->pks.n; ++p_i){
+        for (p_i = 0; p_i < mv_size(&frag->pks); ++p_i){
             int ret;
-            kh_put(kh_cnt, bcc->peaks, frag->pks.ix[p_i], &ret);
+            kh_put(kh_cnt, bcc->peaks, mv_i(&frag->pks, p_i), &ret);
             if (ret < 0)
                 return err_msg(-1, 0, "bc_data_atac_fill_stats: failed to add to peak ID");
         }
-        if (frag->pks.n) ++in_pk;
+        if (mv_size(&frag->pks)) ++in_pk;
 
         // count variant calls
-        ml_node_t(vac_list) *vn;
+        ml_node_t(seq_vac_l) *vn;
         for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
             seq_vac_t v = ml_node_val(vn);
             int ret;

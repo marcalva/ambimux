@@ -95,36 +95,31 @@ seq_base_t *seq_base_dup(const seq_base_t *b, int *ret);
  * base list
  ******************************************************************************/
 
-/* declare base_list type
- * list type: ml_t(base_list)
- * node type: ml_node_t(base_list)
+/* declare seq_base_l type
+ * list type: ml_t(seq_base_l)
+ * node type: ml_node_t(seq_base_l)
  *
  */
-ml_declare(base_list, seq_base_t, base_cmp);
+ml_declare(seq_base_l, seq_base_t, base_cmp);
 
-// base_list functions
-#define base_list_init(ll) ml_init(base_list, ll)
-#define base_list_free(ll) ml_free(base_list, ll)
+// seq_base_l functions
+#define seq_base_l_init(ll) ml_init(seq_base_l, ll)
+#define seq_base_l_free(ll) ml_free(seq_base_l, ll)
 
 /* insert seq_base_t into base list object.
- * @param ll list of bases of type ml_t(base_list)
+ * @param ll list of bases of type ml_t(seq_base_l)
  * @param base base of type seq_base_t
  * @param skip_dup if base already found and skip_dup=1, then do nothing
  * @param dup_ok if dup_ok=0 and base already found, return error.
  */
-#define base_list_insert(ll, base, skip_dup, dup_ok) \
-    ml_insert(base_list, ll, base, skip_dup, dup_ok)
+#define seq_base_l_insert(ll, base, skip_dup, dup_ok) \
+    ml_insert(seq_base_l, ll, base, skip_dup, dup_ok)
 
-#define base_list_cpy(dest, src) ml_cpy(base_list, dest, src)
+#define seq_base_l_cpy(dest, src) ml_cpy(seq_base_l, dest, src)
 
-int base_list_cmp(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
-int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
-int base_list_match_qual(ml_t(base_list) *bl, const ml_t(base_list) *cmp);
-
-/*******************************************************************************
- * base_listist
- ******************************************************************************/
-
+int seq_base_l_cmp(ml_t(seq_base_l) bl1, ml_t(seq_base_l) bl2, int cmp_qual);
+int seq_base_l_equal(ml_t(seq_base_l) bl1, ml_t(seq_base_l) bl2, int cmp_qual);
+int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp);
 
 /*******************************************************************************
  * variant allele calls
@@ -169,48 +164,45 @@ void seq_vac_dstry(seq_vac_t *v);
 
 #define vac_cmp(v1, v2) ((v1).vix - (v2).vix)
 
-/* declare vac_list type
- * list type: ml_t(vac_list)
- * node type: ml_node_t(vac_list)
+/* declare seq_vac_l type
+ * list type: ml_t(seq_vac_l)
+ * node type: ml_node_t(seq_vac_l)
  *
  */
-ml_declare(vac_list, seq_vac_t, vac_cmp);
+ml_declare(seq_vac_l, seq_vac_t, vac_cmp);
 
-// base_list functions
-#define vac_list_init(ll) ml_init(vac_list, ll)
-#define vac_list_free(ll) ml_free(vac_list, ll)
+// seq_vac_l functions
+#define seq_vac_l_init(ll) ml_init(seq_vac_l, ll)
+#define seq_vac_l_free(ll) ml_free(seq_vac_l, ll)
 
-/* insert seq_base_t into base list object.
- * @param ll list of bases of type ml_t(base_list)
- * @param base base of type seq_base_t
- * @param skip_dup if base already found and skip_dup=1, then do nothing
- * @param dup_ok if dup_ok=0 and base already found, return error.
+/* insert seq_vac_t into vac list object.
+ * @param ll list of vacs of type ml_t(seq_vac_l)
+ * @param vac vac of type seq_vac_t
+ * @param skip_dup if vac already found and skip_dup=1, then do nothing
+ * @param dup_ok if dup_ok=0 and vac already found, return error.
  */
-#define vac_list_insert(ll, vac, skip_dup, dup_ok) \
-    ml_insert(vac_list, ll, vac, skip_dup, dup_ok)
+#define seq_vac_l_insert(ll, vac, skip_dup, dup_ok) \
+    ml_insert(seq_vac_l, ll, vac, skip_dup, dup_ok)
 
-#define vac_list_cpy(dest, src) ml_cpy(vac_list, dest, src)
+#define seq_vac_l_cpy(dest, src) ml_cpy(seq_vac_l, dest, src)
 
 
-/* Call variants from sequenced bases
+/* Call variants from sequenced vacs
  *
  * For each overlapping SNV, record the allele in a seq_vac_t object 
  * as the integer of the allele (0 for ref, 1 for first alt, ...).
  * Then add the seq_vac_t object to @p vacs.
  * If the vase in @p b is 'N', skip and return 0.
- * If the base quality is < min_qual, skip and return 0.
+ * If the vac quality is < min_qual, skip and return 0.
  */
 
-int seq_base_call_var(seq_base_t b, ml_t(vac_list) *vl, g_var_t *gv, 
+int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv, 
         str_map *cmap, uint8_t min_qual);
 
-int vac_list_call_var(ml_t(base_list) *bl, ml_t(vac_list) *vl, g_var_t *gv, 
+int seq_vac_l_call_var(ml_t(seq_base_l) *bl, ml_t(seq_vac_l) *vl, g_var_t *gv, 
         str_map *cmap, uint8_t min_qual);
 
-// int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
-
-/*******************************************************************************
- ******************************************************************************/
+// int seq_vac_l_equal(ml_t(seq_vac_l) bl1, ml_t(seq_vac_l) bl2, int cmp_qual);
 
 /*******************************************************************************
  * sequencing gene
@@ -258,32 +250,32 @@ seq_gene_t *seq_gene_dup(const seq_gene_t *src, int *ret);
 
 #define gene_cmp(g1, g2) ((g1).gene_id - (g2).gene_id)
 
-/* declare gene_list type
- * list type: ml_t(gene_list)
- * node type: ml_node_t(gene_list)
+/* declare seq_gene_l type
+ * list type: ml_t(seq_gene_l)
+ * node type: ml_node_t(seq_gene_l)
  *
  */
-ml_declare(gene_list, seq_gene_t, gene_cmp);
+ml_declare(seq_gene_l, seq_gene_t, gene_cmp);
 
-// base_list functions
-#define gene_list_init(ll) ml_init(gene_list, ll)
-#define gene_list_free(ll) ml_free(gene_list, ll)
+// seq_gene_l functions
+#define seq_gene_l_init(ll) ml_init(seq_gene_l, ll)
+#define seq_gene_l_free(ll) ml_free(seq_gene_l, ll)
 
-/* insert seq_base_t into base list object.
- * @param ll list of bases of type ml_t(base_list)
- * @param base base of type seq_base_t
- * @param skip_dup if base already found and skip_dup=1, then do nothing
- * @param dup_ok if dup_ok=0 and base already found, return error.
+/* insert seq_gene_t into gene list object.
+ * @param ll list of genes of type ml_t(seq_gene_l)
+ * @param gene gene of type seq_gene_t
+ * @param skip_dup if gene already found and skip_dup=1, then do nothing
+ * @param dup_ok if dup_ok=0 and gene already found, return error.
  */
-#define gene_list_insert(ll, gene, skip_dup, dup_ok) \
-    ml_insert(gene_list, ll, gene, skip_dup, dup_ok)
+#define seq_gene_l_insert(ll, gene, skip_dup, dup_ok) \
+    ml_insert(seq_gene_l, ll, gene, skip_dup, dup_ok)
 
-#define gene_list_cpy(dest, src) ml_cpy(gene_list, dest, src)
+#define seq_gene_l_cpy(dest, src) ml_cpy(seq_gene_l, dest, src)
 
-int gene_list_cmp(ml_t(gene_list) gl1, ml_t(gene_list) gl2);
-int gene_list_equal(ml_t(gene_list) gl1, ml_t(gene_list) gl2);
+int seq_gene_l_cmp(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2);
+int seq_gene_l_equal(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2);
 
-// int base_list_equal(ml_t(base_list) bl1, ml_t(base_list) bl2, int cmp_qual);
+// int seq_gene_l_equal(ml_t(seq_gene_l) bl1, ml_t(seq_gene_l) bl2, int cmp_qual);
 
 /*******************************************************************************
  ******************************************************************************/

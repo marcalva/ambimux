@@ -29,11 +29,13 @@ static inline float logsum2expf(float x1, float x2, int *ret){
 double maxd(double *x, uint32_t n);
 double logsumexpd(double *x, uint32_t n, int *ret);
 
-static inline double logsum2expd(double x1, double x2, int *ret){
+double logsumexpd2(double *x, uint32_t n);
+
+static inline double logsum2expd(double x1, double x2){
     double a[2];
     a[0] = x1;
     a[1] = x2;
-    return logsumexpd(a, 2, ret);
+    return logsumexpd2(a, 2);
 }
 
 // generate a pseudorandom positive number

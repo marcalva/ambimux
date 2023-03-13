@@ -8,7 +8,7 @@
 #include <string.h>
 
 int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a, 
-        ml_t(gene_list) *gl){
+        ml_t(seq_gene_l) *gl){
     if (h == NULL || b == NULL || a == NULL)
         return err_msg(-1, 0, "bam1_feat_overlap: argument is null");
 
@@ -28,41 +28,37 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a,
     if (bam_is_rev(b)) strand = '-';
 
     // get features that contain bam1_t read b.
-    int genes_len = 1;
-    gene_t **genes = malloc(genes_len * sizeof(gene_t *)); // must be freed.
+    ml_t(gl) genes;
+    ml_init(gl, &genes);
 
-    if (genes == NULL)
-        return err_msg(-1, 0, "bam1_feat_overlap: %s", strerror(errno));
-
-    int ngenes = feats_from_region(a, ref, b_beg, b_end, 1, strand, &genes, &genes_len);
+    int ngenes = feats_from_region(a, ref, b_beg, b_end, 1, strand, &genes);
     if (ngenes < 0) return -1;
 
     // add gene ID and splice status
     seq_gene_t sg;
     seq_gene_init(&sg);
-    int i;
-    for (i = 0; i < ngenes; ++i){
-        // check for bugs
-        if (genes[i] == NULL)
-            return err_msg(-1, 0, "bam1_feat_overlap: gene is null");
+    ml_node_t(gl) *gn;
+    for (gn = ml_begin(&genes); gn; gn = ml_node_next(gn)){
+        gene_t *gene = ml_node_val(gn);
 
-        char *id = genes[i]->id;
-        if (id == NULL)
-            return err_msg(-1, 0, "bam1_feat_overlap: gene name not found");
+        char *id = gene->id;
+        assert(id != NULL);
         int32_t gid = str_map_ix(a->gene_ix, id);
-        if (gid < 0) return(-1);
+        if (gid < 0)
+            return err_msg(-1, 0, "bam1_feat_overlap: failed to get gene index from gtf anno");
         sg.gene_id = gid;
 
         int sret = 0;
-        sg.splice = bam1_spliced(b, genes[i], &sret);
+        sg.splice = bam1_spliced(b, gene, &sret);
         if (sret < 0)
             return err_msg(-1, 0, "bam1_feat_overlap: splice failed");
 
-        if (ml_insert(gene_list, gl, sg, 0, 0) < 0)
+        if (ml_insert(seq_gene_l, gl, sg, 0, 0) < 0)
             return(-1);
         
     }
-    free(genes);
+
+    ml_free(gl, &genes);
 
     int ret = (int)(ml_size(gl));
     return ret;
@@ -105,13 +101,13 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
 
     int ix;
     for (ix = 0; ix < n_iso; ++ix){
-        iro[ix] = 0;
-        ero[ix] = 0;
-        rl[ix] = 0;
-        pe[ix] = 0;
-        pi[ix] = 0;
-        pt[ix] = 0;
-        sj[ix] = 0;
+        iro[ix] = 0.0;
+        ero[ix] = 0.0;
+        rl[ix] = 0.0;
+        pe[ix] = 0.0;
+        pi[ix] = 0.0;
+        pt[ix] = 0.0;
+        sj[ix] = 0.0;
     }
 
     char strand = '+';
@@ -123,17 +119,16 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
     // pos is 0-based leftmost base of first CIGAR op that consumes reference.
     int32_t pos = (int32_t)b->core.pos;
 
-    // get length of cigar length that consumes reference and query
+    // get length of cigar ops that consumes reference and query
     uint32_t qr_len = 0;
     uint32_t ci;
     for (ci = 0; ci < n_cigar; ++ci){
         uint32_t c_op = (uint32_t)bam_cigar_op(cigar_raw[ci]); // lower 4 bits is cigar op
         uint32_t c_len = (uint32_t)bam_cigar_oplen(cigar_raw[ci]); // higher 24 bits is length
 
-        int cr = bam_cigar_type(c_op)&2; // consumes reference
-        int cq = bam_cigar_type(c_op)&1; // consumes query
+        int crq = bam_cigar_type(c_op)&3; // consumes both
 
-        if (cr && cq) qr_len += c_len;
+        if (crq) qr_len += c_len;
     }
 
     int iso_i = 0; // isoform index
@@ -149,8 +144,9 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
             return 0;
         }
 
-        exon_t *exon = iso->exons;
-        if (exon == NULL){
+        ml_t(exon_list) *exons = &iso->exons;
+        size_t n_exons = ml_size(exons);
+        if (n_exons == 0){
             iso_i++;
             continue;
         }
@@ -164,6 +160,7 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
 
             int cr = bam_cigar_type(c_op)&2; // consumes reference
             int cq = bam_cigar_type(c_op)&1; // consumes query
+            int crq = bam_cigar_type(c_op)&3; // consumes both
 
             if (cr == 0 && cq == 0)
                 continue;
@@ -177,77 +174,65 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
             if (cr)
                 r_end = r_beg + c_len;
 
-            /*********************************************************
-             * check splice junction N
-             *********************************************************/
+            int64_t e_ovrlp = 0, i_ovrlp = 0;
+            ml_node_t(exon_list) *en;
+            for (en = ml_begin(exons); en; en = ml_node_next(en)){
+                exon_t ex1 = ml_node_val(en);
 
-            if (c_op == BAM_CREF_SKIP){
-                exon = iso->exons;
-                while (exon != NULL && exon->next != NULL && exon->end < r_beg){
-                    exon = exon->next;
+                /*********************************************************
+                 * check exon overlap
+                 *********************************************************/
+                if (crq){
+                    int64_t e_tmp_ovrlp = bp_overlap(r_beg, r_end, strand, 
+                            ex1.beg, ex1.end, g->strand);
+                    if (e_tmp_ovrlp < 0){
+                        *ret = -1;
+                        return 0;
+                    }
+                    e_ovrlp += e_tmp_ovrlp;
                 }
-                if (exon != NULL && exon->next != NULL && 
-                    exon->end == r_beg && exon->next->beg == r_end){
-                    sj[iso_i] = 1;
+
+                ml_node_t(exon_list) *en_next = ml_node_next(en);
+                if (en_next){
+                    exon_t ex2 = ml_node_val(en_next);
+                    assert(ex1.end <= ex2.beg);
+
+                    /*********************************************************
+                     * check splice junction N
+                     *********************************************************/
+                    if (c_op == BAM_CREF_SKIP && ex1.end == r_beg && ex2.beg == r_end)
+                        sj[iso_i] = 1;
+
+                    /*********************************************************
+                     * check intron overlap
+                     *********************************************************/
+                    if (crq){
+                        int64_t i_tmp_ovrlp = bp_overlap(r_beg, r_end, strand, 
+                                ex1.end, ex2.beg, g->strand);
+                        if (i_tmp_ovrlp < 0){
+                            *ret = -1;
+                            return 0;
+                        }
+                        i_ovrlp += i_tmp_ovrlp;
+                    }
                 }
+
+                if (ex1.beg >= r_end)
+                    break;
             }
+            ero[iso_i] += (double)e_ovrlp; // add overlap of CIGAR segment
+            iro[iso_i] += (double)i_ovrlp; // add overlap of CIGAR segment
 
-            /*********************************************************
-             * CQR length
-             * overlap with isoform [beg,end)
-             *********************************************************/
-
-            if (cr && cq){
+            // isoform overlap
+            if (crq)
                 rl[iso_i] += (double)bp_overlap(r_beg, r_end, strand, 
                         iso->beg, iso->end, g->strand);
-            }
-
-            /*********************************************************
-             * check intron overlap
-             *********************************************************/
-
-            if (cr && cq){
-                int64_t ovrlp = 0;
-                exon = iso->exons->next; // first exon is dummy node
-                while (exon != NULL && exon->next != NULL){
-                    int64_t tmp_ovrlp = bp_overlap(r_beg, r_end, strand, 
-                            exon->end, exon->next->beg, g->strand);
-                    if (tmp_ovrlp < 0){
-                        *ret = -1;
-                        return 0;
-                    }
-                    ovrlp += tmp_ovrlp;
-                    exon = exon->next;
-                }
-                iro[iso_i] += (double)ovrlp; // add overlap of CIGAR segment
-            }
-
-            /*********************************************************
-             * check exon overlap
-             *********************************************************/
-
-            if (cr && cq){
-                int64_t ovrlp = 0;
-                exon = iso->exons->next;
-                while (exon != NULL && exon->beg < r_end){
-                    int64_t tmp_ovrlp = bp_overlap(r_beg, r_end, strand, 
-                            exon->beg, exon->end, g->strand);
-                    if (tmp_ovrlp < 0){
-                        *ret = -1;
-                        return 0;
-                    }
-                    ovrlp += tmp_ovrlp;
-                    exon = exon->next;
-                }
-
-                ero[iso_i] += (double)ovrlp; // add overlap of CIGAR segment
-            }
         }
 
-        pt[iso_i] = (double)rl[iso_i] / (double)qr_len;
+        pt[iso_i] = qr_len ? (double)rl[iso_i] / (double)qr_len : 0;
         if (rl[iso_i] > 0){
-            pi[iso_i] = iro[iso_i] / rl[iso_i];
-            pe[iso_i] = ero[iso_i] / rl[iso_i];
+            pi[iso_i] = rl[iso_i] < 1 ? iro[iso_i] / rl[iso_i] : 0;
+            pe[iso_i] = rl[iso_i] < 1 ? ero[iso_i] / rl[iso_i] : 0;
         }
         iso_i++;
     }
@@ -256,19 +241,20 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
      * get spliced or unspliced status of record for each isoform
      *********************************************************/
 
+    // TODO: check how to handle reads that partially overal an isoform.
     int n_o_iso = 0; // number isoforms with full overlap with UMI
     int is_spl = 0, is_unspl = 0;
     for (ix = 0; ix < n_iso; ++ix){
         if (pt[ix] < 1) continue;
-        n_o_iso++;
+        ++n_o_iso;
         if (sj[ix] == 1) // if overlaps splice junction
-            is_spl++;
+            ++is_spl;
         if (pi[ix] > 0) // if at least one base pair overlaps intron
-            is_unspl++;
+            ++is_unspl;
     }
 
     /*********************************************************
-     * if read overlaps a splice junction from an isoform, then it is 
+     * if read overlaps a splice junction from any isoform, then it is 
      *  considered spliced
      * if read does not overlap any splice junction and at least one 
      *  base pair overlaps an intron for all isoforms, it is unspliced
@@ -293,8 +279,8 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret){
 
 /* new bam1 vars overlap. */
 int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, 
-        var_t **vars){
-    if (b == NULL || h == NULL || gv == NULL)
+        ml_t(vcfr_list) *vars){
+    if (b == NULL || h == NULL || gv == NULL || vars == NULL)
         return err_msg(-1, 0, "bam1_vars_overlap: argument is null");
 
     uint32_t *cigar_raw = (uint32_t *)bam_get_cigar(b);
@@ -324,7 +310,7 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
 
         // get overlapping variants from r_pos region.
         if ( cr && cq ){
-            int ret = region_vars(gv, ref, r_pos_beg, r_pos_end, vars);
+            int ret = g_var_get_region_vars(gv, ref, r_pos_beg, r_pos_end, vars);
             if (ret < -1)
                 return err_msg(-1, 0, "bam1_vars_overlap: failed region overlap at "
                         "%s:%"PRIi32"-%"PRIi32"\n", ref, r_pos_beg, r_pos_end);
@@ -336,25 +322,23 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
     return(n_vars);
 }
 
-int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(base_list) *bl){
-    if (h == NULL || b == NULL || gv == NULL)
+int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(seq_base_l) *bl){
+    if (h == NULL || b == NULL || gv == NULL || bl == NULL)
         return err_msg(-1, 0, "bam1_seq_base: argument is null");
 
     int vret;
-    var_t *ovars = NULL;
+    ml_t(vcfr_list) ovars;
+    ml_init(vcfr_list, &ovars);
     if ( (vret = bam1_vars_overlap(h, b, gv, &ovars)) < 0 )
         return(-1);
 
-    if (bl == NULL)
-        return err_msg(-1, 0, "bam1_seq_base: bl is null");
-    if (ml_size(bl) != 0)
-        return err_msg(-1, 0, "bam1_seq_base: bl is not empty");
-
-    var_t *tvar;
-    for (tvar = ovars; tvar != NULL; tvar = tvar->next){
+    int n_base = 0;
+    ml_node_t(vcfr_list) *vn;
+    for (vn = ml_begin(&ovars); vn; vn = ml_node_next(vn)){
+        var_t tvar = ml_node_val(vn);
         // Get position of the variant
-        int32_t v_rid = tvar->b->rid;
-        int32_t v_pos = tvar->b->pos;
+        int32_t v_rid = tvar.b->rid;
+        int32_t v_pos = tvar.b->pos;
 
         // Get base pair at overlapping site
         uint8_t base, qual;
@@ -372,19 +356,15 @@ int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(base_list) *b
 
         // TODO: better handle multi-allelic SNPs. Currently just skips adding 
         // duplicate bases if there are two or more variants at the same position.
-        if ( base_list_insert(bl, sb, 1, 1) < 0 )
+        if ( seq_base_l_insert(bl, sb, 1, 1) < 0 )
             return(-1);
 
+        ++n_base;
     }
 
-    while (ovars != NULL){
-        tvar = ovars->next;
-        free(ovars);
-        ovars = tvar;
-    }
+    ml_free(vcfr_list, &ovars);
 
-    int ret = (int)ml_size(bl);
-    return ret;
+    return n_base;
 }
 
 int64_t bp_overlap(int64_t a1, int64_t a2, char a_strand, int64_t b1, int64_t b2, char b_strand){

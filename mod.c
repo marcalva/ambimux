@@ -20,59 +20,6 @@
 
 #define feps (FLT_EPSILON * 100e3)
 
-flg *flg_init(int n){
-    flg *f = calloc(1, sizeof(flg));
-    if (f == NULL){
-        err_msg(-1, 0, "init_flg: %s", strerror(errno));
-        return(NULL);
-    }
-    int a = floor((n-1) / CHAR_BIT) + 1;
-    f->f = calloc(a, sizeof(char));
-    f->n = n;
-    return(f);
-}
-
-int flg_set_flag(flg *f, int ix){
-    if (ix < 0 || ix >= f->n){
-        return err_msg(-1, 0, "flg_set_flag: ix %i not in [0,%i)", ix, f->n);
-    }
-    int bix = ix % CHAR_BIT;
-    int fix = floor(ix / CHAR_BIT);
-    char fl = 0x1 << bix;
-    f->f[fix] |= fl;
-    return(0);
-}
-
-int flg_unset_flag(flg *f, int ix){
-    if (ix >= f->n){
-        return err_msg(-1, 0, "flg_unset_flag: ix %i not in [0,%i)", ix, f->n);
-    }
-    int bix = ix % CHAR_BIT;
-    int fix = floor(ix / CHAR_BIT);
-    char fl = 0x1 << bix;
-    f->f[fix] &= ~fl;
-    return(0);
-}
-
-int flg_get_flag(flg *f, int ix){
-    if (ix >= f->n){
-        return err_msg(-1, 0, "flg_get_flag: ix %i not in [0,%i)", ix, f->n);
-    }
-    int bix = ix % CHAR_BIT;
-    int fix = floor(ix / CHAR_BIT);
-    char fl = 0x1 << bix;
-    char on = f->f[fix] & fl;
-
-    if (on) return(1);
-    else return(0);
-}
-
-void flg_dstry(flg *f){
-    if (f == NULL) return;
-    if (f->f) free(f->f);
-    free(f);
-}
-
 mdl_pars_t *mdl_pars_init(){
     mdl_pars_t *gp = calloc(1, sizeof(mdl_pars_t));
     int err;
@@ -159,10 +106,13 @@ void mdl_dstry(mdl_t *m){
 
     bflg_free(m->fix_flag);
     bflg_free(m->absent_bc);
+    free(m->fix_flag);
+    free(m->absent_bc);
 
     uint32_t i;
     for (i = 0; i < m->c_probs_len; ++i){
         free(m->c_probs[i].cp_hs);
+        free(m->c_probs[i].lp_hs);
     }
     free(m->c_probs);
 
@@ -290,8 +240,8 @@ int mdl_init_all(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
     uint16_t n_samples = (uint16_t)bcf_hdr_nsamples(objs->vcf_hdr);
     if (n_samples == 0)
         return err_msg(-1, 0, "mdl_init_all: no samples");
-    uint32_t n_vars = (uint32_t)objs->gv->n_e;
 
+    uint32_t n_vars = (uint32_t)mv_size(&objs->gv->vix2var);
 
     pars->D = n_bcs;
     pars->G = n_genes;
@@ -350,11 +300,14 @@ int mdl_init_all(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         int fl;
         fl = bflg_get(mdl->fix_flag, i);
         uint32_t n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
+        mdl->c_probs[i].lp_hs = calloc(n_hs, sizeof(f_t));
         mdl->c_probs[i].cp_hs = calloc(n_hs, sizeof(f_t));
         if (mdl->c_probs[i].cp_hs == NULL)
             return err_msg(-1, 0, "mdl_pars_init_all: %s", strerror(errno));
-        mdl->c_probs[i].cp_hs[0] = 0;
-        for (j = 1; j < n_hs; ++j) mdl->c_probs[i].cp_hs[j] = -INFINITY;
+        mdl->c_probs[i].lp_hs[0] = 0;
+        for (j = 1; j < n_hs; ++j) mdl->c_probs[i].lp_hs[j] = -INFINITY;
+        mdl->c_probs[i].cp_hs[0] = 1;
+        for (j = 1; j < n_hs; ++j) mdl->c_probs[i].cp_hs[j] = 0;
     }
 
     mdl->eps = objs->eps;
@@ -390,8 +343,6 @@ int mdl_init_all(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
 
 int mdl_get_hst(mdl_t *mdl, int hs_ix, int *hd, int *s1, int *s2, int t_ix[3], int *t_n){
     // get (h,s,t) from index
-    assert(mdl != NULL);
-    assert(mdl->hs_ix != NULL);
 
     uint16_t M = mdl->mp->M;
 
@@ -429,9 +380,12 @@ int mdl_get_hst(mdl_t *mdl, int hs_ix, int *hd, int *s1, int *s2, int t_ix[3], i
  * Probability functions
  ******************************************************************************/
 
-int pr_hsd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
+void pr_hd(mdl_t *mdl, int hd, f_t *prob){
+    *prob = mdl->mp->lambda[hd];
+}
+
+// not in log
+void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob){
     f_t p_sd, p_hd = mdl->mp->lambda[hd];
     switch (hd) {
         case 0:
@@ -444,18 +398,13 @@ int pr_hsd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob){
             p_sd = (mdl->mp->pi[s1] * mdl->mp->pi[s2]) / mdl->mp->pi_d_sum;
             break;
         default:
-            return err_msg(-1, 0, "p_sd: hd=%i is invalid, there is a bug", hd);
+            p_sd = -1;
     }
-    assert(p_hd > 0);
-    assert(p_sd > 0);
-    *prob = log(p_hd) + log(p_sd);
-    return(0);
+    *prob = p_sd;
 }
 
+// not in log
 int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, f_t *prob){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
-    assert(mdl->mp->alpha != NULL);
 
     uint16_t M = mdl->mp->M;
     uint8_t c_ix = s_ix == M ? 0 : 1; // 0 is ambient, 1 is cell
@@ -478,91 +427,62 @@ int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, f_t *prob){
         default:
             return err_msg(-1, 0, "pr_tdm: hd=%i is invalid, there is a bug", hd);
     }
-    *prob = log(pr);
+    *prob = pr;
     return(0);
 }
 
-// s_ix is sample index (0, ..., M-1, M)
-// @return Pr(T_dm, G_dm, B_dm, X | \Theta)
-int p_hst_rna(mdl_t *mdl, rna_mol_t *mol, int bc_ix, int hd, int s_ix, f_t *prob){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
-    assert(mdl->mp->gamma != NULL);
-    assert(mdl->mp->rho != NULL);
-    assert(mol != NULL);
-    assert(mdl->has_rna);
-
+// not in log
+int p_rna(mdl_t *mdl, rna_mol_t *mol, int s_ix, f_t *prob){
     uint16_t M = mdl->mp->M, M1 = M + 1;
     uint32_t G = mdl->mp->G;
     uint32_t rho_nrow = 3 * G;
     uint8_t c_ix = s_ix == M ? 0 : 1; // 0 is ambient, 1 is cell
 
-    f_t lp = 0; // log prob
+    f_t lp = 1; // prob
 
     // probability terms
-    f_t lp_tdm = 1, p_gdm = 1, p_bdm = 1;
-
-    // Pr(T_dm | S_d, \alpha_d)
-    if (pr_tdm(mdl, bc_ix, hd, s_ix, &lp_tdm) < 0)
-        return -1;
-    lp += lp_tdm;
-    assert(!isnan(lp));
+    f_t p_gdm = 1, p_bdm = 1;
 
     // Pr(G_dm | T_dm, \rho)
     if (ml_size(&mol->gl) == 1){
-        ml_node_t(gene_list) *gn = ml_begin(&mol->gl);
+        ml_node_t(seq_gene_l) *gn = ml_begin(&mol->gl);
         seq_gene_t seq_gene = ml_node_val(gn);
         p_gdm = pr_rho_gene(mdl->mp->rho, seq_gene, (uint32_t)c_ix, G, rho_nrow);
     }
-    assert(p_gdm > 0);
-    lp += log(p_gdm);
-    assert(!isnan(lp));
+    lp *= p_gdm;
 
     // Pr(B_dm | T_dm, \gamma, pi)
-    ml_node_t(vac_list) *vn;
+    ml_node_t(seq_vac_l) *vn;
     for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
         seq_vac_t vac = ml_node_val(vn);
         p_bdm = pr_gamma_var(mdl->mp->gamma, vac, (uint32_t)s_ix, M1, mdl->mp->tau);
-        assert(p_bdm > 0);
-        lp += log(p_bdm);
+        lp *= p_bdm;
     }
 
-    assert(!isnan(lp));
     *prob = lp;
     return(0);
 }
 
-int p_hst_atac(mdl_t *mdl, atac_frag_t *frag, int bc_ix, int hd, int s_ix, f_t *prob){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
-    assert(mdl->mp->gamma != NULL);
-    assert(mdl->mp->rho != NULL);
-    assert(frag != NULL);
-    assert(mdl->has_atac);
+// not in log
+int p_atac(mdl_t *mdl, atac_frag_t *frag, int s_ix, f_t *prob){
 
-    size_t n_peaks = frag->pks.n;
+    size_t n_peaks = mv_size(&frag->pks);
 
     uint16_t M = mdl->mp->M, M1 = M + 1;
     uint8_t c_ix = s_ix == M ? 0 : 1; // 0 is ambient, 1 is cell
 
-    f_t lp = 0; // log prob
+    f_t lp = 1; // prob
 
     // probability terms
-    f_t lp_tdm = 1, p_pdm = 1, p_bdm = 1;
-
-    // Pr(T_dm | S_d, \alpha_d)
-    if (pr_tdm(mdl, bc_ix, hd, s_ix, &lp_tdm) < 0)
-        return -1;
-    lp += lp_tdm;
+    f_t p_pdm = 1, p_bdm = 1;
 
     // Pr(P_dm | T_dm, \sigma)
     p_pdm = mdl->mp->sigma[c_ix]; // frag in peak
     if (n_peaks == 0) p_pdm = 1 - p_pdm; // frag out peak
-    assert(p_pdm > 0);
-    lp += log(p_pdm);
+    lp *= p_pdm;
 
     // Pr(B_dm | T_dm, \gamma, pi)
-    ml_node_t(vac_list) *vn;
+    ml_node_t(seq_vac_l) *vn;
     for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
         seq_vac_t vac = ml_node_val(vn);
         if (vac.allele > 2) continue; // other alleles are considered missing
@@ -572,8 +492,7 @@ int p_hst_atac(mdl_t *mdl, atac_frag_t *frag, int bc_ix, int hd, int s_ix, f_t *
         f_t p_be0 = (1.0 - mdl->mp->tau) * ap;
         f_t p_be1 = mdl->mp->tau * 0.25;
         p_bdm = p_be0 + p_be1;
-        assert(p_bdm > 0);
-        lp += log(p_bdm);
+        lp *= p_bdm;
     }
     *prob = lp;
     return(0);
@@ -592,10 +511,29 @@ int mdl_e_hs(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
     assert(mdl->c_probs != NULL);
     assert(bam_data->bc_data != NULL);
 
+    uint16_t M = mdl->mp->M, M1 = M + 1;
+
     int lsret = 0;
 
+    // pre-calculate P(H_d, S_d)
+    f_t *lp_hs_v = calloc(mdl->_nrow_hs, sizeof(f_t));
+    uint32_t hs_i = 0;
+    for (hs_i = 0; hs_i < mdl->_nrow_hs; ++hs_i){
+        int hd, s1, s2, t_ix[3], t_n;
+        if (mdl_get_hst(mdl, hs_i, &hd, &s1, &s2, t_ix, &t_n) < 0)
+            return(-1);
+        f_t p_hd = -1, p_sd = -1;
+        pr_hd(mdl, hd, &p_hd);
+        pr_sd(mdl, hd, s1, s2, &p_sd);
+        lp_hs_v[hs_i] = log(p_hd) + log(p_sd);
+    }
+
+    f_t *p_tm_v[3];
+    uint32_t h_i = 0, t_i = 0;
+    for (h_i = 0; h_i < 3; ++h_i) p_tm_v[h_i] = calloc(M1, sizeof(f_t));
+
     uint32_t i, n_hs;
-    khint_t k, k_rna, k_atac;
+    khint_t k;
     for (i = 0; i < ix_len; ++i){
         // get barcode and bam data
         int bc_ix = ixs[i];
@@ -611,9 +549,9 @@ int mdl_e_hs(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
         fl = bflg_get(mdl->fix_flag, bc_ix);
         n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
 
-        mdl->c_probs[bc_ix].cp_hs[0] = 0;
+        mdl->c_probs[bc_ix].cp_hs[0] = 1;
         for (hs_ix = 1; hs_ix < n_hs; ++hs_ix)
-            mdl->c_probs[bc_ix].cp_hs[hs_ix] = -INFINITY;
+            mdl->c_probs[bc_ix].cp_hs[hs_ix] = 0;
 
         char *bc_key = str_map_str(mdl->all_bcs, bc_ix);
         k = kh_get(kh_bc_dat, bam_data->bc_data, bc_key);
@@ -627,6 +565,17 @@ int mdl_e_hs(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
         khash_t(khaf) *frags = bc_dat->atac_frags;
         assert(frags != NULL);
 
+        // pre-calculate P(T_dm) for this barcode
+        h_i = 0;
+        if (pr_tdm(mdl, bc_ix, h_i, M, p_tm_v[h_i] + M) < 0)
+            return(-1);
+        for (h_i = 1; h_i < 3; ++h_i){
+            for (t_i = 0; t_i < M1; ++t_i){
+                if (pr_tdm(mdl, bc_ix, h_i, t_i, p_tm_v[h_i] + t_i) < 0)
+                    return(-1);
+            }
+        }
+
         int moli = 0;
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
             // get (h,s,t) from index
@@ -635,229 +584,63 @@ int mdl_e_hs(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
             if (mdl_get_hst(mdl, hs_ix, &hd, &s1, &s2, t_ix, &t_n) < 0)
                 return(-1);
 
+            // hold Pr(H_d, S_d, X_d)
+            f_t lp_htd = 0;
+
             // Pr(H_d, S_d | \lambda, \pi)
-            f_t phsd;
-            if (pr_hsd(mdl, hd, s1, s2, &phsd) < 0)
-                return(-1);
-            f_t lp_htd = phsd;
+            lp_htd += lp_hs_v[hs_ix];
             moli=0;
 
-            if (bam_data->has_rna){
-                for (k_rna = kh_begin(mols); k_rna != kh_end(mols); ++k_rna){
-                    if (!kh_exist(mols, k_rna)) continue;
-                    rna_mol_t *mol = kh_val(mols, k_rna);
-                    assert(mol != NULL);
+            ml_node_t(mlar) *rn;
+            for (rn = ml_begin(&bc_dat->mols_l); rn; rn = ml_node_next(rn)){
+                rna_mol_t *mol = ml_node_val(rn);
 
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        // Pr(T_dm, G_dm, B_dm | \Theta)
-                        if (p_hst_rna(mdl, mol, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
-                        assert(!isnan(lp_tgpb[t_i]));
-                    }
-                    lp_htd += logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_e_hs: log sum error rna");
-                    // ++moli;
+                f_t psum = 0, p_tgpb[3] = {1,1,1};
+                int t_i;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    f_t p_t = p_tm_v[hd][s_ix];
+                    f_t p_gv = 0;
+                    if (p_rna(mdl, mol, s_ix, &p_gv) < 0)
+                        return(-1);
+                    p_tgpb[t_i] = p_t * p_gv;
+                    psum += p_tgpb[t_i];
                 }
+                lp_htd += log(psum);
+                // ++moli;
             }
-            if (bam_data->has_atac){
-                for (k_atac = kh_begin(frags); k_atac != kh_end(frags); ++k_atac){
-                    if (!kh_exist(frags, k_atac)) continue;
-                    atac_frag_t *frag = kh_val(frags, k_atac);
-                    assert(frag != NULL);
+            ml_node_t(mlaf) *fn;
+            for (fn = ml_begin(&bc_dat->frags_l); fn; fn = ml_node_next(fn)){
+                atac_frag_t *frag = ml_node_val(fn);
 
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        // Pr(T_dm, P_dm, B_dm | \Theta)
-                        if (p_hst_atac(mdl, frag, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
-                        assert(!isnan(lp_tgpb[t_i]));
-                    }
-                    lp_htd += logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_e_hs: log sum error atac");
-                    ++moli;
+                f_t psum = 0, p_tgpb[3] = {1,1,1};
+                int t_i;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    f_t p_t = p_tm_v[hd][s_ix];
+                    f_t p_pv = 0;
+                    if (p_atac(mdl, frag, s_ix, &p_pv) < 0)
+                        return(-1);
+                    p_tgpb[t_i] = p_t * p_pv;
+                    psum += p_tgpb[t_i];
                 }
+                // lp_htd += logsumexpd2(lp_tgpb, t_n);
+                lp_htd += log(psum);
+                ++moli;
             }
-            assert(!isnan(lp_htd));
-            assert(lp_htd <= 0);
-            mdl->c_probs[bc_ix].cp_hs[hs_ix] = lp_htd;
+            mdl->c_probs[bc_ix].lp_hs[hs_ix] = lp_htd;
         }
         // Pr(X_d | \Theta)
-        mdl->c_probs[bc_ix].p_x = logsumexpd(mdl->c_probs[bc_ix].cp_hs, n_hs, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_e_hs: log sum error p_x");
+        mdl->c_probs[bc_ix].p_x = logsumexpd2(mdl->c_probs[bc_ix].lp_hs, n_hs);
+        assert(!isnan(mdl->c_probs[bc_ix].p_x));
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
-            mdl->c_probs[bc_ix].cp_hs[hs_ix] -= mdl->c_probs[bc_ix].p_x;
+            f_t ldiv = mdl->c_probs[bc_ix].lp_hs[hs_ix] - 
+                mdl->c_probs[bc_ix].p_x;
+            mdl->c_probs[bc_ix].cp_hs[hs_ix] = exp(ldiv);
         }
     }
-    return(0);
-}
-
-int mdl_q(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len, double *q){
-    if (mdl == NULL || ixs == NULL)
-        return err_msg(-1, 0, "mdl_q: arguments are null");
-
-    uint32_t i;
-    uint16_t M = mdl->mp->M, M1 = M + 1;
-    uint32_t G = mdl->mp->G;
-    uint32_t rho_nrow = 3 * G;
-
-    uint32_t hs_ix;
-    int lsret = 0;
-    khint_t k;
-
-    f_t ellk = 0;
-
-    for (i = 0; i < ix_len; ++i){
-        uint32_t bc_ix = ixs[i];
-
-        int fl;
-
-        // if no barcode
-        fl = bflg_get(mdl->absent_bc, bc_ix);
-        if (fl == 1) continue;
-
-        char *bc_key = str_map_str(mdl->all_bcs, bc_ix);
-        k = kh_get(kh_bc_dat, bam_data->bc_data, bc_key);
-        if (k == kh_end(bam_data->bc_data)) continue;
-
-        fl = bflg_get(mdl->fix_flag, bc_ix);
-        uint32_t n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
-
-        // bam data
-        bc_data_t *bc_dat = kh_val(bam_data->bc_data, k);
-        khash_t(khrmn) *mols = bc_dat->rna_mols;
-        khash_t(khaf) *frags = bc_dat->atac_frags;
-
-        khint_t k_rna, k_atac;
-        for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
-            // get (h,s,t) from index
-            int hd, s1, s2, t_ix[3], t_n;
-            if (mdl_get_hst(mdl, hs_ix, &hd, &s1, &s2, t_ix, &t_n) < 0)
-                return(-1);
-
-            f_t cp_hs = mdl->c_probs[bc_ix].cp_hs[hs_ix];
-            f_t lp_hsd = 0;
-            if (pr_hsd(mdl, hd, s1, s2, &lp_hsd) < 0) return(-1);
-            ellk += (exp(cp_hs) * lp_hsd);
-            assert(!isnan(ellk));
-
-            if (bam_data->has_rna){
-                for (k_rna = kh_begin(mols); k_rna != kh_end(mols); ++k_rna){
-                    if (!kh_exist(mols, k_rna)) continue;
-                    rna_mol_t *mol = kh_val(mols, k_rna);
-
-                    // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        if (p_hst_rna(mdl, mol, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
-                        assert(!isnan(lp_tgpb[t_i]));
-                    }
-                    f_t lp_tgbx = logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_m_sum: log sum error rna");
-                    f_t lp1 = cp_hs - lp_tgbx;
-                    assert(!isnan(lp1));
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
-                        f_t cp_hstdm = lp1 + lp_tgpb[t_i];
-                        assert(!isnan(cp_hstdm));
-
-                        f_t lp_tdm = 0;
-                        if (pr_tdm(mdl, bc_ix, hd, s_ix, &lp_tdm) < 0)
-                            return(-1);
-                        if (isfinite(lp_tdm))
-                            ellk += (exp(cp_hstdm) * lp_tdm);
-                        assert(!isnan(ellk));
-
-                        // Pr(G_dm | T_dm, \rho)
-                        if (ml_size(&mol->gl) == 1){
-                            ml_node_t(gene_list) *gn = ml_begin(&mol->gl);
-                            seq_gene_t seq_gene = ml_node_val(gn);
-                            f_t p_gdm = pr_rho_gene(mdl->mp->rho, seq_gene, (uint32_t)a_type, G, rho_nrow);
-                            ellk += (exp(cp_hstdm) * log(p_gdm));
-                            assert(!isnan(ellk));
-                        }
-                        ml_node_t(vac_list) *vn;
-                        for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
-                            seq_vac_t vac = ml_node_val(vn);
-                            f_t p_bdm = pr_gamma_var(mdl->mp->gamma, vac, (uint32_t)s_ix, M1, mdl->mp->tau);
-                            ellk += (exp(cp_hstdm) * log(p_bdm));
-                            assert(!isnan(ellk));
-                        }
-                    }
-                }
-            }
-            if (bam_data->has_atac){
-                for (k_atac = kh_begin(frags); k_atac != kh_end(frags); ++k_atac){
-                    if (!kh_exist(frags, k_atac)) continue;
-                    atac_frag_t *frag = kh_val(frags, k_atac);
-
-                    size_t n_peaks = frag->pks.n;
-                    uint8_t pk = n_peaks == 0 ? 0 : 1; // 0: outside peak, 1: inside peak
-
-                    // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        if (p_hst_atac(mdl, frag, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
-                    }
-                    f_t lp_tgbx = logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_m_sum: log sum error atac");
-                    f_t lp1 = cp_hs - lp_tgbx;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
-                        f_t cp_hstdm = lp1 + lp_tgpb[t_i];
-
-                        f_t lp_tdm = 0;
-                        if (pr_tdm(mdl, bc_ix, hd, s_ix, &lp_tdm) < 0)
-                            return(-1);
-                        if (isfinite(lp_tdm))
-                            ellk += (exp(cp_hstdm) * lp_tdm);
-                        assert(!isnan(ellk));
-
-                        f_t sig_p;
-                        sig_p = mdl->mp->sigma[a_type];
-                        if (pk == 0) sig_p = 1 - sig_p;
-                        f_t lp_p = log(sig_p);
-                        ellk += (exp(cp_hstdm) * lp_p);
-                        assert(!isnan(ellk));
-
-                        ml_node_t(vac_list) *vn;
-                        for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
-                            seq_vac_t vac = ml_node_val(vn);
-                            if (vac.allele > 2) continue; // other alleles are considered missing
-                            f_t ap = mdl->mp->gamma[ CMI(s_ix, vac.vix, M1) ];
-                            if (ap < 0) continue; // if allele is missing
-                            if (vac.allele == 0) ap = 1.0 - ap;
-                            f_t p_be0 = (1.0 - mdl->mp->tau) * ap;
-                            f_t p_be1 = mdl->mp->tau * 0.25;
-                            f_t p_bdm = p_be0 + p_be1;
-                            assert(p_bdm > 0);
-                            ellk += (exp(cp_hstdm) * log(p_bdm));
-                            assert(!isnan(ellk));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    *q = ellk;
-
+    free(lp_hs_v);
+    for (t_i = 0; t_i < 3; ++t_i) free(p_tm_v[t_i]);
     return(0);
 }
 
@@ -874,11 +657,18 @@ int mdl_m_init(mdl_t *mdl, f_t prior){
     uint32_t alpha_ne = 2 * D;
     uint16_t M = mdl->mp->M;
     uint32_t i;
+    /*
     for (i = 0; i < 3; ++i) mdl->mp->_lambda_sum[i] = log(prior / 3.0);
     for (i = 0; i < M; ++i) mdl->mp->_pi_sum[i] = log(prior / M);
     for (i = 0; i < alpha_ne; ++i) mdl->mp->_alpha_sum[i] = log(prior / 2.0);
     for (i = 0; i < rho_ne; ++i) mdl->mp->_rho_sum[i] = log(prior / (G * 3));
     for (i = 0; i < 4; ++i) mdl->mp->_sigma_sum[i] = log(prior / 2.0);
+    */
+    for (i = 0; i < 3; ++i) mdl->mp->_lambda_sum[i] = prior / 3.0;
+    for (i = 0; i < M; ++i) mdl->mp->_pi_sum[i] = prior / M;
+    for (i = 0; i < alpha_ne; ++i) mdl->mp->_alpha_sum[i] = prior / 2.0;
+    for (i = 0; i < rho_ne; ++i) mdl->mp->_rho_sum[i] = prior / (G * 3);
+    for (i = 0; i < 4; ++i) mdl->mp->_sigma_sum[i] = prior / 2.0;
 
     return(0);
 }
@@ -888,26 +678,33 @@ int mdl_m_sum(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
         return err_msg(-1, 0, "mdl_max_lambda: arguments are null");
 
     uint32_t i;
-    uint16_t M = mdl->mp->M;
+    uint16_t M = mdl->mp->M, M1 = M + 1;
     uint32_t G = mdl->mp->G;
     uint32_t D = mdl->mp->D;
     uint32_t rho_ncol = 2;
     uint32_t rho_nrow = 3 * G;
     uint32_t rho_ne = rho_ncol * rho_nrow;
     f_t *rho_sum = malloc(rho_ne * sizeof(f_t));
-    for (i = 0; i < rho_ne; ++i) rho_sum[i] = -INFINITY;
+    // for (i = 0; i < rho_ne; ++i) rho_sum[i] = -INFINITY;
+    for (i = 0; i < rho_ne; ++i) rho_sum[i] = 0;
 
     uint32_t sig_ncol = 2;
     uint32_t sig_nrow = 2;
     uint32_t sig_ne = sig_ncol * sig_nrow;
     // sig_sum col 0: ambient, col 1: cell, row 0: outside peak, row 1: inside peak
     f_t *sig_sum = malloc(sig_ne * sizeof(f_t)); // outside/inside peak by ambient/nuclear
-    for (i = 0; i < sig_ne; ++i) sig_sum[i] = -INFINITY;
+    // for (i = 0; i < sig_ne; ++i) sig_sum[i] = -INFINITY;
+    for (i = 0; i < sig_ne; ++i) sig_sum[i] = 0;
+
+    f_t *p_tm_v[3];
+    uint32_t h_i = 0, t_i = 0;
+    for (h_i = 0; h_i < 3; ++h_i) p_tm_v[h_i] = calloc(M1, sizeof(f_t));
 
     uint32_t hs_ix;
     int lsret = 0;
     khint_t k;
-    f_t lambda_sums[3] = {-INFINITY, -INFINITY, -INFINITY};
+    // f_t lambda_sums[3] = {-INFINITY, -INFINITY, -INFINITY};
+    f_t lambda_sums[3] = {0,0,0};
     for (i = 0; i < ix_len; ++i){
         uint32_t bc_ix = ixs[i];
 
@@ -929,19 +726,28 @@ int mdl_m_sum(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
         // if (!fl){
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
             int h_d = mdl->hs_ix[CMI(hs_ix, 0, mdl->_nrow_hs)];
-            lambda_sums[h_d] = logsum2expd(lambda_sums[h_d], c_p.cp_hs[hs_ix], &lsret);
-            if (lsret < 0) return(-1);
+            lambda_sums[h_d] += c_p.cp_hs[hs_ix];
+            // lambda_sums[h_d] = logsum2expd(lambda_sums[h_d], c_p.cp_hs[hs_ix]);
         }
         // }
 
-        f_t alpha_sums[2] = {-INFINITY,-INFINITY}; // index 0: ambient, index 1: cell
+        // f_t alpha_sums[2] = {-INFINITY,-INFINITY}; // index 0: ambient, index 1: cell
+        f_t alpha_sums[2] = {0, 0}; // index 0: ambient, index 1: cell
 
         // bam data
         bc_data_t *bc_dat = kh_val(bam_data->bc_data, k);
-        khash_t(khrmn) *mols = bc_dat->rna_mols;
-        khash_t(khaf) *frags = bc_dat->atac_frags;
 
-        khint_t k_rna, k_atac;
+        // pre-calculate P(T_dm) for this barcode
+        h_i = 0;
+        if (pr_tdm(mdl, bc_ix, h_i, M, p_tm_v[h_i] + M) < 0)
+            return(-1);
+        for (h_i = 1; h_i < 3; ++h_i){
+            for (t_i = 0; t_i < M1; ++t_i){
+                if (pr_tdm(mdl, bc_ix, h_i, t_i, p_tm_v[h_i] + t_i) < 0)
+                    return(-1);
+            }
+        }
+
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
             // get (h,s,t) from index
             int hd, s1, s2, t_ix[3], t_n;
@@ -953,127 +759,127 @@ int mdl_m_sum(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
             // Multiple by P(T,G,P,B,X)
             f_t lp_hsx = mdl->c_probs[bc_ix].cp_hs[hs_ix];
 
-            if (bam_data->has_rna){
-                for (k_rna = kh_begin(mols); k_rna != kh_end(mols); ++k_rna){
-                    if (!kh_exist(mols, k_rna)) continue;
-                    rna_mol_t *mol = kh_val(mols, k_rna);
+            ml_node_t(mlar) *rn;
+            for (rn = ml_begin(&bc_dat->mols_l); rn; rn = ml_node_next(rn)){
+                rna_mol_t *mol = ml_node_val(rn);
 
-                    size_t n_genes = ml_size(&mol->gl);
-                    if (n_genes > 1) n_genes = 0; // skip multigene UMIs
+                size_t n_genes = ml_size(&mol->gl);
+                if (n_genes > 1) n_genes = 0; // skip multigene UMIs
 
-                    // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        if (p_hst_rna(mdl, mol, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
-                        assert(!isnan(lp_tgpb[t_i]));
+                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
+                f_t psum = 0, p_tgpb[3] = {0,0,0};
+                int t_i;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    f_t p_t = p_tm_v[hd][s_ix];
+                    f_t p_gv = 0;
+                    if (p_rna(mdl, mol, s_ix, &p_gv) < 0)
+                        return(-1);
+                    p_tgpb[t_i] = p_t * p_gv;
+                    psum += p_tgpb[t_i];
+                }
+                // f_t lp_tgbx = log(psum);
+                // f_t lp1 = lp_hsx - lp_tgbx;
+                f_t phs1 = lp_hsx / psum;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
+                    // f_t lpt = lp1 + log(p_tgpb[t_i]);
+                    f_t pt = phs1 * p_tgpb[t_i];
+                    assert(!isnan(pt));
+
+                    // alpha
+                    if (hd >= 1){
+                        // alpha_sums[a_type] = logsum2expd(alpha_sums[a_type], lpt);;
+                        alpha_sums[a_type] += pt;
                     }
-                    f_t lp_tgbx = logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_m_sum: log sum error rna");
-                    f_t lp1 = lp_hsx - lp_tgbx;
-                    assert(!isnan(lp1));
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
-                        f_t lpt = lp1 + lp_tgpb[t_i];
-                        assert(!isnan(lpt));
 
-                        // alpha
-                        if (hd >= 1){
-                            alpha_sums[a_type] = logsum2expd(alpha_sums[a_type], lpt, &lsret);;
-                            if (lsret < 0)
-                                return err_msg(-1, 0, "mdl_m_sum: log sum error alpha rna");
-                        }
-
-                        // rho
-                        if (n_genes == 1){
-                            ml_node_t(gene_list) *gn = ml_begin(&mol->gl);
-                            seq_gene_t seq_gene = ml_node_val(gn);
-                            int32_t g_ix = seq_gene.gene_id;
-                            uint8_t spl = seq_gene.splice;
-                            uint32_t f_ix = g_ix + (spl * mdl->mp->G);
-                            rho_sum[ CMI(f_ix, a_type, rho_nrow) ] = 
-                                logsum2expd(rho_sum[ CMI(f_ix, a_type, rho_nrow) ], lpt, &lsret);
-                            if (lsret < 0)
-                                return err_msg(-1, 0, "mdl_m_sum: log sum error rho rna");
-                        }
+                    // rho
+                    if (n_genes == 1){
+                        ml_node_t(seq_gene_l) *gn = ml_begin(&mol->gl);
+                        seq_gene_t seq_gene = ml_node_val(gn);
+                        int32_t g_ix = seq_gene.gene_id;
+                        uint8_t spl = seq_gene.splice;
+                        uint32_t f_ix = g_ix + (spl * mdl->mp->G);
+                        // rho_sum[ CMI(f_ix, a_type, rho_nrow) ] = 
+                        //     logsum2expd(rho_sum[ CMI(f_ix, a_type, rho_nrow) ], lpt);
+                        rho_sum[ CMI(f_ix, a_type, rho_nrow) ] += pt;
                     }
                 }
             }
-            if (bam_data->has_atac){
-                for (k_atac = kh_begin(frags); k_atac != kh_end(frags); ++k_atac){
-                    if (!kh_exist(frags, k_atac)) continue;
-                    atac_frag_t *frag = kh_val(frags, k_atac);
+            ml_node_t(mlaf) *fn;
+            for (fn = ml_begin(&bc_dat->frags_l); fn; fn = ml_node_next(fn)){
+                atac_frag_t *frag = ml_node_val(fn);
 
-                    size_t n_peaks = frag->pks.n;
-                    uint8_t pk = n_peaks == 0 ? 0 : 1; // 0: outside peak, 1: inside peak
 
-                    // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
-                    f_t lp_tgpb[3] = {0,0,0};
-                    int t_i;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        if (p_hst_atac(mdl, frag, bc_ix, hd, s_ix, &lp_tgpb[t_i]) < 0)
-                            return(-1);
+                size_t n_peaks = mv_size(&frag->pks);
+                uint8_t pk = n_peaks == 0 ? 0 : 1; // 0: outside peak, 1: inside peak
+
+                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
+                f_t psum = 0, p_tgpb[3] = {0,0,0};
+                int t_i;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    f_t p_t = p_tm_v[hd][s_ix];
+                    f_t p_pv = 0;
+                    if (p_atac(mdl, frag, s_ix, &p_pv) < 0)
+                        return(-1);
+                    p_tgpb[t_i] = p_t * p_pv;
+                    psum += p_tgpb[t_i];
+                }
+                // f_t lp_tgbx = log(psum);
+                // f_t lp1 = lp_hsx - lp_tgbx;
+                f_t phs1 = lp_hsx / psum;
+                for (t_i = 0; t_i < t_n; ++t_i){
+                    int s_ix = t_ix[t_i];
+                    int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
+                    // f_t lpt = lp1 + log(p_tgpb[t_i]);
+                    f_t pt = phs1 * p_tgpb[t_i];
+
+                    // alpha
+                    if (hd >= 1){
+                        // alpha_sums[a_type] = logsum2expd(alpha_sums[a_type], lpt);;
+                        alpha_sums[a_type] += pt;
                     }
-                    f_t lp_tgbx = logsumexpd(lp_tgpb, t_n, &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_m_sum: log sum error atac");
-                    f_t lp1 = lp_hsx - lp_tgbx;
-                    for (t_i = 0; t_i < t_n; ++t_i){
-                        int s_ix = t_ix[t_i];
-                        int a_type = s_ix == M ? 0 : 1; // 0 for ambient, 1 for cell
-                        f_t lpt = lp1 + lp_tgpb[t_i];
 
-                        // alpha
-                        if (hd >= 1){
-                            alpha_sums[a_type] = logsum2expd(alpha_sums[a_type], lpt, &lsret);;
-                            if (lsret < 0)
-                                return err_msg(-1, 0, "mdl_m_sum: log sum error alpha atac");
-                        }
-
-                        sig_sum[ CMI(pk, a_type, sig_nrow) ] = 
-                            logsum2expd(sig_sum[ CMI(pk, a_type, sig_nrow) ], lpt, &lsret);
-                        if (lsret < 0)
-                            return err_msg(-1, 0, "mdl_m_sum: log sum error sig atac");
-                    }
+                    // sig_sum[ CMI(pk, a_type, sig_nrow) ] = 
+                    //     logsum2expd(sig_sum[ CMI(pk, a_type, sig_nrow) ], lpt);
+                    sig_sum[ CMI(pk, a_type, sig_nrow) ] += pt;
                 }
             }
         }
+
+        mdl->mp->_alpha_sum[CMI(bc_ix, 0, D)] += alpha_sums[0];
+        mdl->mp->_alpha_sum[CMI(bc_ix, 1, D)] += alpha_sums[1];
+        /*
         mdl->mp->_alpha_sum[CMI(bc_ix, 0, D)] = 
-            logsum2expd(mdl->mp->_alpha_sum[CMI(bc_ix, 0, D)], alpha_sums[0], &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_sum: log sum error alpha sum 0");
+            logsum2expd(mdl->mp->_alpha_sum[CMI(bc_ix, 0, D)], alpha_sums[0]);
         mdl->mp->_alpha_sum[CMI(bc_ix, 1, D)] = 
-            logsum2expd(mdl->mp->_alpha_sum[CMI(bc_ix, 1, D)], alpha_sums[1], &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_sum: log sum error alpha sum 1");
+            logsum2expd(mdl->mp->_alpha_sum[CMI(bc_ix, 1, D)], alpha_sums[1]);
+        */
     }
 
     // add to tmp sum variables
     // add lambda
     pthread_mutex_lock(&mdl->mp->sum_lock);
     for (i = 0; i < 3; ++i){
-        mdl->mp->_lambda_sum[i] = logsum2expd(mdl->mp->_lambda_sum[i], lambda_sums[i], &lsret);
-        if (lsret < 0) return(-1);
+        // mdl->mp->_lambda_sum[i] = logsum2expd(mdl->mp->_lambda_sum[i], lambda_sums[i]);
+        mdl->mp->_lambda_sum[i] += lambda_sums[i];
     }
 
     // add rho
     if (bam_data->has_rna){
         for (i = 0; i < rho_ne; ++i){
-            mdl->mp->_rho_sum[i] = logsum2expd(mdl->mp->_rho_sum[i], rho_sum[i], &lsret);
-            if (lsret < 0) return(-1);
+            // mdl->mp->_rho_sum[i] = logsum2expd(mdl->mp->_rho_sum[i], rho_sum[i]);
+            mdl->mp->_rho_sum[i] += rho_sum[i];
         }
     }
 
     // add sigma
     if (bam_data->has_atac){
         for (i = 0; i < sig_ne; ++i){
-            mdl->mp->_sigma_sum[i] = logsum2expd(mdl->mp->_sigma_sum[i], sig_sum[i], &lsret);
-            if (lsret < 0) return(-1);
+            // mdl->mp->_sigma_sum[i] = logsum2expd(mdl->mp->_sigma_sum[i], sig_sum[i]);
+            mdl->mp->_sigma_sum[i] += sig_sum[i];
         }
     }
     pthread_mutex_unlock(&mdl->mp->sum_lock);
@@ -1081,12 +887,12 @@ int mdl_m_sum(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len){
     free(rho_sum);
     free(sig_sum);
 
+    for (t_i = 0; t_i < 3; ++t_i) free(p_tm_v[t_i]);
+
     return(0);
 }
 
 int mdl_m_pi_fix(mdl_t *mdl){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
 
     uint32_t i, j, M = mdl->mp->M;
 
@@ -1142,8 +948,6 @@ int mdl_pars_add_gamma(mdl_pars_t *gp, float **a, int nv, int ns){
 }
 
 int mdl_m_set_gamma_amb(mdl_t *mdl){
-    assert(mdl != NULL);
-    assert(mdl->mp != NULL);
 
     uint32_t i, M = mdl->mp->M, V = mdl->mp->V, M1 = M + 1;
 
@@ -1179,12 +983,13 @@ int mdl_m_est(mdl_t *mdl){
     uint32_t rho_nrow = 3 * G;
 
     // maximize lambda
-    f_t lambda_tot = logsumexpd(mdl->mp->_lambda_sum, 3, &lsret);
-    if (lsret < 0)
-        return err_msg(-1, 0, "mdl_m_est: log sum error lambda");
+    // f_t lambda_tot = logsumexpd2(mdl->mp->_lambda_sum, 3);
+    f_t lambda_tot = 0;
+    for (i = 0; i < 3; ++i) lambda_tot += mdl->mp->_lambda_sum[i];
     assert( (!isnan(lambda_tot)) && (!isinf(lambda_tot)) );
     for (i = 0; i < 3; ++i){
-        new_par = exp(mdl->mp->_lambda_sum[i] - lambda_tot);
+        // new_par = exp(mdl->mp->_lambda_sum[i] - lambda_tot);
+        new_par = mdl->mp->_lambda_sum[i] / lambda_tot;
         mdl->mp->_par_diff += fabs(new_par - mdl->mp->lambda[i]);
         mdl->mp->lambda[i] = new_par;
     }
@@ -1207,12 +1012,12 @@ int mdl_m_est(mdl_t *mdl){
 
         a_sum[0] = mdl->mp->_alpha_sum[CMI(i, 0, D)];
         a_sum[1] = mdl->mp->_alpha_sum[CMI(i, 1, D)];
-        a_total = logsumexpd(a_sum, 2, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_est: log sum error alpha");
+        // a_total = logsumexpd2(a_sum, 2);
+        a_total = a_sum[0] + a_sum[1];
 
         if (isfinite(a_total)){
-            new_par = exp(a_sum[0] - a_total);
+            // new_par = exp(a_sum[0] - a_total);
+            new_par = a_sum[0]/a_total;
         } else {
             new_par = 0.5;
         }
@@ -1230,14 +1035,19 @@ int mdl_m_est(mdl_t *mdl){
 
     // rho
     if (mdl->has_rna){
+        /*
         f_t rho_tot[2] = {-INFINITY,-INFINITY};
-        rho_tot[0] = logsumexpd(mdl->mp->_rho_sum, rho_nrow, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_est: log sum error rho tot 0");
-        rho_tot[1] = logsumexpd(mdl->mp->_rho_sum + rho_nrow, rho_nrow, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_est: log sum error rho tot 1");
-
+        rho_tot[0] = logsumexpd2(mdl->mp->_rho_sum, rho_nrow);
+        rho_tot[1] = logsumexpd2(mdl->mp->_rho_sum + rho_nrow, rho_nrow);
+        */
+        f_t rho_tot[2] = {0,0};
+        for (i = 0; i < rho_nrow; ++i){
+            for (j = 0; j < 2; ++j){
+                uint32_t rix = CMI(i, j, rho_nrow);
+                rho_tot[j] += mdl->mp->_rho_sum[rix];
+            }
+        }
+                
         // check for errors
         if ( (isnan(rho_tot[0])) || (isnan(rho_tot[1])) )
             return err_msg(-1, 0, "mdl_m_est: rho prob. sum is nan: [%f,%f]", 
@@ -1249,7 +1059,8 @@ int mdl_m_est(mdl_t *mdl){
         for (i = 0; i < rho_nrow; ++i){
             for (j = 0; j < 2; ++j){
                 uint32_t rix = CMI(i, j, rho_nrow);
-                new_par = exp(mdl->mp->_rho_sum[rix] - rho_tot[j]);
+                // new_par = exp(mdl->mp->_rho_sum[rix] - rho_tot[j]);
+                new_par = mdl->mp->_rho_sum[rix] / rho_tot[j];
                 mdl->mp->_par_diff += fabs(new_par - mdl->mp->rho[rix]);
                 mdl->mp->rho[rix] = new_par;
             }
@@ -1260,23 +1071,27 @@ int mdl_m_est(mdl_t *mdl){
     if (mdl->has_atac){
         uint32_t sig_nrow = 2;
         f_t sig_tot[2];
-        sig_tot[0] = logsumexpd(mdl->mp->_sigma_sum, sig_nrow, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_est: log sum error sig tot 0");
-        sig_tot[1] = logsumexpd(mdl->mp->_sigma_sum + sig_nrow, sig_nrow, &lsret);
-        if (lsret < 0)
-            return err_msg(-1, 0, "mdl_m_est: log sum error sig tot 1");
+        /*
+        sig_tot[0] = logsumexpd2(mdl->mp->_sigma_sum, sig_nrow);
+        sig_tot[1] = logsumexpd2(mdl->mp->_sigma_sum + sig_nrow, sig_nrow);
+        */
+        for (i = 0; i < 2; ++i){
+            sig_tot[i] = mdl->mp->_sigma_sum[CMI(0,i,sig_nrow)] + 
+                mdl->mp->_sigma_sum[CMI(1,i,sig_nrow)];
+        }
         if (isnan(sig_tot[0]) || isnan(sig_tot[1]))
             return err_msg(-1, 0, "mdl_max_sigma: sigma prob. sum is nan: [%f,%f]", 
                     sig_tot[0], sig_tot[1]);
         if (isinf(sig_tot[0]) || isinf(sig_tot[1]))
             return err_msg(-1, 0, "mdl_max_sigma: sigma prob. sum is inf: [%f,%f]", 
                     sig_tot[0], sig_tot[1]);
-        new_par = exp(mdl->mp->_sigma_sum[ CMI(1, 0, sig_nrow) ] - sig_tot[0]);
+        // new_par = exp(mdl->mp->_sigma_sum[ CMI(1, 0, sig_nrow) ] - sig_tot[0]);
+        new_par = mdl->mp->_sigma_sum[ CMI(1, 0, sig_nrow) ] / sig_tot[0];
         mdl->mp->_par_diff += fabs(new_par - mdl->mp->sigma[0]);
         mdl->mp->sigma[0] = new_par;
 
-        new_par = exp(mdl->mp->_sigma_sum[ CMI(1, 1, sig_nrow) ] - sig_tot[1]);
+        // new_par = exp(mdl->mp->_sigma_sum[ CMI(1, 1, sig_nrow) ] - sig_tot[1]);
+        new_par = mdl->mp->_sigma_sum[ CMI(1, 1, sig_nrow) ] / sig_tot[1];
         mdl->mp->_par_diff += fabs(new_par - mdl->mp->sigma[1]);
         mdl->mp->sigma[1] = new_par;
     }
@@ -1294,7 +1109,8 @@ int mdl_delta(mdl_t *mdl, f_t *delta){
     if (mdl->has_rna) n_pars += 6.0 * (f_t)mdl->mp->G; // rho
     if (mdl->has_atac) n_pars += 2.0; // sigma
 
-    *delta = exp(log(mdl->mp->_par_diff) - log(n_pars));
+    // *delta = exp(log(mdl->mp->_par_diff) - log(n_pars));
+    *delta = mdl->mp->_par_diff / n_pars;
 
     return(0);
 }
@@ -1353,15 +1169,14 @@ int mdl_init_par_dat(mdl_t *mdl, bam_data_t *bam_data){
                 size_t n_genes = ml_size(&mol->gl);
                 if (n_genes > 1) n_genes = 0; // skip multigene UMIs
                 if (n_genes == 1){
-                    ml_node_t(gene_list) *gn = ml_begin(&mol->gl);
+                    ml_node_t(seq_gene_l) *gn = ml_begin(&mol->gl);
                     seq_gene_t seq_gene = ml_node_val(gn);
                     int32_t g_ix = seq_gene.gene_id;
                     uint8_t spl = seq_gene.splice;
                     uint32_t f_ix = g_ix + (spl * mdl->mp->G);
                     uint32_t rix = CMI(f_ix, c_ix, rho_nrow);
-                    mdl->mp->_rho_sum[rix] = logsum2expd(mdl->mp->_rho_sum[rix], log(1.0), &lsret);
-                    if (lsret < 0)
-                        return err_msg(-1, 0, "mdl_init_par_dat: log sum error rho rna");
+                    // mdl->mp->_rho_sum[rix] = logsum2expd(mdl->mp->_rho_sum[rix], log(1.0));
+                    mdl->mp->_rho_sum[rix] += 1.0;
                 }
             }
         }
@@ -1370,15 +1185,13 @@ int mdl_init_par_dat(mdl_t *mdl, bam_data_t *bam_data){
                 if (!kh_exist(frags, k_atac)) continue;
                 atac_frag_t *frag = kh_val(frags, k_atac);
 
-                size_t n_peaks = frag->pks.n;
+                size_t n_peaks = mv_size(&frag->pks);
                 uint8_t pk = n_peaks == 0 ? 0 : 1; // 0: outside peak, 1: inside peak
 
                 uint32_t six = CMI(pk, c_ix, sig_nrow);
 
-                mdl->mp->_sigma_sum[six] = logsum2expd(mdl->mp->_sigma_sum[six], log(1.0), &lsret);
-
-                if (lsret < 0)
-                    return err_msg(-1, 0, "mdl_init_par_dat: log sum error sig atac");
+                // mdl->mp->_sigma_sum[six] = logsum2expd(mdl->mp->_sigma_sum[six], log(1.0));
+                mdl->mp->_sigma_sum[six] += 1.0;
             }
         }
     }
@@ -1571,7 +1384,6 @@ int mdl_em(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
 
         if (mdl_m_est(mdl) < 0) return(-1);
 
-        // if (mdl_q(mdl, bam_data, ixs, ix_len, &q) < 0) return(-1);
         if (mdl_data_llk(mdl, &q) < 0) return(-1);
         if ( (q - q_prev) < 0 ) err_msg(0, 1, "llk decreased: delta=%f", q - q_prev);
         if (objs->verbose) log_msg("Q=%f; delta=%f", q, q - q_prev);
@@ -1611,7 +1423,6 @@ int mdl_data_llk(mdl_t *mdl, f_t *llk){
 }
 
 int mdl_check_pars(mdl_t *mdl){
-    assert(mdl != NULL);
 
     f_t lt1 = 1 - feps;
     f_t ut1 = 1 + feps;
@@ -1642,9 +1453,12 @@ int mdl_check_pars(mdl_t *mdl){
         int fl = bflg_get(mdl->fix_flag, i);
         uint32_t n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
 
-        f_t c_sum = logsumexpd(mdl->c_probs[i].cp_hs, n_hs, &lsret);
-        c_sum = exp(c_sum);
-        if (lsret < 0) return(-1);
+        // f_t c_sum = logsumexpd2(mdl->c_probs[i].cp_hs, n_hs);
+        // c_sum = exp(c_sum);
+        f_t c_sum = 0;
+        for (j = 0; j < n_hs; ++j){
+            c_sum += mdl->c_probs[i].cp_hs[j];
+        }
         cond = c_sum >= lt1 && c_sum <= ut1;
         if (!cond){
             fprintf(stderr, "c_prob[%u]=", i);
@@ -1750,13 +1564,11 @@ int mdl_get_llk(mdl_t *mdl){
         uint32_t hs_ix = 0;
         for (hs_ix = 0; hs_ix < ncomb; ++hs_ix){
             int h = mdl->hs_ix[CMI(hs_ix, 0, mdl->_nrow_hs)];
-            f_t ll = cps.cp_hs[hs_ix] + cps.p_x;
+            f_t ll = mdl->c_probs[all_bc_ix].lp_hs[hs_ix];
             mf->bc_llks[CMI(bc_i, hs_ix, n_bc)] = ll;
-            lsum[h] = logsum2expd(lsum[h], ll, &lsret);
-            if (lsret < 0) return(-1);
+            lsum[h] = logsum2expd(lsum[h], ll);
         }
-        f_t lsumall = logsumexpd(lsum, 3, &lsret);
-        if (lsret < 0) return(-1);
+        f_t lsumall = logsumexpd2(lsum, 3);
         for (i = 0; i < 3; ++i)
             mf->pp[CMI(bc_i, i, n_bc)] = exp(lsum[i] - lsumall);
 
@@ -1806,22 +1618,19 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
     if (objs->gv == NULL || objs->vcf_hdr == NULL)
         return err_msg(-1, 0, "mdl_fit: variant data  is NULL");
 
-    if (objs->verbose) log_msg("fitting model");
+    if (objs->verbose) log_msg("initializing model");
 
     mdl_t *mdl = mdl_alloc();
     if (mdl == NULL)
         return -1;
 
-    if (objs->verbose) log_msg("setting and fixing low count barcodes");
     // sets all bc, flt_bcs, and test_bcs
     if (mdl_set_bcs(mdl, bam_dat, objs) < 0)
         return -1;
 
-    if (objs->verbose) log_msg("setting samples");
     if (mdl_set_samples(mdl, objs) < 0)
         return -1;
 
-    if (objs->verbose) log_msg("initializing model");
     if (mdl_init_all(mdl, bam_dat, objs) < 0)
         return -1;
 
@@ -1935,7 +1744,6 @@ int write_alpha(mdl_t *mdl, char *fn){
     for (i = 0; i < bc_n; ++i){
         char *bc = str_map_str(mdl->test_bcs, i);
         int bc_ix = str_map_ix(mdl->all_bcs, bc);
-        assert(bc_ix >= 0);
         al[i] = mdl->mp->alpha[bc_ix];
     }
 
@@ -2084,8 +1892,6 @@ int write_llk(mdl_t *mdl, char *fn){
         return err_msg(-1, 0, "write_llk: failed to write to file");
 
     int bc_n = mdl->test_bcs->n;
-
-    assert(bc_n >= 0);
 
     // col names
     log_msg("getting column names");

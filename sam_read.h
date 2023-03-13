@@ -8,22 +8,21 @@
 #include <stdlib.h>
 #include "htslib/sam.h"
 #include "htslib/vcf.h"
-#include "htslib/vcfutils.h"
-#include "htslib/synced_bcf_reader.h"
 #include "htslib/hts.h"
 #include "str_util.h"
 
 /* Get start and end 0-based coordinates of alignment.
  *
  * Provides 0-based [start,end) position of reference-consuming alignment.
- * The variables pointer to by start and end are updated after calling
+ * The @p tid @p start @p end variables are updated after the call.
+ *
  * If any of the arguments passed to the function are NULL, return -1 
  * without updating the pointers.
  *
- * @param b Pointer to bam1_t object.
- * @param tid Pointer to int32_t object to update chromosome ID.
- * @param start Pointer to int32_t object to update start coordinate.
- * @param end Pointer to int32_t object to update end coordinate.
+ * If adj_soft_clip is 0, return the start-end of reference-consuming alignment.
+ * If 1, add the length of soft clip cigar ops at the end of the alignment, 
+ * so start is subtracted and end is added.
+ *
  * @return 0 on success, -1 on error.
  */
 int get_rcoord_bam(const bam1_t *b, int32_t *tid, int32_t *start, int32_t *end, 
@@ -67,13 +66,12 @@ static inline int bam1_unmapped(const bam1_t *b){
 int load_bam(const char *bamfn, samFile **bam, sam_hdr_t **bam_hdr, 
         hts_idx_t **bam_idx);
 
-// Overlap tid
+/* find the overlapping chromosomes between bam and bcf.
+ * The indices of the overlapping chromosomes are stored in @p t1 and 
+ * @p t2.
+ * @return number of overlapping chromosomes on success, or -1 on error.
+ */
 int ovrlp_tid(sam_hdr_t *sam_hdr, bcf_hdr_t *bcf_hdr, int **t1, int **t2);
-
-// Return the base that overlaps the BAM record. If no overlap, return 'N'
-// base_ref is the tid chromosome that corresponds to the BAM record
-int get_ovrlp_base(const bam1_t *b, int32_t base_ref, int32_t base_pos, 
-        char *base, uint8_t *qual);
 
 /* Get base pair of aligned bam query given reference position.
  *
@@ -97,9 +95,26 @@ int get_ovrlp_base(const bam1_t *b, int32_t base_ref, int32_t base_pos,
 int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos, 
         uint8_t *base, uint8_t *qual);
 
-char *get_tag(const bam1_t *b, char tag[2]);
+// return character tag, or NULL on error
+static inline char *get_tag(const bam1_t *b, char tag[2]){
+    uint8_t *ptr = bam_aux_get(b, tag);
+    if (ptr == NULL)
+        return NULL;
+    char *bc = bam_aux2Z(ptr);
+    return bc;
+}
 
-int64_t get_itag(const bam1_t *b, char tag[2]);
+// Returns integer from tag, sets
+static inline int64_t get_itag(const bam1_t *b, char tag[2], int *ret){
+    *ret = 0;
+    uint8_t *ptr = bam_aux_get(b, tag);
+    if (ptr == NULL){
+        *ret = -1;
+        return -1;
+    }
+    int64_t val = bam_aux2i(ptr);
+    return val;
+}
 
 void print_bam1_t(const bam1_t *b);
 

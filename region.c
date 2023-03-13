@@ -6,6 +6,10 @@
 #include "htslib/vcf.h"
 #include "region.h"
 
+/*******************************************************************************
+ * g_region
+ ******************************************************************************/
+
 void init_g_region(g_region *reg){
     reg->rid = -1;
     reg->start = -1;
@@ -13,16 +17,13 @@ void init_g_region(g_region *reg){
     reg->strand = '.';
 }
 
-int set_region(g_region *reg, int32_t rid, int32_t start, int32_t end, 
+void set_region(g_region *reg, int32_t rid, int32_t start, int32_t end, 
         char strand){
-    if (end < start)
-        return err_msg(-1, 0, "set_region: start %i > end %i", start, end);
-
+    if (reg == NULL) return;
     reg->rid = rid;
     reg->start = start;
     reg->end = end;
     reg->strand = strand;
-    return(0);
 }
 
 int regioncmp(g_region r1, g_region r2){
@@ -45,34 +46,15 @@ void print_g_region(FILE *f, g_region g){
     fprintf(f, "%i:%" PRIi32 "-%" PRIi32 " (%c)\n", g.rid, g.start, g.end, g.strand);
 }
 
+/*******************************************************************************
+ * g_pos
+ ******************************************************************************/
+
 void init_g_pos(g_pos *p){
     if (p == NULL) return;
-
     p->rid = -1;
     p->pos = -1;
     p->strand = '.';
-}
-
-void init_reg_pair(g_reg_pair *rp){
-    init_g_region(&rp->r1);
-    init_g_region(&rp->r2);
-}
-
-g_reg_pair get_reg_pair(g_region r1, g_region r2){
-    g_reg_pair g;
-    init_reg_pair(&g);
-    g.r1 = r1;
-    g.r2 = r2;
-    return(g);
-}
-
-int set_pos(g_pos *p, int32_t rid, int32_t pos, char strand){
-    if (p == NULL) return(0);
-
-    p->rid = rid;
-    p->pos = pos;
-    p->strand = strand;
-    return(0);
 }
 
 int poscmp(g_pos p1, g_pos p2){
@@ -98,6 +80,23 @@ void fprint_g_pos(FILE *f, g_pos p){
     char *s = str_g_pos(p);
     fprintf(f, "%s", s);
     free(s);
+}
+
+/*******************************************************************************
+ * g_reg_pair
+ ******************************************************************************/
+
+void init_reg_pair(g_reg_pair *rp){
+    init_g_region(&rp->r1);
+    init_g_region(&rp->r2);
+}
+
+g_reg_pair get_reg_pair(g_region r1, g_region r2){
+    g_reg_pair g;
+    init_reg_pair(&g);
+    g.r1 = r1;
+    g.r2 = r2;
+    return(g);
 }
 
 khint_t kh_reg_pair_hash(g_reg_pair p){
@@ -224,36 +223,40 @@ int iregs_add_bed(iregs_t *iregs, const char *fn){
 // TODO: add strand capacity
 int iregs_parse_bed(iregs_t *iregs){
     if (iregs == NULL || iregs->idx == NULL) return(0);
-    iregs->itr = regitr_init(iregs->idx);
-    if (iregs->itr == NULL)
+    regitr_t *itr = regitr_init(iregs->idx);
+    if (itr == NULL)
         return err_msg(-1, 0, "iregs_parse_bed: failed to init regitr");
-    while (regitr_loop(iregs->itr))
-        if (iregs_add2reghash(iregs, iregs->itr->seq, (int32_t)iregs->itr->beg, 
-                    (int32_t)iregs->itr->end, '.') < 0) return(-1);
-    regitr_destroy(iregs->itr);
+    while (regitr_loop(itr))
+        if (iregs_add2reghash(iregs, itr->seq, (int32_t)itr->beg, 
+                    (int32_t)itr->end, '.') < 0) return(-1);
+    regitr_destroy(itr);
     iregs->itr = NULL;
     return(0);
 }
 
 // TODO: add strand capacity
 int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end, 
-        iregn_t *overlaps){
+        mv_t(int_vec) *overlaps){
     if (iregs == NULL) return(0);
 
-    if ( (iregs->itr = regitr_init(iregs->idx)) == NULL )
+    if (chr == NULL || overlaps == NULL)
+        return err_msg(-1, 0, "iregs_overlap: argument is null");
+
+    regitr_t *itr;
+    if ( (itr = regitr_init(iregs->idx)) == NULL )
         return err_msg(-1, 0, "iregs_overlap: failed to initialize regitr");
-    if (regidx_overlap(iregs->idx, chr, (hts_pos_t)beg, (hts_pos_t)end, iregs->itr) < 0)
+    if (regidx_overlap(iregs->idx, chr, (hts_pos_t)beg, (hts_pos_t)end, itr) < 0)
         return err_msg(-1, 0, "iregs_overlap: failed to index overlap "
                 "%s:%"PRIi32"-%"PRIi32, chr, beg+1, end+1);
 
-    while ( regitr_overlap(iregs->itr) ){
+    while ( regitr_overlap(itr) ){
         g_region tmp;
-        tmp.rid = str_map_ix(iregs->chr_map, iregs->itr->seq);
+        tmp.rid = str_map_ix(iregs->chr_map, itr->seq);
         if (tmp.rid < 0)
             return err_msg(-1, 0, "iregs_overlap: could not find chromosome %s in iregs, "
                     "improper initialization", chr);
-        tmp.start = (int32_t)iregs->itr->beg;
-        tmp.end = (int32_t)iregs->itr->end;
+        tmp.start = (int32_t)itr->beg;
+        tmp.end = (int32_t)itr->end;
         tmp.strand = '.';
         // get the index of the region in iregs->reg to store
         khint_t k_ix = kh_get(kh_reg, iregs->hash, tmp);
@@ -263,11 +266,11 @@ int iregs_overlap(iregs_t *iregs, const char *chr, int32_t beg, int32_t end,
         int ix       = kh_val(iregs->hash, k_ix);
         if (ix >= iregs->n)
             return err_msg(-1, 0, "iregs_overlap: ix %i > n %i", ix, iregs->n);
-        if (iregn_add_ix(overlaps, ix) < 0) return(-1);
+        if (mv_push(int_vec, overlaps, ix) < 0) return(-1);
     }
-    regitr_destroy(iregs->itr);
+    regitr_destroy(itr);
     iregs->itr = NULL;
-    return((int)overlaps->n);
+    return((int)mv_size(overlaps));
 }
 
 // TODO: write payload.

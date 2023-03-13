@@ -6,8 +6,6 @@
 #include <ctype.h>
 #include "htslib/sam.h"
 #include "htslib/vcf.h"
-#include "htslib/vcfutils.h"
-#include "htslib/synced_bcf_reader.h"
 #include "htslib/hts.h"
 #include "sam_read.h"
 #include "str_util.h"
@@ -127,69 +125,6 @@ int ovrlp_tid(sam_hdr_t *sam_hdr, bcf_hdr_t *bcf_hdr, int **t1, int **t2){
     return n;
 }
 
-// Return 0 on no overlapping chromosome
-// Return 1 on success
-// overlapping base stored in base. Stores 'N' if no overlap.
-// overlapping qual stored in qual. Stores 0 if no overlap
-int get_ovrlp_base(const bam1_t *b, int32_t base_ref, int32_t base_pos, 
-        char *base, uint8_t *qual){
-    *base = 'N';
-    *qual = 0;
-    uint32_t *cigar_raw;
-    cigar_raw = bam_get_cigar(b);
-    uint32_t n_cigar = b->core.n_cigar;
-
-    int32_t tid = b->core.tid;
-    if (tid != base_ref)
-        return(0);
-    int32_t left_pos = (int32_t)b->core.pos;
-    uint32_t i;
-    uint32_t prev_q_index = 0;
-    uint32_t next_q_index = 0;
-    int64_t qlen = bam_cigar2qlen(n_cigar, cigar_raw);
-    int32_t prev_r_index = left_pos;
-    int32_t next_r_index = left_pos;
-    for (i = 0; i < n_cigar; i++){
-        if (base_pos < prev_r_index)
-            break;
-        uint32_t op = bam_cigar_op(cigar_raw[i]);
-        uint32_t cigar_oplen = bam_cigar_oplen(cigar_raw[i]);
-
-        int cr = bam_cigar_type(op)&2;
-        int cq = bam_cigar_type(op)&1;
-        // if consumes reference
-        if (cr){
-            next_r_index += cigar_oplen;
-        }
-        // if consumes query
-        if (cq){
-            next_q_index += cigar_oplen;
-        }
-        if ( !cq ){
-            prev_q_index = next_q_index;
-            prev_r_index = next_r_index;
-            continue;
-        }
-
-        if ( (base_pos >= prev_r_index) && (base_pos < next_r_index)){
-            int32_t add_to = base_pos - prev_r_index;
-            uint32_t q_ix = prev_q_index + add_to;
-            if (q_ix >= qlen)
-                return err_msg(-1, 0, "get_ovrlp_base: q index (%llu) is greater than query length (%i), "
-                        "probable bug in program", q_ix, qlen);
-            uint8_t *p = bam_get_seq(b);
-            uint8_t *q = bam_get_qual(b);
-            *base = seq_nt16_str[bam_seqi(p, q_ix)];
-            *qual = q[q_ix];
-        }
-        else {
-            prev_q_index = next_q_index;
-            prev_r_index = next_r_index;
-        }
-    }
-    return(1);
-}
-
 int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos, 
         uint8_t *base, uint8_t *qual){
 
@@ -256,22 +191,6 @@ int bam1_site_base(const bam1_t *b, int32_t ref, int32_t pos,
         }
     }
     return(0);
-}
-
-// Returns string from tag, NULL if not found.
-char *get_tag(const bam1_t *b, char tag[2]){
-    uint8_t *ptr = bam_aux_get(b, tag);
-    if (ptr == NULL)
-        return NULL;
-    char *bc = bam_aux2Z(ptr);
-    return bc;
-}
-
-// Returns integer from tag, NULL if not found.
-int64_t get_itag(const bam1_t *b, char tag[2]){
-    uint8_t *ptr = bam_aux_get(b, tag);
-    int64_t ret = bam_aux2i(ptr);
-    return ret;
 }
 
 void print_bam1_t(const bam1_t *b){

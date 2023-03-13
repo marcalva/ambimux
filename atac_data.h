@@ -35,7 +35,7 @@ static inline qshort qname2qshort(const char *s){
  */
 typedef struct atac_read1_t {
     g_region loc;
-    ml_t(base_list) bl;
+    ml_t(seq_base_l) bl;
 } atac_read1_t;
 
 /*@ @typedef
@@ -54,13 +54,22 @@ typedef struct atac_rd_pair_t {
 /* read pairs keyed by query name */
 KHASH_INIT(khap, qshort, atac_rd_pair_t *, 1, kh_qname_hash_func, kh_qname_hash_equal);
 
+typedef struct atac_read2_t{
+    atac_read1_t r1;
+    atac_read1_t r2;
+    uint32_t s; // number os supporting reads
+} atac_read2_t;
+
+// vector of atac_read2_t
+mv_declare(ar2_vec, atac_read2_t);
+
 /*! @typedef atac_dups_t
  * Store an array of atac_rd_pair_t objects/
  */
 typedef struct atac_dups_t {
     struct _atac_dup1_t {
         atac_rd_pair_t rd; // read pair
-        size_t n_rd; // number of (duplicate) reads per pair.
+        uint32_t n_rd; // number of (duplicate) reads per pair.
     } *dups;
     size_t size, m;
 } atac_dups_t;
@@ -71,16 +80,20 @@ KHASH_INIT(khad, g_reg_pair, atac_dups_t *, 1, kh_reg_pair_hash, kh_reg_pair_equ
 /*! @typedef atac_frag_t
  */
 typedef struct atac_frag_t {
+    mv_t(ar2_vec) rds;
     atac_dups_t *dups;
-    ml_t(base_list) bl;
-    ml_t(vac_list) vl;
-    iregn_t pks;
+    ml_t(seq_base_l) bl; // bases
+    ml_t(seq_vac_l) vl; // variant calls
+    mv_t(int_vec) pks; // peaks
     uint8_t _dedup;
     size_t s; // number of supporting reads
 } atac_frag_t;
 
 /* atac fragments. Key is region, value is pointer to atac_frag_t */
 KHASH_INIT(khaf, g_reg_pair, atac_frag_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
+
+#define mlaf_lt(p, q) -1
+ml_declare(mlaf, atac_frag_t *, mlaf_lt);
 
 /*******************************************************************************
  * atac_read1_t

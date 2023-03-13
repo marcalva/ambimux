@@ -38,10 +38,10 @@ int proc_atac1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
     if (b_cb == NULL || strlen(b_cb) < 4) return 0; // missing can be represented as dash
 
     if (objs->max_nh > 0){
-        tag_ptr = bam_aux_get(bam_r, objs->rna_nh_tag);
+        tag_ptr = bam_aux_get(bam_r, objs->atac_nh_tag);
         if (tag_ptr == NULL){
-            return err_msg(-1, 0, "proc_atac1: NH set but could not find tag %s in "
-                    "read %s\n", objs->rna_nh_tag, qname);
+            return err_msg(-1, 0, "proc_atac1: NH set but could not find tag '%s' in "
+                    "read '%s'\n", objs->atac_nh_tag, qname);
         }
         int nh = (int)bam_aux2i(tag_ptr);
         if (nh > objs->max_nh) return 0;
@@ -51,34 +51,28 @@ int proc_atac1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
     qshort qs = qname2qshort(qname);
 
     // init atac read
-    atac_read1_t *ar = atac_read_init();
-    if (ar == NULL) return(-1);
+    atac_read1_t *atac_read = atac_read_init();
+    if (atac_read == NULL) return(-1);
 
     // coordinates are begin and end of alignment, excluding clipped bases.
     if (bam_rid == -1)
-        return err_msg(-1, 0, "proc_atac1: bam rid is -1 for %s", qname);
-    ar->loc.rid = bam_rid;
-    ar->loc.start = bam_beg;
-    ar->loc.end = bam_end;
-    ar->loc.strand = '.'; // unstranded data
+        return err_msg(-1, 0, "proc_atac1: bam rid is -1 for '%s'", qname);
+    atac_read->loc.rid = bam_rid;
+    atac_read->loc.start = bam_beg;
+    atac_read->loc.end = bam_end;
+    atac_read->loc.strand = '.'; // unstranded data
 
     // Get overlapping variants, base calls, and base qualities.
     int vret;
-    ml_t(base_list) bl;
-    ml_init(base_list, &bl);
-    if ( (vret = bam1_seq_base(objs->atac_bam_hdr, bam_r, objs->gv, &bl)) < 0)
+    if ( (vret = bam1_seq_base(objs->atac_bam_hdr, bam_r, 
+                    objs->gv, &atac_read->bl)) < 0)
         return(-1);
-
-    // create seq_base_t
-    if ( ml_cpy(base_list, &ar->bl, &bl) < 0 )
-        return(-1);
-    ml_free(base_list, &bl);
 
     // add read to bam_data
-    if (bam_data_atac_add_read(bam_data, b_cb, ar, qs) < 0)
+    if (bam_data_atac_add_read(bam_data, b_cb, atac_read, qs) < 0)
         return err_msg(-1, 0, "proc_atac1: failed add read");
 
-    atac_read_dstry(ar); // destroy since atac read is copied into bam_data
+    atac_read_dstry(atac_read); // destroy since atac read is copied into bam_data
     return(0);
 }
 
@@ -98,7 +92,7 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
     /* Set BAM iterator to region */
     bam_itr = sam_itr_querys(objs->atac_bam_idx, objs->atac_bam_hdr, objs->region);
     if (bam_itr == NULL){
-        return err_msg(-1, 0, "run_atac: could not set region %s in BAM file", objs->region);
+        return err_msg(-1, 0, "run_atac: could not set region '%s' in BAM file", objs->region);
     }
     /* */
 
@@ -131,17 +125,17 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
 
     if (bam_data_atac_free_pairs(bam_data) < 0) return(-1);
 
-    if (objs->verbose) log_msg("deduplicating reads");
+    if (objs->verbose) log_msg("deduplicating ATAC reads");
     if (bam_data_atac_dedup(bam_data) < 0) return(-1);
 
     // go from base pair to ref/alt/other allele at variants
-    if (objs->verbose) log_msg("calling variants");
+    if (objs->verbose) log_msg("running ATAC pileup at SNP sites");
     if (bam_data_atac_var_call(bam_data, objs->gv, objs->cmap, objs->min_phred) < 0)
         return(-1);
 
     // call peaks at fragments
     if (objs->pks){
-        if (objs->verbose) log_msg("calling peaks");
+        if (objs->verbose) log_msg("overlapping ATAC fragment peaks");
         if (bam_data_atac_peak_call(bam_data, objs->pks, objs->cmap) < 0)
             return(-1);
     }
@@ -157,13 +151,19 @@ int proc_rna1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
     if (bam1_unmapped(bam_r)) return 0; // unmapped
     if ( ((bam_r->core.flag)&(BAM_FSECONDARY)) != 0 ) return 0; // secondary alignment
     if ( ((bam_r->core.flag)&(BAM_FSUPPLEMENTARY)) != 0 ) return 0; // supplemetary alignment
-    if ( (bam_r->core.qual) < (uint8_t)(objs->atac_mapq)) return 0; // low qual
+    if ( (bam_r->core.qual) < (uint8_t)(objs->rna_mapq)) return 0; // low qual
 
     // coordinates are begin and end of alignment, excluding clipped bases.
     int32_t bam_rid;
     int32_t bam_beg, bam_end;
     if (get_rcoord_bam(bam_r, &bam_rid, &bam_beg, &bam_end, 0) < 0)
         return err_msg(-1, 0, "proc_rna1: failed get coordinates");
+
+    // print_bam1_t(bam_r);
+    const char *qname = bam_get_qname(bam_r);
+
+    if (bam_rid == -1)
+        return err_msg(-1, 0, "proc_rna1: bam rid is -1 for '%s'", qname);
 
     // skip read if in exclusion regions
     /*
@@ -172,72 +172,59 @@ int proc_rna1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
             iregs_has_overlap(objs->exclude, chr, bam_beg, bam_end-1) > 0)
     */
 
-    // print_bam1_t(bam_r);
-    const char *qname = bam_get_qname(bam_r);
-
     uint8_t *tag_ptr;
 
-    const char *b_umi = get_tag(bam_r, objs->rna_umi_tag);
-    if (b_umi == NULL) return 0;
-    if (strlen(b_umi) < 4) return 0; // missing can be represented as dash
-
-    const char *b_cb = get_tag(bam_r, objs->rna_bc_tag);
-    if (b_cb == NULL || strlen(b_cb) < 4) return 0; // missing can be represented as dash
-
+    // check number of hits of query, filter if above threshold
     if (objs->max_nh > 0){
         tag_ptr = bam_aux_get(bam_r, objs->rna_nh_tag);
         if (tag_ptr == NULL){
             return err_msg(-1, 0, "proc_rna1: NH set but could not find "
-                    "tag %s in read %s\n", objs->rna_nh_tag, qname);
+                    "tag '%s' in read '%s'\n", objs->rna_nh_tag, qname);
         }
         int nh = (int)bam_aux2i(tag_ptr);
         if (nh > objs->max_nh) return 0;
     }
 
-    int fret, vret;
-
-    // Get overlapping features
-    ml_t(gene_list) gl;
-    ml_init(gene_list, &gl);
-    if ( (fret = bam1_feat_overlap(objs->rna_bam_hdr, bam_r, objs->anno, &gl)) < 0)
-        return err_msg(-1, 0, "proc_rna1: could not overlap features in bam record");
-
-    // Get overlapping variants, base calls, and base qualities.
-    ml_t(base_list) bl;
-    ml_init(base_list, &bl);
-    if ( (vret = bam1_seq_base(objs->atac_bam_hdr, bam_r, objs->gv, &bl)) < 0)
-        return err_msg(-1, 0, "proc_rna1: could not overlap variants and bases in bam record");
-
-    // skip if no overlapping features or variants
-    if (vret == 0 && fret == 0){
-        ml_free(gene_list, &gl);
-        ml_free(base_list, &bl);
+    // get UMI and barcode tags
+    const char *b_umi = get_tag(bam_r, objs->rna_umi_tag);
+    if (b_umi == NULL || strlen(b_umi) < 4){
         return 0;
     }
+
+    const char *b_cb = get_tag(bam_r, objs->rna_bc_tag);
+    if (b_cb == NULL || strlen(b_cb) < 4){
+        return 0; // missing can be represented as dash
+    }
+
+    int fret, vret;
+
+    umishort umih = umi2umishort(b_umi);
 
     // create rna_read_t object.
     rna_read1_t *rna_read = rna_read1_alloc();
     if (rna_read == NULL) return(-1);
 
-    if (bam_rid == -1)
-        return err_msg(-1, 0, "proc_rna1: bam rid is -1 for %s", qname);
     rna_read->loc.rid = bam_rid;
     rna_read->loc.start = bam_beg;
     rna_read->loc.end = bam_end;
     rna_read->loc.strand = bam_is_rev(bam_r) ? '-' : '+'; // rna is stranded
 
-    // create seq_gene_t
-    if ( ml_cpy(gene_list, &rna_read->gl, &gl) < 0)
-        return(-1);
-    ml_free(gene_list, &gl);
+    // Get overlapping features
+    if ( (fret = bam1_feat_overlap(objs->rna_bam_hdr, bam_r, objs->anno, &rna_read->gl)) < 0)
+        return err_msg(-1, 0, "proc_rna1: could not overlap features in bam record");
 
-    // create seq_base_t
-    if ( ml_cpy(base_list, &rna_read->bl, &bl) < 0 )
-        return(-1);
-    ml_free(base_list, &bl);
+    // Get overlapping variants, base calls, and base qualities.
+    if ( (vret = bam1_seq_base(objs->rna_bam_hdr, bam_r, objs->gv, &rna_read->bl)) < 0)
+        return err_msg(-1, 0, "proc_rna1: could not overlap variants and bases in bam record");
+
+    // skip if no overlapping features or variants
+    if (vret == 0 && fret == 0){
+        rna_read1_dstry(rna_read);
+        return 0;
+    }
 
     // add read to rna
-    if (bam_data_rna_add_read(bam_data, b_cb, rna_read, b_umi) < 0)
+    if (bam_data_rna_add_read(bam_data, b_cb, rna_read, umih) < 0)
         return(-1);
 
     rna_read1_dstry(rna_read);
@@ -271,7 +258,7 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
     /* Set BAM iterator to region */
     bam_itr = sam_itr_querys(objs->rna_bam_idx, objs->rna_bam_hdr, objs->region);
     if (bam_itr == NULL){
-        return err_msg(-1, 0, "run_rna: could not set region %s in BAM file", objs->region);
+        return err_msg(-1, 0, "run_rna: could not set region '%s' in BAM file", objs->region);
     }
     /* */
 
@@ -323,11 +310,11 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
     free(splice);
     */
 
-    if (objs->verbose) log_msg("deduplicating reads");
+    if (objs->verbose) log_msg("deduplicating RNA reads");
     if (bam_data_rna_dedup(bam_data) < 0)
         return(-1);
 
-    if (objs->verbose) log_msg("calling variants");
+    if (objs->verbose) log_msg("running RNA pileup at SNP sites");
     if (bam_data_rna_var_call(bam_data, objs->gv, objs->cmap, objs->min_phred) < 0)
         return(-1);
 
@@ -338,7 +325,6 @@ int bam_count(bam_data_t *bam_dat, obj_pars *objs, char *filename){
     if (bam_dat == NULL || objs == NULL)
         return err_msg(-1, 0, "bam_count: arguments are NULL");
 
-    if (objs->verbose) log_msg("initializing counts");
     bam_counts_t *agc = bam_counts_init();
     if (objs->gv != NULL && (bam_counts_add_gv(agc, objs->gv) < 0))
         return -1;
@@ -352,11 +338,11 @@ int bam_count(bam_data_t *bam_dat, obj_pars *objs, char *filename){
     if (bam_counts_add_bc_map(agc, bam_dat->bcs) < 0)
         return -1;
 
-    if (objs->verbose) log_msg("generating counts");
+    if (objs->verbose) log_msg("generating feature counts");
     if (bam_counts_count(agc, bam_dat) < 0)
         return(-1);
 
-    if (objs->verbose) log_msg("writing counts");
+    if (objs->verbose) log_msg("writing feature counts");
     if (bam_counts_write(agc, objs->anno, objs->gv, filename) < 0)
         return -1;
 

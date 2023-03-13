@@ -26,7 +26,7 @@
  * @return Number of genes overlapping, or -1 on error.
  */
 int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a, 
-        ml_t(gene_list) *gl);
+        ml_t(seq_gene_l) *gl);
 
 /* Calculate whether a read is spliced, unspliced, or ambiguous.
  * 
@@ -40,13 +40,13 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret);
 
 /* Find variants that overlap an alignment
  *
- * This function returns Var objects in a linked list pointer to by 
+ * This function returns var_t objects in a linked list pointed to by 
  * the argument in @p vars.The list @p vars is updated to contain the 
- * overlapping Var objects.
+ * overlapping var_t objects.
  *
- * Proper usage would be 
- *  var_t *var_list;
- *  bam1_vars_overlap(sam_hdr, bam1, gv, &var_list);
+ * Undefined behaviour if vars points to an invalid list object.
+ *
+ * Returns an error if any of the arguments are null.
  *
  * @param h pointer to header for bam record @p b.
  * @param b pointer to bam1_t object for overlap.
@@ -56,15 +56,18 @@ uint8_t bam1_spliced(bam1_t *b, gene_t *g, int *ret);
  * @return -1 on error, 0 on success.
  */
 int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, 
-        var_t **vars);
+        ml_t(vcfr_list) *vars);
 
 /* Get sequenced bases at overlapping variant sites in alignment.
  *
- * @param bl pointer to initialized base list object of type ml_t(base_list). 
+ * Appends seq_base_t objects to the seq_base_l pointer to by @p bl.
+ * If @p bl is null, return an error.
+ *
+ * @param bl pointer to initialized base list object of type ml_t(seq_base_l). 
  *  Must be empty. If NULL, return an error.
  *  @return -1 on error, or the number of bases in @p bl.
  */
-int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(base_list) *bl);
+int bam1_seq_base(const sam_hdr_t *h, bam1_t *b, g_var_t *gv, ml_t(seq_base_l) *bl);
 
 /* Return the number of bases that overlap between [a1,a2) and [b1,b2) features. 
  * a1 must be less than a2, and b1 must be less than b2.

@@ -30,6 +30,12 @@ typedef struct {
     khash_t(khap) *atac_pairs; // indexed by query name hash
     khash_t(khaf) *atac_frags; // indexed by location
 
+    // list implementations for traversal
+    // these are just placeholders to avoid traversing the hash table, 
+    // do not free the pointers in the nodes themselves
+    ml_t(mlar) mols_l;
+    ml_t(mlaf) frags_l;
+
     // barcode stats/counts
     bc_stats_t *bc_stats;
 
@@ -53,6 +59,8 @@ void bc_data_dstry(bc_data_t *bcdat);
  */
 void bc_data_free_atac_pairs(bc_data_t *bcdat);
 
+int bc_data_fill_list(bc_data_t *bcdat);
+
 /*******************************************************************************
  * BC RNA
  ******************************************************************************/
@@ -61,7 +69,7 @@ void bc_data_free_atac_pairs(bc_data_t *bcdat);
  * See bam_data_rna_add_read.
  * @return 0 on success, -1 on error.
  */
-int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, const char *name);
+int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, umishort umih);
 
 /* De-duplicates the reads in @f rna_mols
  * See bam_data_rna_dedup.
@@ -164,7 +172,7 @@ int bam_data_fill_bcs(bam_data_t *b, str_map *bcs);
  * @return 0 on success, -1 on error.
  */
 int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc, 
-        const rna_read1_t *r, const char *name);
+        const rna_read1_t *r, umishort umih);
 
 /* De-duplicate RNA reads in bam_data_t object.
  * Loops through the fragments and collapses duplicate 
@@ -244,6 +252,8 @@ int bam_data_atac_var_call(bam_data_t *bam_data, g_var_t *gv,
  */
 int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks, 
         str_map *cmap);
+
+int bam_data_fill_list(bam_data_t *bam_data);
 
 /*******************************************************************************
  * bc_stats

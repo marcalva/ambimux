@@ -26,7 +26,75 @@ enum alleles {REF, ALT, OTHER, NA_ALLELE};
 #define N_ALLELE 4
 
 /************************************************************************
- * VCF file
+ * var_t
+ ***********************************************************************/
+
+typedef struct var_t { 
+    bcf1_t *b;
+    int32_t vix;
+} var_t;
+
+/* var_t vector type
+ * mv_t(vcfr_vec)
+ */
+mv_declare(vcfr_vec, var_t);
+
+// TODO: see if I can keep this list sorted by position instead of index
+/* var_t list type
+ * ml_t(vcfr_list)
+ */
+// return -1 if v1 < v2 in position, first compare rid then pos
+// return 0 if the same
+static inline int var_pos_cmp(var_t v1, var_t v2){
+    if (v1.b->rid < v2.b->rid) return(-1);
+    else if (v1.b->rid > v2.b->rid) return(1);
+
+    if (v1.b->pos < v2.b->pos) return(-1);
+    else if (v1.b->pos > v2.b->pos) return(1);
+
+    return(0);
+}
+// #define var_t_cmp(p, q) ( ((q).vix < (p).vix) - ((p).vix < (q).vix) )
+ml_declare(vcfr_list, var_t, var_pos_cmp);
+
+#define vcfr_list_init(ll) ml_init(vcfr_list, ll)
+#define vcfr_list_free(ll) ml_free(vcfr_list, ll)
+#define vcfr_list_insert(ll, vcfr, skip_dup, dup_ok) \
+    ml_insert(vcfr_list, ll, vcfr, skip_dup, dup_ok)
+
+// KHASH_INIT(var, var_id_t*, var_t*, 1, _var_id_t_hash_func, _var_id_t_hash_equal);
+KHASH_INIT(var, char*, var_t*, 1, kh_str_hash_func, kh_str_hash_equal);
+
+/************************************************************************
+ * chr_bins_t
+ ***********************************************************************/
+
+typedef struct chr_bins_t {
+    ml_t(vcfr_list) bins[MAX_BIN];
+} chr_bins_t;
+
+/* chr_bins_t vector type
+ * mv_t(cbin_vec)
+ */
+mv_declare(cbin_vec, chr_bins_t *);
+
+/************************************************************************
+ * g_var_t
+ ***********************************************************************/
+
+typedef struct {
+    str_map *chrm_ix; // chromosome  
+    mv_t(cbin_vec) chr_bins;
+
+    mv_t(vcfr_vec) vix2var; // variant index to var_t object.
+
+    bcf_hdr_t *vcf_hdr;
+} g_var_t;
+
+// Functions
+
+/************************************************************************
+ * bcf functions
  ***********************************************************************/
 
 int load_vcf(const char *vcffn, const char *region, int region_set, 
@@ -45,62 +113,6 @@ int sub_vcf_samples(bcf_hdr_t **vcf_hdr, const char *samplefn);
  * @return 0 on success, -1 on error.
  */
 int bcf_hdr_chr_ix(const bcf_hdr_t *hdr, str_map *cm);
-
-/************************************************************************
- * var_t
- ***********************************************************************/
-
-typedef struct var_t { 
-    bcf1_t *b;
-    int32_t vix;
-    struct var_t *next;
-} var_t;
-
-/* var_t vector type
- * mv_t(vcfr_vec)
- */
-mv_declare(vcfr_vec, var_t);
-
-/* var_t list type
- * ml_t(vcfr_list)
- */
-#define var_t_cmp(p, q) ( ((q).vix < (p).vix) - ((p).vix < (q).vix) )
-ml_declare(vcfr_list, var_t, var_t_cmp);
-
-#define vcfr_list_init(ll) ml_init(vcfr_list, ll)
-#define vcfr_list_free(ll) ml_free(vcfr_list, ll)
-#define vcfr_list_insert(ll, vcfr, skip_dup, dup_ok) \
-    ml_insert(vcfr_list, ll, vcfr, skip_dup, dup_ok)
-
-// KHASH_INIT(var, var_id_t*, var_t*, 1, _var_id_t_hash_func, _var_id_t_hash_equal);
-KHASH_INIT(var, char*, var_t*, 1, kh_str_hash_func, kh_str_hash_equal);
-
-typedef struct chr_bins_t {
-    ml_t(vcfr_list) bins[MAX_BIN];
-} chr_bins_t;
-
-/* chr_bins_t vector type
- * mv_t(cbin_vec)
- */
-mv_declare(cbin_vec, chr_bins_t *);
-
-typedef struct chr_var_t {
-    var_t *bins[MAX_BIN];
-    uint16_t vars_n[MAX_BIN];
-} chr_var_t;
-
-typedef struct {
-    str_map *chrm_ix; // chromosome  
-    mv_t(cbin_vec) chr_bins;
-    chr_var_t **chrms; // array to array of chr_var_t
-    int chrms_m; // max number of elements
-    mv_t(vcfr_vec) vix2var; // variant index to var_t object
-    var_t **ix2var; // variant index to var_t object
-    int32_t n_v, n_e, n_a; // num. variants, num. elements, num. allocated
-    bcf_hdr_t *vcf_hdr;
-} g_var_t;
-
-// Functions
 
 /* Return a variant ID for a BCF line.
  *
@@ -132,33 +144,7 @@ uint8_t base_ref_alt(bcf1_t *b, char base);
 
 int get_var_len(bcf1_t *b);
 
-int get_var_bin(bcf1_t *b);
-
-var_t *var_alloc();
-
-g_var_t *init_genomevar();
-
-chr_bins_t *chr_bins_alloc();
-
-/* initialize chr_var_t object
- * return NULL if memory wasn't allocated
- */ 
-chr_var_t *init_chr_var();
-
-int add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr);
-
-/*
- * @param max_miss ignore variatns with number missing alleles > max_miss.
- *   Set to negative value to ignore.
- * @param maf_cut ignore variants with maf <= maf_cut or maf >= (1-maf_cut).
- *   Set to negative value to ignore.
- */
-g_var_t *vcf2gv(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut);
-
-void destroy_gv(g_var_t *gv);
-
-// destroy bcf1_t records to preserve memory
-void free_bcf1_t(g_var_t *gv);
+int get_bcf1_bin(bcf1_t *b);
 
 /* Check if a SNP is bi-allelic.
  *
@@ -169,14 +155,19 @@ int is_biallelic_snp(bcf1_t *b);
 
 /* get number of allele or samples missing
  *
+ * All pointers must be non-null, otherwise undefined behaviour.
+ * Only bi-allelic variants are supported.
+ * Uses the GT format field, error if missing.
+ *
  * @param vcf_hdr VCF header
  * @param b VCF line
  * @param nmiss updated number of missing alleles
- * @param na updated number of alternate allele counts
+ * @param n_allele updated number of alternate allele counts
  * @param total updated total number of alleles
  * @return -1 on error, 0 on success.
  */
-int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *na, int *ntotal);
+int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *n_allele, 
+        int *ntotal);
 
 /* check if fmt tag is valid for getting allele probabilities from a VCF line
  * Assumes the GT or GP tag is present in the header.
@@ -196,6 +187,71 @@ int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *na, int *nto
  */
 int is_gt_valid(bcf_hdr_t *vcf_hdr, bcf1_t *b);
 int is_gp_valid(bcf_hdr_t *vcf_hdr, bcf1_t *b);
+
+/************************************************************************
+ * var_t functions
+ ***********************************************************************/
+
+var_t *var_alloc();
+
+// free underlying memory, including destroying the bcf1 struct
+void var_free(var_t *var);
+
+/************************************************************************
+ * chr_bins_t functions
+ ***********************************************************************/
+
+// Allocate and initialize, return NULL on error
+chr_bins_t *chr_bins_alloc();
+
+// free memory underlying chr_bins. This does not free the bcf records.
+// call g_var_free_bcfr first.
+void chr_bins_free(chr_bins_t *bins);
+
+/************************************************************************
+ * g_var_t functions
+ ***********************************************************************/
+
+g_var_t *g_var_alloc();
+
+/* add a chromosome name to g_var_t
+ * adds the string to the index, and allocates a chr_bins_t object.
+ * @return integer index of chromosome name, or -1 on error
+ */
+int g_var_add_chr(g_var_t *gv, const char *chr);
+
+/* add variant to g_var from a bcf record.
+ * return 0 on success, -1 on error.
+ */
+int g_var_add_var(g_var_t *gv, bcf1_t *b, const bcf_hdr_t *hdr);
+
+/* Reads bi-allelic snps from vcf file.
+ *
+ * @param max_miss ignore variants with number missing alleles > max_miss.
+ *   Set to negative value to ignore.
+ * @param maf_cut ignore variants with maf <= maf_cut or maf >= (1-maf_cut).
+ *   Set to negative value to ignore.
+ */
+g_var_t *g_var_read_vcf(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double maf_cut);
+
+/*
+ * free the underlying memory associated with the bcf records.
+ */
+void g_var_free_bcfr(g_var_t *gv);
+
+/* free memory associated with gv, but not object itself.
+ * frees the bcf records
+ * does not free the vcf header, must be freed separately.
+ */
+void g_var_free(g_var_t *gv);
+
+/*
+ * bcf records should be freed with g_var_free_bcfr before calling this.
+ */
+void g_var_dstry(g_var_t *gv);
+
+/************************************************************************
+ ***********************************************************************/
 
 /* get allele prob. for bi-allelic SNPs 
  *
@@ -232,10 +288,15 @@ float **ap_array_gt(g_var_t *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char 
 
 /* Get the variants that overlap region [beg, end)
  *
- * If @p *vars is NULL, then the pointer pointed to by vars is replaced 
- * with a linked list of var_t object. If @p vars already points to a linked 
- * list of var_t objects, then the overlapping variants are appened to the 
- * list. There is no dummy head node.
+ * Variants are added to the list ml_t(vcfr_list) in @p vars. 
+ * Assumes that this points to a valid list, undefined behaviour 
+ * otherwise.
+ *
+ * Returns an error if gv or ref is null.
+ *
+ * The region is specified as 0-based [beg, end).
+ * Will return an error if end <= beg, or if beg or end are less than 0.
+ *
  *
  * @param gv g_var_t object to retrieve variants from.
  * @param ref Reference sequence name (chromosome) in character array.
@@ -249,8 +310,8 @@ float **ap_array_gt(g_var_t *gv, bcf_hdr_t *vcf_hdr, int32_t *ids, int ni, char 
  * @note The containers in vars must be freed, but not the actual 
  * contents.
  */
-int region_vars(g_var_t *gv, const char* ref, int32_t beg, 
-        int32_t end, var_t **vars);
+int g_var_get_region_vars(g_var_t *gv, const char* ref, int32_t beg, 
+        int32_t end, ml_t(vcfr_list) *vars);
 
 int n_snp(g_var_t *gv, int *n_snp);
 

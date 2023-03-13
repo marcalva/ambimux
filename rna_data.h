@@ -14,6 +14,17 @@
 #include "counts.h"
 #include "gtf_anno.h"
 
+// store UMI as hashed 64 bit integer
+typedef uint64_t umishort;
+
+#define kh_umi_hash_func(i) (kh_int64_hash_func((i)))
+#define kh_umi_hash_equal(a, b) ((a) == (b))
+
+static inline umishort umi2umishort(const char *s){
+    umishort us = (umishort)(str_int64_hash(s));
+    return(us);
+}
+
 /*! @typedef
  * @abstract Structure to store data of a single RNA read
  *
@@ -24,9 +35,51 @@
  */
 typedef struct rna_read1_t {
     g_region loc;
-    ml_t(base_list) bl;
-    ml_t(gene_list) gl;
+    ml_t(seq_base_l) bl;
+    ml_t(seq_gene_l) gl;
 } rna_read1_t;
+
+/*! @typedef
+ * @abstract Store duplicate RNA read
+ *
+ * @field dups Pointer to rna_read1_t array.
+ * @field rds_per_dup Number of supporting reads for each read in dups.
+ * @field size Number of reads in dups (length of valid elements in dups).
+ * @field m Allocated size of dups and rds_per_dup.
+ */
+typedef struct rna_dups_t {
+    rna_read1_t *dups;
+    uint32_t *rds_per_dup;
+    size_t size, m;
+} rna_dups_t;
+
+/*! @typedef
+ * @abstract Store de-duplicated RNA reads representing molecules.
+ *
+ * @field dups Pointer to rna_read1_t array.
+ * @field rds_per_dup Number of supporting reads for each read in dups.
+ * @field size Number of reads in dups (length of valid elements in dups).
+ * @field m Allocated size of dups and rds_per_dup.
+ * @field n_reads Number of supporting reads
+ */
+typedef struct rna_mol_t {
+    rna_dups_t *dups;
+    g_region loc;
+    ml_t(seq_base_l) bl;
+    ml_t(seq_vac_l) vl;
+    ml_t(seq_gene_l) gl;
+    size_t n_reads;
+    uint8_t _dedup;
+} rna_mol_t;
+
+// store reads by name
+// KHASH_INIT(khrmn, char*, rna_mol_t *, 1, kh_str_hash_func, kh_str_hash_equal);
+
+// store reads by UMI (hash)
+KHASH_INIT(khrmn, umishort, rna_mol_t *, 1, kh_umi_hash_func, kh_umi_hash_equal);
+
+#define mlar_lt(p, q) -1
+ml_declare(mlar, rna_mol_t *, mlar_lt);
 
 void rna_read1_init(rna_read1_t *r);
 rna_read1_t *rna_read1_alloc();
@@ -85,20 +138,6 @@ int rna_read1_add_base(rna_read1_t *r, seq_base_t base);
  */
 int rna_read1_match_qual(rna_read1_t *r, const rna_read1_t *cmp);
 
-/*! @typedef
- * @abstract Store duplicate RNA read
- *
- * @field dups Pointer to rna_read1_t array.
- * @field rds_per_dup Number of supporting reads for each read in dups.
- * @field size Number of reads in dups (length of valid elements in dups).
- * @field m Allocated size of dups and rds_per_dup.
- */
-typedef struct rna_dups_t {
-    rna_read1_t *dups;
-    size_t *rds_per_dup;
-    size_t size, m;
-} rna_dups_t;
-
 int rna_dups_init(rna_dups_t *rd);
 rna_dups_t *rna_dups_alloc();
 
@@ -106,28 +145,6 @@ void rna_dups_free(rna_dups_t *rd);
 void rna_dups_dstry(rna_dups_t *rd);
 
 int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r);
-
-// store reads by name
-KHASH_INIT(khrdn, char *, rna_dups_t *, 1, kh_str_hash_func, kh_str_hash_equal);
-
-/*! @typedef
- * @abstract Store de-duplicated RNA reads representing molecules.
- *
- * @field dups Pointer to rna_read1_t array.
- * @field rds_per_dup Number of supporting reads for each read in dups.
- * @field size Number of reads in dups (length of valid elements in dups).
- * @field m Allocated size of dups and rds_per_dup.
- * @field n_reads Number of supporting reads
- */
-typedef struct rna_mol_t {
-    rna_dups_t *dups;
-    g_region loc;
-    ml_t(base_list) bl;
-    ml_t(vac_list) vl;
-    ml_t(gene_list) gl;
-    size_t n_reads;
-    uint8_t _dedup;
-} rna_mol_t;
 
 int rna_mol_init(rna_mol_t *rmol);
 rna_mol_t *rna_mol_alloc();
@@ -150,9 +167,6 @@ int rna_mol_dedup(rna_mol_t *mol);
 
 int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual);
-
-// store reads by name
-KHASH_INIT(khrmn, char*, rna_mol_t *, 1, kh_str_hash_func, kh_str_hash_equal);
 
 /*
 void count_umis(bam_rna_t *bam_r, int *n_umi, int *n_reads, int *n_bc);

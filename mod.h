@@ -32,38 +32,9 @@
 
 #define TAU 0.01
 
-// struct for bitwise flags
-typedef struct {
-    char *f;
-    int n;
-} flg;
-
-flg *flg_init(int n);
-int flg_set_flag(flg *f, int ix);
-int flg_unset_flag(flg *f, int ix);
-int flg_get_flag(flg *f, int ix);
-void flg_dstry(flg *f);
-
 /*********************
  * parameters
  *********************/
-
-/*
- *
- * An example workflow:
- *
- * mdl_pars_t *gp = init_mdl_pars();
- * set_mdl_pars(gp, n_bcs, n_genes, n_vars, n_samples);
- * mdl_pars_set_bcs(gp, bcs, 1);
- * mdl_pars_est_alpha(gp, bam_rna, flt_bcs, 1.0);
- * mdl_pars_set_samples(gp, samples, 1);
- * mdl_pars_add_gamma(gp, dose_array, n_vars, n_samples);
- * mdl_pars_set_beta(gp);
- * mdl_pars_set_tau(gp, 0.5);
- * mdl_pars_set_eps(gp, 0.01);
- * mdl_llk(bam_rna, bam_atac, gp, &bc_llks);
- *
- */
 
 /*! @typedef mdl_pars_t
  * All matrices are column major indexed.
@@ -120,6 +91,7 @@ typedef struct {
  */
 typedef struct {
     f_t p_x; // P(X_d | Theta) data probability
+    f_t *lp_hs; // log P(H_d, S_d | Theta) length: _nrow_hs
     f_t *cp_hs; // P(H_d, S_d | X_d, Theta) length: _nrow_hs
 } c_probs_t;
 
@@ -206,27 +178,22 @@ static inline f_t pr_gamma_var(f_t *gamma, seq_vac_t vac, uint32_t s_ix, uint32_
     return(p_bdm);
 }
 
-/* Calculate Pr(H_d | \Theta) * Pr(S_)d | \Theta)
- *
- * @return 0 on success, -1 on error. The log prob. value is stored in @p prob.
- */
-int pr_hsd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob);
-
-/* Calculate Pr(T_dm | S_d, \alpha_d)
- *
- * @return 0 on success, -1 on error. The log prob. value is stored in @p prob.
- */
+// Pr(H_d)
+void pr_hd(mdl_t *mdl, int hd, f_t *prob);
+// Pr(S_d)
+void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob);
+// Pr(T_d)
 int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, f_t *prob);
-
-int p_hst_rna(mdl_t *mdl, rna_mol_t *mol, int bc_ix, int hd, int s_ix, f_t *prob);
-int p_hst_atac(mdl_t *mdl, atac_frag_t *frag, int bc_ix, int hd, int s_ix, f_t *prob);
+// Pr(G_dm, B_dm)
+int p_rna(mdl_t *mdl, rna_mol_t *mol, int s_ix, f_t *prob);
+// Pr(P_dm, B_dm)
+int p_atac(mdl_t *mdl, atac_frag_t *frag, int s_ix, f_t *prob);
 
 /*******************************************************************************
  * Expectation
  ******************************************************************************/
 
 int mdl_e_hs(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len);
-int mdl_q(mdl_t *mdl, bam_data_t *bam_data, int *ixs, uint32_t ix_len, double *q);
 
 /*******************************************************************************
  * Maximization

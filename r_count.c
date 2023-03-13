@@ -8,7 +8,7 @@
  ******************************************************************************/
 
 bc_counts_t *bc_counts_init(){
-    bc_counts_t *bcc = (bc_counts_t *)calloc(1, sizeof(bc_counts_t));
+    bc_counts_t *bcc = calloc(1, sizeof(bc_counts_t));
     if (bcc == NULL){
         err_msg(-1, 0, "bc_counts_init: %s", strerror(errno));
         return(NULL);
@@ -18,8 +18,8 @@ bc_counts_t *bc_counts_init(){
     bcc->atac_pc = kb_init(kh_cnode, KB_DEFAULT_SIZE);
     bcc->rna_ac = kb_init(kh_cnode, KB_DEFAULT_SIZE);
     bcc->rna_gc = kb_init(kh_cnode, KB_DEFAULT_SIZE);
-    if (bcc->atac_ac == NULL || bcc->atac_pc == NULL || bcc->rna_ac == NULL 
-            || bcc->rna_gc == NULL){
+    if (bcc->atac_ac == NULL || bcc->atac_pc == NULL 
+        || bcc->rna_ac == NULL || bcc->rna_gc == NULL){
         err_msg(-1, 0, "bc_counts_init: failed to init kbtree"); 
         return(NULL);
     }
@@ -62,6 +62,7 @@ bam_counts_t *bam_counts_init(){
     agc->rna_gcs_nz = 0;
     agc->rna_acs_nz = 0;
     agc->atac_acs_nz = 0;
+    agc->atac_pcs_nz = 0;
 
     return(agc);
 }
@@ -162,25 +163,27 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                 if (!kh_exist(mols, k_m)) continue;
                 rna_mol_t *mol = kh_val(mols, k_m);
                 if (mol == NULL) continue;
-                ml_node_t(gene_list) *gn;
+                ml_node_t(seq_gene_l) *gn;
                 if (ml_size(&mol->gl) != 1) continue; // discard multigene UMIs
                 for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
                     seq_gene_t gene = ml_node_val(gn);
                     int32_t fix = gene.gene_id;
                     uint8_t spl = gene.splice;
                     assert(spl <= N_SPL);
-                    cnt_node_t *p, t = {0};
+                    cnt_node_t *p, t;
+                    memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = (int)fix;
                     t.counts[spl] = 1;
                     p = kb_getp(kh_cnode, bcc->rna_gc, &t);
                     if (!p){
                         kb_putp(kh_cnode, bcc->rna_gc, &t);
                         ++agc->rna_gcs_nz;
+                    } else {
+                        p->counts[spl] += 1;
                     }
-                    else ++p->counts[spl];
                     agc->has_rna_gc = 1;
                 }
-                ml_node_t(vac_list) *vn;
+                ml_node_t(seq_vac_l) *vn;
                 for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
                     seq_vac_t vac = ml_node_val(vn);
                     int32_t vix = vac.vix;
@@ -188,7 +191,8 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     if (allele >= MAX_ALLELE)
                         return err_msg(-1, 0, "bam_counts_count: "
                                 "allele %u > %i", allele, MAX_ALLELE);
-                    cnt_node_t *p, t = {0};
+                    cnt_node_t *p, t;
+                    memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = vix;
                     t.counts[allele] = 1;
                     p = kb_getp(kh_cnode, bcc->rna_ac, &t);
@@ -196,7 +200,9 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                         kb_putp(kh_cnode, bcc->rna_ac, &t);
                         ++agc->rna_acs_nz;
                     }
-                    else ++p->counts[allele];
+                    else {
+                        p->counts[allele] += 1;
+                    }
                     agc->has_rna_ac = 1;
                 }
             }
@@ -211,23 +217,22 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     printf("frag is null in bam_counts_count, is this ok?\n");
                     continue;
                 }
-                uint32_t c_add = 1;
-                iregn_t pk = frag->pks; // can be empty
                 size_t ip;
-                for (ip = 0; ip < pk.n; ++ip){
-                    cnt_node_t *p, t = {0};
-                    t.ix = pk.ix[ip];
-                    t.counts[0] = c_add;
+                for (ip = 0; ip < mv_size(&frag->pks); ++ip){
+                    cnt_node_t *p, t;
+                    memset(&t, 0, sizeof(cnt_node_t));
+                    t.ix = mv_i(&frag->pks, ip);
+                    t.counts[0] = 1;
                     p = kb_getp(kh_cnode, bcc->atac_pc, &t);
                     if (p == NULL){
                         kb_putp(kh_cnode, bcc->atac_pc, &t);
                         ++agc->atac_pcs_nz;
                     } else {
-                        p->counts[0] += c_add;
+                        p->counts[0] += 1;
                     }
                     agc->has_atac_pc = 1;
                 }
-                ml_node_t(vac_list) *vn;
+                ml_node_t(seq_vac_l) *vn;
                 for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
                     seq_vac_t vac = ml_node_val(vn);
                     int32_t vix = vac.vix;
@@ -236,16 +241,17 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                         return err_msg(-1, 0, "bam_atac_ac_count: "
                                 "allele %u > %i", allele, MAX_ALLELE);
 
-                    cnt_node_t *p, t = {0};
+                    cnt_node_t *p, t;
+                    memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = vix;
                     t.counts[allele] = 1;
-                    p = kb_getp(kh_cnode, bcc->atac_pc, &t);
+                    p = kb_getp(kh_cnode, bcc->atac_ac, &t);
                     if (!p){
-                        kb_putp(kh_cnode, bcc->atac_pc, &t);
+                        kb_putp(kh_cnode, bcc->atac_ac, &t);
                         ++agc->atac_acs_nz;
                     }
                     else{
-                        ++p->counts[allele];
+                        p->counts[allele] += 1;
                     }
                     agc->has_atac_ac = 1;
                 }
@@ -307,9 +313,12 @@ int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
     char *strs[3];
 
     // var bc non-zero lengths
-    strs[0] = int2str((int)agc->gv->n_v, &len);
-    strs[1] = int2str((int)agc->bc_ix->n, &len);
-    strs[2] = int2str((int)agc->atac_acs_nz, &len);
+    int n_vars = (int)mv_size(&agc->gv->vix2var);
+    int n_bcs = (int)agc->bc_ix->n;
+    int n_nz = (int)agc->atac_acs_nz;
+    strs[0] = int2str(n_vars, &len);
+    strs[1] = int2str(n_bcs, &len);
+    strs[2] = int2str(n_nz, &len);
 
     // write header
     for (i = 0; i < 3; ++i){
@@ -503,9 +512,12 @@ int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
     char *strs[3];
 
     // var bc non-zero lengths
-    strs[0] = int2str((int)agc->gv->n_v, &len);
-    strs[1] = int2str((int)agc->bc_ix->n, &len);
-    strs[2] = int2str((int)agc->rna_acs_nz, &len);
+    int n_vars = (int)mv_size(&agc->gv->vix2var);
+    int n_bcs = (int)agc->bc_ix->n;
+    int n_nz = (int)agc->rna_acs_nz;
+    strs[0] = int2str(n_vars, &len);
+    strs[1] = int2str(n_bcs, &len);
+    strs[2] = int2str(n_nz, &len);
 
     // write header
     for (i = 0; i < 3; ++i){
@@ -749,12 +761,14 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
     if (fp == NULL)
         return err_msg(-1, 0, "bam_counts_write: failed to open file %s", ofn);
     int i;
-    int32_t ne = agc->gv->n_e;
+    int32_t ne = mv_size(&gv->vix2var);
     for (i = 0; i < ne; ++i){
         var_t *var = gv_vari(gv, i);
         if (var == NULL) continue;
         char *vid = var_id(agc->gv->vcf_hdr, var->b, '\t');
         if (bgzf_write(fp, vid, strlen(vid)) < 0)
+            return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
+        if (bgzf_write(fp, "\n", 1) < 0)
             return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
         free(vid);
     }
