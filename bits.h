@@ -18,7 +18,7 @@ typedef struct {
     size_t n_buckets; // length of f
 } bflg_t;
 
-#define bflg_init_empty(flg, n) ( (flg)->f = NULL, (flg)->n = 0, (flg)->n_buckets = 0 ) 
+#define bflg_init_empty(flg) ( (flg)->f = NULL, (flg)->n = 0, (flg)->n_buckets = 0 ) 
 
 #define bflg_free(flg) ( free((flg)->f), (flg)->n = 0, (flg)->n_buckets = 0 )
 #define bflg_unset(flg, ix) ( flg->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
