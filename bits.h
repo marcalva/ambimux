@@ -24,10 +24,10 @@ typedef struct {
 #define bflg_unset(flg, ix) ( flg->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
 #define bflg_set(flg, ix) ( flg->f[(ix) >> 3] |= (1UL << ((ix) & 0x7U)) )
 #define bflg_get(flg, ix) ( ( flg->f[(ix) >> 3] >> ((ix) & 0x7U) ) & 1 ) 
+#define bflg_size(flg) (flg)->n
 
 static inline int bflg_resize(bflg_t *bflg, size_t n){
     if (n <= bflg->n) return(0);
-    bflg->n = n;
     size_t m = _bsize(n);
     bflg->f = realloc(bflg->f, m * sizeof(uint8_t));
     if (bflg->f == NULL){
@@ -38,6 +38,7 @@ static inline int bflg_resize(bflg_t *bflg, size_t n){
     // set allocated bits to 0
     size_t i;
     for (i = bflg->n; i < n; ++i) bflg_unset(bflg, i);
+    bflg->n = n;
     return(0);
 }
 
