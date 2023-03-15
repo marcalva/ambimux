@@ -32,11 +32,12 @@ An example usage of ambimux is
     --samples $samples \
     --rna-mapq 30 \
     --atac-mapq 30 \
-    --flt-n 2000 \
     --out-min 100 \
     --bc-wl $wl_bcs \
-    --flt-bcs $flt_bcs \
-    --verbose
+    --threads 8 \
+    --verbose \
+    --eps 10 \
+    --max-iter 10 \
     --out mulitome
 ```
 where the variables are replaced by your own files.
@@ -128,15 +129,6 @@ strand, gene type, gene ID, and gene name.
 It is also possible to only generate these counts and not run the likelihood 
 model by including the `--counts-only` argument.
 
-## Barcodes to estimate alpha
-
-The alpha parameter (gene expression probabilities) for the ambient and cell 
-profiles is estimated by taking the average across ambient and cell barcodes, 
-respectively. The cell barcodes have to be specified for alpha estimation. 
-They can be provided directly, or specified as the top `N` barcodes.
-The cell barcodes can be specified with `--flt-bcs` and the `N` can be 
-specified with `--flt-n`.
-
 ## Output filtering
 
 Droplets with very few counts are not useful for analyses and are typically 
@@ -150,13 +142,16 @@ pass this threshold, the barcode is skipped.
 ## Program options
 
 ```
+
+ambimux v0.1.0: single-cell demultiplexing
+
 Options:
 
 Input options
 
   -a, --atac-bam      Indexed ATAC BAM file.
   -r, --rna-bam       Indexed RNA BAM file.
-  -v, --vcf           Indexed VCF file. 
+  -v, --vcf           Indexed VCF file.
   -g, --gtf           GTF file.
   -p, --peaks         BED file containing peaks.
   -e, --exclude       BED file containing regions to exclude.
@@ -167,16 +162,11 @@ Output options
   -o, --out           Output file prefix [ambimux]. File names are appended with '.' delimiter
   -C, --counts-only   Flag argument to produce counts only and not fit a demultiplexing model.
   -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many 
-                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip. [100]
+                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, 
+skip. [100]
 
 Alignment options
 
-  -f, --flt-bcs       File containing list of filtered barcodes for alpha estimation
-                      These correspond to nonempty droplets. If set, --flt-n is ignored.
-                      Likelihood and summary results will be output only for these filtered barcodes,
-                      whereas counts will be generated for all barcodes.
-  -n, --flt-n         Alternative to flt-bcs, estimate alpha by assuming the top n barcodes
-                      ranked by number or RNA+ATAC reads are non-empty [2000].
   -w, --bc-wl         Optional file containing a whitelist of barcodes.
   -u, --rna-umi-tag   RNA BAM tag for UMI [UB].
   -b, --rna-bc-tag    RNA BAM tag for cell barcode [CB].
@@ -193,10 +183,20 @@ Mapping thresholds
   -Z, --atac-mapq     Minimum MAPQ (mapping quality) of an ATAC alignment [30].
   -R, --region        Region (hts format), for example 'chr21,chr21:10-,chr21-10-20'.
 
+EM options
+
+  -h, --eps           Convergence threshold, where the percent change in parameters
+                      must be less than this value [1e-5].
+  -q, --max-iter      Maximum number of iterations to perform for EM [20].
+  -d, --seed          Optional random seed to initialize parameters for EM.
+  -T, --threads       Optional number of threads to use [1].
+
 GTF options
 
   -t, --tx-basic      Read only transcripts tagged as 'basic' in the GTF file.
 
   -V, --verbose       Write status on output.
+      --help          Print this help screen.
+
 ```
 

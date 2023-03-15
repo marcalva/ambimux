@@ -407,10 +407,6 @@ int main(int argc, char *argv[]){
     ret = bam_count(bam_dat, objs, objs->out_fn);
     ER(ret);
 
-    // fill list
-    ret = bam_data_fill_list(bam_dat);
-    ER(ret);
-
     if (opts->counts_only)
         goto cleanup;
 
