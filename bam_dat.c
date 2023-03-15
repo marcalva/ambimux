@@ -33,6 +33,43 @@ bc_data_t *bc_data_init(){
     return(bcdat);
 }
 
+void bc_data_free_reads(bc_data_t *bcdat){
+    if (bcdat == NULL) return;
+
+    khint_t k;
+
+    if (bcdat->rna_mols != NULL){
+        for (k = kh_begin(bcdat->rna_mols); k != kh_end(bcdat->rna_mols); ++k){
+            if (!kh_exist(bcdat->rna_mols, k)) continue;
+            rna_mol_t *mol = kh_val(bcdat->rna_mols, k);
+            rna_mol_dstry(mol);
+        }
+        kh_destroy(khrmn, bcdat->rna_mols);
+    }
+    bcdat->rna_mols = NULL;
+    if (bcdat->atac_pairs != NULL){
+        for (k = kh_begin(bcdat->atac_pairs); k != kh_end(bcdat->atac_pairs); ++k){
+            if (!kh_exist(bcdat->atac_pairs, k)) continue;
+            atac_rd_pair_t *rp = kh_val(bcdat->atac_pairs, k);
+            atac_rd_pair_dstry(rp);
+        }
+        kh_destroy(khap, bcdat->atac_pairs);
+    }
+    bcdat->atac_pairs = NULL;
+    if (bcdat->atac_frags != NULL){
+        for (k = kh_begin(bcdat->atac_frags); k != kh_end(bcdat->atac_frags); ++k){
+            if (!kh_exist(bcdat->atac_frags, k)) continue;
+            atac_frag_t *frag = kh_val(bcdat->atac_frags, k);
+            atac_frag_dstry(frag);
+        }
+        kh_destroy(khaf, bcdat->atac_frags);
+    }
+    bcdat->atac_frags = NULL;
+
+    ml_free(mlaf, &bcdat->frags_l);
+    ml_free(mlar, &bcdat->mols_l);
+}
+
 void bc_data_dstry(bc_data_t *bcdat){
     if (bcdat == NULL) return;
 
@@ -41,7 +78,6 @@ void bc_data_dstry(bc_data_t *bcdat){
     if (bcdat->rna_mols != NULL){
         for (k = kh_begin(bcdat->rna_mols); k != kh_end(bcdat->rna_mols); ++k){
             if (!kh_exist(bcdat->rna_mols, k)) continue;
-            umishort umih = kh_key(bcdat->rna_mols, k);
             rna_mol_t *mol = kh_val(bcdat->rna_mols, k);
             rna_mol_dstry(mol);
         }
@@ -349,6 +385,25 @@ bam_data_t *bam_data_init(){
     }
 
     return(b);
+}
+
+void bam_data_free_bcs(bam_data_t *bam_data){
+    if (bam_data == NULL)
+        return;
+
+    if (bam_data->bc_data != NULL){
+        khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+        khint_t kbc;
+        for (kbc = kh_begin(bcs_hash); kbc != kh_end(bcs_hash); ++kbc){
+            if (!kh_exist(bcs_hash, kbc)) continue;
+            char *bc_key = kh_key(bcs_hash, kbc);
+            free(bc_key);
+            bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
+            bc_data_dstry(bc_dat);
+        }
+        kh_destroy(kh_bc_dat, bam_data->bc_data);
+        bam_data->bc_data = NULL;
+    }
 }
 
 void bam_data_dstry(bam_data_t *bam_data){

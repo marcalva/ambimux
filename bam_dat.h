@@ -52,6 +52,8 @@ KHASH_INIT(kh_bc_dat, char *, bc_data_t *, 1, kh_str_hash_func, kh_str_hash_equa
  */
 bc_data_t *bc_data_init();
 
+void bc_data_free_reads(bc_data_t *bcdat);
+
 /* Destroy and free all memory of bcdat
  */
 void bc_data_dstry(bc_data_t *bcdat);
@@ -136,6 +138,8 @@ typedef struct {
 // Initialize empty bam_data object
 // Return NULL on error, or pointer to the allocated object
 bam_data_t *bam_data_init();
+
+void bam_data_free_bcs(bam_data_t *bam_data);
 
 // Free all memory in and including @p bam_dat
 void bam_data_dstry(bam_data_t *bam_dat);
