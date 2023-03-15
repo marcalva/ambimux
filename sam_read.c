@@ -73,17 +73,17 @@ int bam1_is_mt(const bam1_t *b, const sam_hdr_t *sam_hdr){
     return chr_is_mt(chr);
 }
 
-int load_bam(const char *bamfn, samFile **bam, sam_hdr_t **bam_hdr, hts_idx_t **bam_idx){
+int load_bam(const char *bamfn, samFile **bamf, sam_hdr_t **bam_hdr, hts_idx_t **bam_idx){
 
-    *bam = sam_open(bamfn, "r");
-    if (*bam == NULL)
+    *bamf = sam_open(bamfn, "r");
+    if (*bamf == NULL)
         return err_msg(-1, 0, "load_bam: could not open BAM file %s", bamfn);
 
-    *bam_hdr = sam_hdr_read(*bam);
+    *bam_hdr = sam_hdr_read(*bamf);
     if (*bam_hdr == NULL)
         return err_msg(-1, 0, "load_bam: could not read header for BAM file %s", bamfn);
 
-    *bam_idx = sam_index_load(*bam, bamfn);
+    *bam_idx = sam_index_load(*bamf, bamfn);
     if (*bam_idx == NULL)
         return err_msg(-1, 0, "load_bam: could not load index for BAM file %s", bamfn);
 

@@ -780,7 +780,7 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
         char peak_fn[] = ".peaks.txt.gz";
         ofn = strcat2((const char *)fn, (const char *)peak_fn);
         if (ofn == NULL) return(-1);
-        BGZF *fp = bgzf_open(ofn, "wg1");
+        fp = bgzf_open(ofn, "wg1");
         if (fp == NULL)
             return err_msg(-1, 0, "bam_counts_write: failed to open file %s", ofn);
         if (iregs_write(agc->pks, fp) < 0) return(-1);

@@ -63,7 +63,7 @@ static inline int bam1_unmapped(const bam1_t *b){
  *
  * @return 0 on success, -1 on error.
  */
-int load_bam(const char *bamfn, samFile **bam, sam_hdr_t **bam_hdr, 
+int load_bam(const char *bamfn, samFile **bamf, sam_hdr_t **bam_hdr, 
         hts_idx_t **bam_idx);
 
 /* find the overlapping chromosomes between bam and bcf.
