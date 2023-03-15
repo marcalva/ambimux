@@ -760,6 +760,9 @@ gene_anno_t *read_from_gtf(char *file, int basic){
         free(a);
         return(NULL);
     }
+    // int n_gene = 0, n_iso = 0, n_exon = 0;
+    // int nc = n_feat(a, &n_gene, &n_iso, &n_exon);
+    // printf("ngene=%i, niso=%i nexon=%i\n", n_gene, n_iso, n_exon);
 
     return a;
 }
