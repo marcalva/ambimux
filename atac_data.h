@@ -80,7 +80,6 @@ KHASH_INIT(khad, g_reg_pair, atac_dups_t *, 1, kh_reg_pair_hash, kh_reg_pair_equ
 /*! @typedef atac_frag_t
  */
 typedef struct atac_frag_t {
-    mv_t(ar2_vec) rds;
     atac_dups_t *dups;
     ml_t(seq_base_l) bl; // bases
     ml_t(seq_vac_l) vl; // variant calls
