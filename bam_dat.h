@@ -24,17 +24,13 @@
  */
 typedef struct {
     // RNA
-    khash_t(khrmn) *rna_mols; // indexed by UMI
+    rna_dups_bag_t rna_dups; // indexed by UMI
+    rna_mlc_bag_t rna_mlcs; // indexed by UMI
 
     // ATAC
-    khash_t(khap) *atac_pairs; // indexed by query name hash
-    khash_t(khaf) *atac_frags; // indexed by location
-
-    // list implementations for traversal
-    // these are just placeholders to avoid traversing the hash table, 
-    // do not free the pointers in the nodes themselves
-    ml_t(mlar) mols_l;
-    ml_t(mlaf) frags_l;
+    atac_pair_bag_t atac_prs; // query name hash
+    atac_dup_bag_t atac_dups; // query by region pair
+    atac_frag_bag_t atac_frgs; // query by region pair
 
     // barcode stats/counts
     bc_stats_t *bc_stats;
@@ -101,6 +97,8 @@ int bc_data_atac_add_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
  * @return 0 on success, -1 on error.
  */
 int bc_data_atac_dedup(bc_data_t *bcdat);
+
+int bc_data_atac_get_dups(bc_data_t *bcdat);
 
 /* Call ATAC variants in bc_data
  * see bam_data_atac_var_call.
@@ -219,6 +217,8 @@ int bam_data_rna_var_call(bam_data_t *bam_data, g_var_t *gv,
  */
 int bam_data_atac_add_read(bam_data_t *bam_data, const char *bc, 
         const atac_read1_t *r, qshort qname);
+
+int bam_data_atac_get_dups(bam_data_t *bam_data);
 
 /* De-duplicate the PCR duplicates in frags.
  * Loop through the frags and deduplicate the underlying reads.

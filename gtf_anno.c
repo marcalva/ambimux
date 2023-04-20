@@ -904,7 +904,7 @@ int n_feat(gene_anno_t *a, int *n_gene, int *n_iso, int *n_exon){
                 kb_itr_first(kb_iso, bt, &itr);
                 for (; kb_itr_valid(&itr); kb_itr_next(kb_iso, bt, &itr)){
                     isoform_t *iso = &kb_itr_key(isoform_t, &itr);
-                    fprintf(stdout, "ID %s beg %i end %i n_exon %zu\n", iso->id, 
+                    fprintf(stdout, "ID %s beg %i end %i n_exon %u\n", iso->id, 
                             iso->beg, iso->end, ml_size(&iso->exons));
                     *n_iso += 1;
                     *n_exon += + ml_size(&iso->exons);

@@ -157,12 +157,10 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
         if (bcc == NULL) return(-1);
 
         if (bam_data->has_rna){
-            khash_t(khrmn) *mols = bc_data->rna_mols;
-            khint_t k_m;
-            for (k_m = kh_begin(mols); k_m != kh_end(mols); ++k_m){
-                if (!kh_exist(mols, k_m)) continue;
-                rna_mol_t *mol = kh_val(mols, k_m);
-                if (mol == NULL) continue;
+            rna_mlc_bag_itr itr, *itrp = &itr;
+            rna_mlc_bag_itr_first(itrp, &bc_data->rna_mlcs);
+            for (; rna_mlc_bag_itr_alive(itrp); rna_mlc_bag_itr_next(itrp)) {
+                rna_mol_t *mol = rna_mlc_bag_itr_val(itrp);
                 ml_node_t(seq_gene_l) *gn;
                 if (ml_size(&mol->gl) != 1) continue; // discard multigene UMIs
                 for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
@@ -205,14 +203,21 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     }
                     agc->has_rna_ac = 1;
                 }
+                rna_mlc_bag_itr_next(itrp);
             }
         }
         if (bam_data->has_atac){
+            atac_frag_bag_itr itr, *itrp = &itr;
+            atac_frag_bag_itr_first(itrp, &bc_data->atac_frgs);
+            for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
+                atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
+            /*
             khash_t(khaf) *frags = bc_data->atac_frags;
             khint_t k_m;
             for (k_m = kh_begin(frags); k_m != kh_end(frags); ++k_m){
                 if (!kh_exist(frags, k_m)) continue;
                 atac_frag_t *frag = kh_val(frags, k_m);
+            */
                 if (frag == NULL){
                     printf("frag is null in bam_counts_count, is this ok?\n");
                     continue;

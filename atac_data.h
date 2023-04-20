@@ -10,6 +10,7 @@
 #include "str_util.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
+#include "kavl.h"
 #include "variants.h"
 #include "counts.h"
 
@@ -51,8 +52,53 @@ typedef struct atac_rd_pair_t {
     uint8_t s;
 } atac_rd_pair_t;
 
+/*******************************************************************************
+ * atac pairs bag
+ ******************************************************************************/
+
+// (internal) node for rna_dups_t object
+typedef struct atac_pair_node {
+    qshort key; // UMI hash
+    atac_rd_pair_t atac_pair;
+    KAVL_HEAD(struct atac_pair_node) head;
+} atac_pair_node;
+#define qshort_cmp(p, q) (((q)->key < (p)->key) - ((p)->key < (q)->key))
+KAVL_INIT2(bt_qr_pr, static, struct atac_pair_node, head, qshort_cmp);
+
+int atac_pair_node_init(atac_pair_node *node);
+void atac_pair_node_free(atac_pair_node *node);
+
+// container of atac_rd_pair_t objects
+typedef struct atac_pair_bag_t {
+    atac_pair_node *atac_pairs;
+} atac_pair_bag_t;
+
+int atac_pair_bag_init(atac_pair_bag_t *bag);
+void atac_pair_bag_free(atac_pair_bag_t *bag);
+int atac_pair_bag_add_read(atac_pair_bag_t *bag, const atac_read1_t *ar,
+        qshort qname);
+
+typedef struct {
+    kavl_itr_t(bt_qr_pr) itr;
+    uint8_t next;
+} atac_pair_bag_itr;
+
+void atac_pair_bag_itr_first(atac_pair_bag_itr *itr, atac_pair_bag_t *bag);
+// return 0 if nothing left and no value, 1 if itr has value after call
+int atac_pair_bag_itr_next(atac_pair_bag_itr *itr);
+int atac_pair_bag_itr_alive(atac_pair_bag_itr *itr);
+qshort *atac_pair_bag_itr_key(atac_pair_bag_itr *itr);
+atac_rd_pair_t *atac_pair_bag_itr_val(atac_pair_bag_itr *itr);
+
 /* read pairs keyed by query name */
 KHASH_INIT(khap, qshort, atac_rd_pair_t *, 1, kh_qname_hash_func, kh_qname_hash_equal);
+
+/*******************************************************************************
+ ******************************************************************************/
+
+/*******************************************************************************
+ * atac frags
+ ******************************************************************************/
 
 typedef struct atac_read2_t{
     atac_read1_t r1;
@@ -71,22 +117,100 @@ typedef struct atac_dups_t {
         atac_rd_pair_t rd; // read pair
         uint32_t n_rd; // number of (duplicate) reads per pair.
     } *dups;
-    size_t size, m;
+    uint32_t size, m;
 } atac_dups_t;
+
+/*******************************************************************************
+ * atac dups bag
+ ******************************************************************************/
+
+// (internal) node for rna_dups_t object
+typedef struct atac_dup_node {
+    g_reg_pair key;
+    atac_dups_t atac_dup;
+    KAVL_HEAD(struct atac_dup_node) head;
+} atac_dup_node;
+#define adn_cmp(p, q) reg_pair_cmp( (p)->key, (q)->key )
+KAVL_INIT2(bt_rg_dp, static, struct atac_dup_node, head, adn_cmp);
+
+int atac_dup_node_init(atac_dup_node *node);
+void atac_dup_node_free(atac_dup_node *node);
+
+// container of atac_dups_t objects
+typedef struct atac_dup_bag_t {
+    atac_dup_node *atac_dups;
+} atac_dup_bag_t;
+
+int atac_dup_bag_init(atac_dup_bag_t *bag);
+void atac_dup_bag_free(atac_dup_bag_t *bag);
+int atac_dup_bag_add_read(atac_dup_bag_t *bag, const atac_rd_pair_t *ap,
+        int skip_chim);
+
+typedef struct {
+    kavl_itr_t(bt_rg_dp) itr;
+    uint8_t next;
+} atac_dup_bag_itr;
+
+void atac_dup_bag_itr_first(atac_dup_bag_itr *itr, atac_dup_bag_t *bag);
+// return 0 if nothing left and no value, 1 if itr has value after call
+int atac_dup_bag_itr_next(atac_dup_bag_itr *itr);
+int atac_dup_bag_itr_alive(atac_dup_bag_itr *itr);
+g_reg_pair *atac_dup_bag_itr_key(atac_dup_bag_itr *itr);
+atac_dups_t *atac_dup_bag_itr_val(atac_dup_bag_itr *itr);
 
 /* duplicates keyed by region */
 KHASH_INIT(khad, g_reg_pair, atac_dups_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
 
+/*******************************************************************************
+ * atac frags
+ ******************************************************************************/
+
 /*! @typedef atac_frag_t
  */
 typedef struct atac_frag_t {
-    atac_dups_t *dups;
     ml_t(seq_base_l) bl; // bases
     ml_t(seq_vac_l) vl; // variant calls
     mv_t(int_vec) pks; // peaks
-    uint8_t _dedup;
-    size_t s; // number of supporting reads
+    uint32_t s; // number of supporting reads
 } atac_frag_t;
+
+/*******************************************************************************
+ * atac frags bag
+ ******************************************************************************/
+
+// (internal) node for rna_frags_t object
+typedef struct atac_frag_node {
+    g_reg_pair key;
+    atac_frag_t atac_frag;
+    KAVL_HEAD(struct atac_frag_node) head;
+} atac_frag_node;
+#define adn_cmp(p, q) reg_pair_cmp( (p)->key, (q)->key )
+KAVL_INIT2(bt_rg_fr, static, struct atac_frag_node, head, adn_cmp);
+
+int atac_frag_node_init(atac_frag_node *node);
+void atac_frag_node_free(atac_frag_node *node);
+
+// container of atac_frags_t objects
+typedef struct atac_frag_bag_t {
+    atac_frag_node *atac_frags;
+} atac_frag_bag_t;
+
+int atac_frag_bag_init(atac_frag_bag_t *bag);
+void atac_frag_bag_free(atac_frag_bag_t *bag);
+int atac_frag_bag_add(atac_frag_bag_t *bag, const atac_frag_t *af,
+        g_reg_pair reg);
+
+typedef struct {
+    kavl_itr_t(bt_rg_fr) itr;
+    uint8_t next;
+} atac_frag_bag_itr;
+
+void atac_frag_bag_itr_first(atac_frag_bag_itr *itr, atac_frag_bag_t *bag);
+// return 0 if nothing left and no value, 1 if itr has value after call
+int atac_frag_bag_itr_next(atac_frag_bag_itr *itr);
+int atac_frag_bag_itr_alive(atac_frag_bag_itr *itr);
+g_reg_pair *atac_frag_bag_itr_key(atac_frag_bag_itr *itr);
+atac_frag_t *atac_frag_bag_itr_val(atac_frag_bag_itr *itr);
 
 /* atac fragments. Key is region, value is pointer to atac_frag_t */
 KHASH_INIT(khaf, g_reg_pair, atac_frag_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
@@ -227,7 +351,8 @@ int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp);
 /* Allocate and initialize and atac dups object.
  * @return Allocated and initialized object, or NULL on error.
  */
-atac_dups_t *atac_dups_init();
+int atac_dups_init(atac_dups_t *d);
+atac_dups_t *atac_dups_alloc();
 
 /* Free the memory an atac dups object and its memers.
  *
@@ -258,25 +383,14 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp);
  ******************************************************************************/
 
 /* Allocate and initialize an empty atac frag object. */
-atac_frag_t *atac_frag_init(); 
+int atac_frag_init(atac_frag_t *f);
+atac_frag_t *atac_frag_alloc(); 
 
 /* Free underlying memory and object itself. */
+void atac_frag_free(atac_frag_t *f);
 void atac_frag_dstry(atac_frag_t *f);
 
-/* Deduplicate reads in an atac frag
- *
- * Expects non-null @p d.
- * Expects at least 1 PCR duplicate in @p d with at least one supporting read.
- * Forms a fragment from a PCR duplicate with the most supporting reads.
- * If two distinct PCR duplicates have the same number of supporting reads, 
- * return NULL to discard the PCR duplicate as it is ambiguous.
- *
- * The duplicates in @p frag are destroyed during a successful call.
- *
- * @return 0 on success, -1 on failure.
- */
-int atac_frag_dedup(atac_frag_t *frag);
-atac_frag_t *atac_dups_dedup(const atac_dups_t *d, int *ret);
+atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret);
 
 /* call variants from atac fragments
  * Variants are called and placed in @f vacs. The seq_blist_t 
@@ -304,26 +418,5 @@ int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap,
  */
 int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, 
         str_map *cmap);
-
-/*******************************************************************************
- * frags hash table
- ******************************************************************************/
-
-/* Add read pair to a frags hash table.
- * Uses the region from the pair of reads as the hash key.
- * If @p skip_chim is not zero, then pairs from distinct chromosomes are 
- * ignored.
- *
- * @return -1 on error, 0 on success.
- */
-int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp, int skip_chim);
-
-/*******************************************************************************
- * bam_atac_t
- ******************************************************************************/
-
-/*******************************************************************************
- * miscellaneous
- ******************************************************************************/
 
 #endif // ATAC_DATA_H

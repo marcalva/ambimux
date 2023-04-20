@@ -122,6 +122,16 @@ int seq_base_l_equal(ml_t(seq_base_l) bl1, ml_t(seq_base_l) bl2, int cmp_qual);
 int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp);
 
 /*******************************************************************************
+ * base vec
+ ******************************************************************************/
+
+mv_declare(seq_base_v, seq_base_t);
+
+int seq_base_v_cmp(mv_t(seq_base_v) bv1, mv_t(seq_base_v) bv2, int cmp_qual);
+int seq_base_v_equal(mv_t(seq_base_v) bv1, mv_t(seq_base_v) bv2, int cmp_qual);
+int seq_base_v_match_qual(mv_t(seq_base_v) *bv, const mv_t(seq_base_v) *cmp);
+
+/*******************************************************************************
  * variant allele calls
  ******************************************************************************/
 
@@ -205,6 +215,18 @@ int seq_vac_l_call_var(ml_t(seq_base_l) *bl, ml_t(seq_vac_l) *vl, g_var_t *gv,
 // int seq_vac_l_equal(ml_t(seq_vac_l) bl1, ml_t(seq_vac_l) bl2, int cmp_qual);
 
 /*******************************************************************************
+ * vac vec
+ ******************************************************************************/
+
+mv_declare(seq_vac_v, seq_vac_t);
+
+int seq_base_call_var_v(seq_base_t b, mv_t(seq_vac_v) *vv, g_var_t *gv,
+        str_map *cmap, uint8_t min_qual);
+
+int seq_vac_l_call_var_v(mv_t(seq_base_v) *vl, mv_t(seq_vac_v) *vv, g_var_t *gv, 
+        str_map *cmap, uint8_t min_qual);
+
+/*******************************************************************************
  * sequencing gene
  ******************************************************************************/
 
@@ -216,8 +238,8 @@ int seq_vac_l_call_var(ml_t(seq_base_l) *bl, ml_t(seq_vac_l) *vl, g_var_t *gv,
  * @field next Pointer to next object in a list.
  */
 typedef struct seq_gene_t {
-   int32_t gene_id;
-   uint8_t splice;
+   int32_t gene_id : 30;
+   uint8_t splice : 2;
 } seq_gene_t;
 
 /* Initialize/allocate a seq_gene_t object.

@@ -31,8 +31,8 @@
  * end, the bases that are part of the read are [start, end).
  */
 typedef struct g_region {
-    char strand;
-    int32_t rid;
+    char strand : 8;
+    int32_t rid : 24;
     int32_t start;
     int32_t end;
 } g_region;
@@ -88,8 +88,8 @@ void print_g_region(FILE *f, g_region g);
  ******************************************************************************/
 
 typedef struct g_pos {
-    char strand;
-    int32_t rid;
+    char strand : 8;
+    int32_t rid : 24;
     int32_t pos;
 } g_pos;
 
@@ -139,6 +139,8 @@ g_reg_pair get_reg_pair(g_region r1, g_region r2);
  * @return khint_t from hash function.
  */
 khint_t kh_reg_pair_hash(g_reg_pair p);
+
+int reg_pair_cmp(g_reg_pair p1, g_reg_pair p2);
 
 /* Test for equality between two g_reg_pair objects.
  *

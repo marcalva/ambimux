@@ -170,12 +170,16 @@ rna_dups_t *rna_dups_alloc(){
 
 void rna_dups_free(rna_dups_t *rd){
     if (rd == NULL) return;
-    size_t i;
+    uint32_t i;
     for (i = 0; i < rd->size; ++i)
         rna_read1_free(&rd->dups[i]);
 
     free(rd->dups);
+    rd->dups = NULL;
     free(rd->rds_per_dup);
+    rd->rds_per_dup = NULL;
+    rd->size = 0;
+    rd->m = 0;
 }
 
 void rna_dups_dstry(rna_dups_t *rd){
@@ -193,7 +197,7 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     if (rd->dups == NULL || rd->rds_per_dup == NULL)
         return err_msg(-1, 0, "rna_dups_add_read: rd->dups or rds_per_dup is null");
 
-    size_t i;
+    uint32_t i;
     int ret;
     for (i = 0; i < rd->size; ++i){
         int rcmp = rna_read1_cmp(&rd->dups[i], r, 0);
@@ -207,7 +211,7 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     while (rd->size >= rd->m){
         rd->m = rd->size + 1;
         rd->dups = realloc(rd->dups, rd->m * sizeof(rna_read1_t));
-        rd->rds_per_dup = realloc(rd->rds_per_dup, rd->m * sizeof(size_t));
+        rd->rds_per_dup = realloc(rd->rds_per_dup, rd->m * sizeof(uint32_t));
         if (rd->dups == NULL || rd->rds_per_dup == NULL)
             return err_msg(-1, 0, "rna_dups_add_read: %s", strerror(errno));
     }
@@ -227,20 +231,300 @@ int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r){
     return(0);
 }
 
+rna_mol_t *rna_dups_dedup(rna_dups_t *dups, int *ret){
+    *ret = 0;
+    if (dups == NULL) {
+        *ret = err_msg(-1, 0, "rna_dups_dedup: mol is null");
+        return NULL;
+    }
+
+    // if no dups, return 0 successfully
+    if (dups->size == 0)
+        return NULL;
+
+    int ix_best = 0;
+    uint32_t max_c = 0; // store read count
+    uint32_t rd_w_max = 0; // number of read pairs with max_c read counts
+
+    uint32_t i;
+    for (i = 0; i < dups->size; ++i){
+        // check for bugs
+        assert(dups->rds_per_dup[i] > 0);
+
+        if (dups->rds_per_dup[i] == max_c){
+            ++rd_w_max;
+        } else if (dups->rds_per_dup[i] > max_c){
+            max_c = dups->rds_per_dup[i];
+            ix_best = i;
+            rd_w_max = 1;
+        }
+    }
+
+    // check for bugs
+    assert(max_c > 0 && rd_w_max > 0);
+
+    // initialize molecule
+    rna_read1_t rb = dups->dups[ix_best];
+
+    rna_mol_t *mol = calloc(1, sizeof(rna_mol_t));
+    // rna_mol_t *mol = rna_mol_alloc();
+    if (mol == NULL) {
+        *ret = -1;
+        return NULL;
+    }
+
+    // rna_dups_free(mol->dups);
+    mol->loc = rb.loc;
+
+    seq_base_l_init(&mol->bl);
+    if ( seq_base_l_cpy(&mol->bl, &rb.bl) < 0 ) {
+        *ret = err_msg(-1, 0, "rna_dups_dedup: failed to copy base list");
+        free(mol);
+        return NULL;
+    }
+
+    seq_gene_l_init(&mol->gl);
+    if ( seq_gene_l_cpy(&mol->gl, &rb.gl) < 0 ) {
+        *ret = err_msg(-1, 0, "rna_dups_dedup: failed to copy gene list");
+        free(mol);
+        return NULL;
+    }
+
+    seq_vac_l_init(&mol->vl);
+    mol->n_reads = dups->rds_per_dup[ix_best];
+
+    return mol;
+}
+
+/*******************************************************************************
+ * rna_dups_bag_t
+ ******************************************************************************/
+
+int rna_dup_node_init(rna_dup_node *node) {
+    if (node == NULL)
+        return err_msg(-1, 0, "rna_dup_node_init: argument is null");
+
+    node->key = 0;
+    if ( rna_dups_init(&node->rna_dup) < 0 )
+        return -1;
+
+     return 0;
+}
+
+rna_dup_node *rna_dup_node_alloc() {
+    rna_dup_node *node = calloc(1, sizeof(rna_dup_node));
+    if (node == NULL) {
+        err_msg(-1, 0, "rna_dup_node_alloc: %s", strerror(errno));
+        return NULL;
+    }
+    if (rna_dup_node_init(node) < 0)
+        return NULL;
+    return node;
+}
+
+void rna_dup_node_free(rna_dup_node *node) {
+    if (node == NULL) return;
+    rna_dups_free(&node->rna_dup);
+}
+
+int rna_dups_bag_init(rna_dups_bag_t *bag) {
+    if (bag == NULL) return -1;
+    bag->rna_dups = NULL;
+    return 0;
+}
+
+void rna_dups_bag_free(rna_dups_bag_t *bag) {
+    if (bag == NULL) return;
+    if (bag->rna_dups == NULL) return;
+
+    kavl_itr_t(bt_umi_dup) itr;
+    kavl_itr_first(bt_umi_dup, bag->rna_dups, &itr);  // place at first
+    do {                             // traverse
+        rna_dup_node *p = (rna_dup_node *)kavl_at(&itr);
+        rna_dup_node_free(p);
+        free((void*)p);                // free node
+    } while (kavl_itr_next(bt_umi_dup, &itr));
+    bag->rna_dups = NULL;
+}
+
+int rna_dups_bag_add_read(rna_dups_bag_t *bag, const rna_read1_t *r,
+        umishort umih) {
+    if (bag == NULL || r == NULL)
+        return err_msg(-1, 0, "rna_dups_bag_add_read: argument is null");
+
+    rna_dup_node *node_i, *node_j = rna_dup_node_alloc();
+    if (node_j == NULL)
+        return -1;
+    node_j->key = umih;
+    node_i = kavl_insert(bt_umi_dup, &bag->rna_dups, node_j, NULL);
+    if (node_i != node_j) {
+        rna_dup_node_free(node_j);
+        free(node_j);
+    }
+
+    if (rna_dups_add_read(&node_i->rna_dup, r) < 0)
+        return -1;
+
+    return 0;
+}
+
+void rna_dups_bag_itr_first(rna_dups_bag_itr *itr, rna_dups_bag_t *bag) {
+    assert(itr != NULL || bag != NULL);
+    if (bag->rna_dups == NULL) {
+        itr->next = 0;
+        return;
+    }
+    itr->next = 1;
+    kavl_itr_first(bt_umi_dup, bag->rna_dups, &itr->itr);
+}
+
+int rna_dups_bag_itr_next(rna_dups_bag_itr *itr) {
+    assert(itr != NULL);
+    if (itr->next == 0) return 0;
+    itr->next = kavl_itr_next(bt_umi_dup, &itr->itr);
+    return(itr->next);
+}
+
+int rna_dups_bag_itr_alive(rna_dups_bag_itr *itr) {
+    assert(itr != NULL);
+    return(itr->next);
+}
+
+umishort *rna_dups_bag_itr_key(rna_dups_bag_itr *itr) {
+    assert(itr != NULL);
+    rna_dup_node *p = (rna_dup_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->key);
+}
+
+rna_dups_t *rna_dups_bag_itr_val(rna_dups_bag_itr *itr) {
+    assert(itr != NULL);
+    rna_dup_node *p = (rna_dup_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->rna_dup);
+}
+
+/*******************************************************************************
+ * rna_mlcl_bag_t
+ ******************************************************************************/
+
+int rna_mlc_node_init(rna_mlc_node *node) {
+    if (node == NULL)
+        return err_msg(-1, 0, "rna_mlc_node_init: argument is null");
+
+    node->key = 0;
+    if ( rna_mol_init(&node->rna_mol) < 0 )
+        return -1;
+
+     return 0;
+}
+
+rna_mlc_node *rna_mlc_node_alloc() {
+    rna_mlc_node *node = calloc(1, sizeof(rna_mlc_node));
+    if (node == NULL) {
+        err_msg(-1, 0, "rna_mlc_node_alloc: %s", strerror(errno));
+        return NULL;
+    }
+    if (rna_mlc_node_init(node) < 0)
+        return NULL;
+    return node;
+}
+
+void rna_mlc_node_free(rna_mlc_node *node) {
+    if (node == NULL) return;
+    rna_mol_free(&node->rna_mol);
+}
+
+int rna_mlc_bag_init(rna_mlc_bag_t *bag) {
+    if (bag == NULL) return -1;
+    bag->rna_mlcs = NULL;
+    return 0;
+}
+
+void rna_mlc_bag_free(rna_mlc_bag_t *bag) {
+    if (bag == NULL) return;
+    if (bag->rna_mlcs == NULL) return;
+
+    kavl_itr_t(bt_umi_mlc) itr;
+    kavl_itr_first(bt_umi_mlc, bag->rna_mlcs, &itr);  // place at first
+    do {                             // traverse
+        rna_mlc_node *p = (rna_mlc_node *)kavl_at(&itr);
+        rna_mlc_node_free(p);
+        free((void*)p);                // free node
+    } while (kavl_itr_next(bt_umi_mlc, &itr));
+    bag->rna_mlcs = NULL;
+}
+
+int rna_mlc_bag_add(rna_mlc_bag_t *bag, rna_mol_t *rna_mol, 
+        umishort umih) {
+    if (bag == NULL || rna_mol == NULL)
+        return err_msg(-2, 0, "rna_mlc_bag_add: argument is null");
+
+    rna_mlc_node *node_i, *node_j = calloc(1, sizeof(rna_mlc_node));
+    if (node_j == NULL)
+        return err_msg(-2, 0, "rna_mlc_bag_add: %s", strerror(errno));
+    node_j->key = umih;
+    node_j->rna_mol = *rna_mol;
+    node_i = kavl_insert(bt_umi_mlc, &bag->rna_mlcs, node_j, NULL);
+    if (node_i != node_j) {
+        rna_mlc_node_free(node_j);
+        free(node_j);
+        return -1;
+    }
+
+    return 0;
+}
+
+void rna_mlc_bag_itr_first(rna_mlc_bag_itr *itr, rna_mlc_bag_t *bag) {
+    assert(itr != NULL || bag != NULL);
+    if (bag->rna_mlcs == NULL) {
+        itr->next = 0;
+        return;
+    }
+    itr->next = 1;
+    kavl_itr_first(bt_umi_mlc, bag->rna_mlcs, &itr->itr);
+}
+
+int rna_mlc_bag_itr_next(rna_mlc_bag_itr *itr) {
+    assert(itr != NULL);
+    if (itr->next == 0) return 0;
+    itr->next = kavl_itr_next(bt_umi_mlc, &itr->itr);
+    return(itr->next);
+}
+
+int rna_mlc_bag_itr_alive(rna_mlc_bag_itr *itr) {
+    assert(itr != NULL);
+    return(itr->next);
+}
+
+umishort *rna_mlc_bag_itr_key(rna_mlc_bag_itr *itr) {
+    assert(itr != NULL);
+    rna_mlc_node *p = (rna_mlc_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->key);
+}
+
+rna_mol_t *rna_mlc_bag_itr_val(rna_mlc_bag_itr *itr) {
+    assert(itr != NULL);
+    rna_mlc_node *p = (rna_mlc_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->rna_mol);
+}
+
 /*******************************************************************************
  * rna_mol_t
  ******************************************************************************/
 
 int rna_mol_init(rna_mol_t *rmol){
     if (rmol == NULL) return(-1);
-    rmol->dups = rna_dups_alloc();
-    if (rmol->dups == NULL)
-        return(-1);
     seq_base_l_init(&rmol->bl);
     seq_vac_l_init(&rmol->vl);
     seq_gene_l_init(&rmol->gl);
     rmol->n_reads = 0;
-    rmol->_dedup = 0;
     return(0);
 }
 
@@ -258,13 +542,10 @@ rna_mol_t *rna_mol_alloc(){
 void rna_mol_free(rna_mol_t *rmol){
     if (rmol == NULL) return;
 
-    rna_dups_dstry(rmol->dups);
-    rmol->dups = NULL;
     seq_base_l_free(&rmol->bl);
     seq_vac_l_free(&rmol->vl);
     seq_gene_l_free(&rmol->gl);
     rmol->n_reads = 0;
-    rmol->_dedup = 0;
 }
 
 void rna_mol_dstry(rna_mol_t *rmol){
@@ -282,22 +563,6 @@ rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret){
     if (cpy == NULL){
         *ret = -1;
         return(NULL);
-    }
-
-    // copy dups
-    cpy->dups = rna_dups_alloc();
-    if (cpy->dups == NULL){
-        rna_mol_dstry(cpy);
-        *ret = err_msg(-1, 0, "rna_mol_cpy: %s", strerror(errno));
-        return(NULL);
-    }
-    size_t ix;
-    for (ix = 0; ix < m->dups->size; ++ix){
-        if (rna_dups_add_read(cpy->dups, m->dups->dups + ix) < 0){
-            *ret = -1;
-            rna_mol_dstry(cpy);
-            return(NULL);
-        }
     }
 
     cpy->loc = m->loc;
@@ -322,71 +587,7 @@ rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret){
 
     cpy->n_reads = m->n_reads;
 
-    cpy->_dedup = m->_dedup;
-
     return(cpy);
-}
-
-int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r){
-    if (mol == NULL || r == NULL)
-        return err_msg(-1, 0, "rna_mol_add_read: 'mol' or 'r' is null");
-    return rna_dups_add_read(mol->dups, r);
-}
-
-int rna_mol_dedup(rna_mol_t *mol){
-    if (mol == NULL)
-        return err_msg(-1, 0, "rna_mol_dedup: mol is null");
-
-    if (mol->dups == NULL)
-        return err_msg(-1, 0, "rna_mol_dedup: mol->dups is null");
-
-    rna_dups_t *dups = mol->dups;
-
-    // if no dups, return 0 successfully
-    if (dups->size == 0)
-        return(0);
-
-    int ix_best = 0;
-    size_t max_c = 0; // store read count
-    size_t rd_w_max = 0; // number of read pairs with max_c read counts
-
-    size_t i;
-    for (i = 0; i < dups->size; ++i){
-        // check for bugs
-        assert(dups->rds_per_dup[i] > 0);
-
-        if (dups->rds_per_dup[i] == max_c){
-            ++rd_w_max;
-        } else if (dups->rds_per_dup[i] > max_c){
-            max_c = dups->rds_per_dup[i];
-            ix_best = i;
-            rd_w_max = 1;
-        }
-    }
-
-    // check for bugs
-    assert(max_c > 0 && rd_w_max > 0);
-
-    // initialize molecule
-    rna_read1_t rb = dups->dups[ix_best];
-
-    mol->loc = rb.loc;
-
-    if ( seq_base_l_cpy(&mol->bl, &rb.bl) < 0 )
-        return err_msg(-1, 0, "rna_mol_dedup: failed to copy base list");
-
-    if ( seq_gene_l_cpy(&mol->gl, &rb.gl) < 0 )
-        return err_msg(-1, 0, "rna_mol_dedup: failed to copy gene list");
-
-    mol->n_reads = dups->rds_per_dup[ix_best];
-
-    // free dups
-    rna_dups_dstry(dups);
-    mol->dups = NULL;
-
-    mol->_dedup = 1;
-
-    return(0);
 }
 
 int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
@@ -397,130 +598,9 @@ int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap,
 
     int ret = seq_vac_l_call_var(&m->bl, &m->vl, gv, cmap, min_qual);
 
-    /*
-    if (1 && ml_size(&m->vl) > 0){
-        printf("var list::\n");
-        ml_node_t(seq_vac_l) *nv;
-        for (nv = ml_begin(&m->vl); nv; nv = ml_node_next(nv)){
-            seq_vac_t vi = ml_node_val(nv);
-            printf("\tvix=%i,allele=%u,qual=%u\n", vi.vix, vi.allele, vi.qual);
-        }
-    }
-    */
-
     // free the bases
     seq_base_l_free(&m->bl);
 
     return(ret);
 }
-
-/*******************************************************************************
- * bc_rna_t
- ******************************************************************************/
-
-/*******************************************************************************
- * bam_rna_t
- ******************************************************************************/
-
-/*******************************************************************************
- * miscellaneous
- ******************************************************************************/
-
-/*
-void count_umis(bam_rna_t *bam_r, int *n_umi, int *n_reads, int *n_bc){
-    *n_umi = 0;
-    *n_reads = 0;
-    *n_bc = 0;
-    khint_t k;
-    bc_rna_t *b;
-
-    for (k = kh_begin(bam_r->bc_rna); k != kh_end(bam_r->bc_rna); ++k){
-        if (!kh_exist(bam_r->bc_rna, k)) continue;
-        (*n_bc)++;
-
-        b = kh_val(bam_r->bc_rna, k);
-
-        *n_umi += kh_size(b->mols);
-
-        khint_t km;
-        for (km = kh_begin(b->mols); km != kh_end(b->mols); ++km){
-            if (!kh_exist(b->mols, km)) continue;
-            rna_mol_t *m = kh_val(b->mols, km);
-            *n_reads += m->n_reads;
-        }
-
-
-    }
-}
-
-void print_bam_rna(bam_rna_t *b, gene_anno_t *anno, bcf_hdr_t *vcf_hdr, 
-        g_var_t *gv){
-    if (b == NULL){
-        err_msg(-1, 0, "print_bam_rna: arguments must not be NULL");
-        return;
-    }
-
-    fprintf(stdout, "printing bam rna\n");
-
-    khint_t k;
-    for (k = kh_begin(b->bc_rna); k != kh_end(b->bc_rna); ++k){
-        if (!kh_exist(b->bc_rna, k)) continue;
-
-        // get frags from bam_atac
-        char *barcode = kh_key(b->bc_rna, k);
-        bc_rna_t *v = kh_val(b->bc_rna, k);
-        if (v == NULL) continue;
-
-        size_t n_m = kh_size(v->mols);
-        // loop through molecules
-        khint_t km;
-        for (km = kh_begin(v->mols); km != kh_end(v->mols); ++km){
-            if (!kh_exist(v->mols, km)) continue;
-
-            char *umi = kh_key(v->mols, km);
-            rna_mol_t *f_i = kh_val(v->mols, km);
-            if (f_i == NULL) continue;
-            fprintf(stdout, "%s: (%zu mols) ", barcode, n_m);
-            fprintf(stdout, "region: %i:%"PRIhts_pos"-%"PRIhts_pos"\n", 
-                    f_i->loc.rid, f_i->loc.start, f_i->loc.end);
-            fprintf(stdout, "\tUMI:%s %zu reads\n", umi, f_i->n_reads);
-
-            // print genes
-            seq_gene_t *sg = f_i->genes.head;
-            while (sg != NULL){
-                char *gene_name = str_map_str(anno->gene_ix, sg->gene_id);
-                fprintf(stdout, "\tgene:");
-                fprintf(stdout, " gene=%s", gene_name);
-                fprintf(stdout, " splice=%u\n", sg->splice);
-                sg = sg->next;
-            }
-
-            // print bases
-            seq_base_t *sb = f_i->bases.head;
-            while (sb != NULL){
-                const char *v_chr = bcf_hdr_id2name(vcf_hdr, sb->pos.rid);
-                fprintf(stdout, "\tbase:");
-                fprintf(stdout, " %s (%i)", v_chr, sb->pos.rid);
-                fprintf(stdout, " %"PRIhts_pos"", sb->pos.pos);
-                fprintf(stdout, " %u", sb->base);
-                fprintf(stdout, " %u\n", sb->qual);
-                sb = sb->next;
-            }
-
-            // print variant calls
-            seq_vac_t *va = f_i->vacs.head;
-            size_t va_n = f_i->vacs.n;
-            fprintf(stdout, "\t%zu variants\n", va_n);
-            while (va != NULL){
-                var_t *var = gv_vari(gv, va->vix);
-                fprintf(stdout, "\tvar:");
-                fprintf(stdout, "\t%s", var->b->d.id);
-                fprintf(stdout, "\t%"PRIhts_pos"", var->b->pos);
-                fprintf(stdout, "\t%u\n", va->allele);
-                va = va->next;
-            }
-        }
-    }
-}
-*/
 

@@ -257,23 +257,332 @@ int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp){
 }
 
 /*******************************************************************************
+ * atac pairs bag
+ ******************************************************************************/
+
+int atac_pair_node_init(atac_pair_node *node) {
+    if (node == NULL)
+        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
+
+    node->key = 0;
+    atac_rd_pair_set0(&node->atac_pair);
+
+     return 0;
+}
+
+void atac_pair_node_free(atac_pair_node *node) {
+    if (node == NULL) return;
+    atac_rd_pair_free(&node->atac_pair);
+}
+
+int atac_pair_bag_init(atac_pair_bag_t *bag) {
+    if (bag == NULL) return -1;
+    bag->atac_pairs = NULL;
+    return 0;
+}
+
+void atac_pair_bag_free(atac_pair_bag_t *bag) {
+    if (bag == NULL) return;
+    if (bag->atac_pairs == NULL) return;
+
+    kavl_itr_t(bt_qr_pr) itr;
+    kavl_itr_first(bt_qr_pr, bag->atac_pairs, &itr);  // place at first
+    do {                             // traverse
+        atac_pair_node *p = (atac_pair_node *)kavl_at(&itr);
+        atac_pair_node_free(p);
+        free((void*)p);                // free node
+    } while (kavl_itr_next(bt_qr_pr, &itr));
+    bag->atac_pairs = NULL;
+}
+
+int atac_pair_bag_add_read(atac_pair_bag_t *bag, const atac_read1_t *ar,
+        qshort qname) {
+    if (bag == NULL || ar == NULL)
+        return err_msg(-1, 0, "atac_pair_bag_add_read: argument is null");
+
+    atac_pair_node *node_i, *node_j = calloc(1, sizeof(atac_pair_node));
+    if (node_j == NULL)
+        return err_msg(-1, 0, "atac_pair_bag_add_read: %s", strerror(errno));
+
+    atac_pair_node_init(node_j);
+    node_j->key = qname;
+    node_i = kavl_insert(bt_qr_pr, &bag->atac_pairs, node_j, NULL);
+    if (node_i != node_j) {
+        atac_pair_node_free(node_j);
+        free(node_j);
+    }
+
+    if (atac_rd_pair_add_read(&node_i->atac_pair, ar) < 0)
+        return -1;
+
+    return 0;
+}
+
+void atac_pair_bag_itr_first(atac_pair_bag_itr *itr, atac_pair_bag_t *bag) {
+    assert(itr != NULL || bag != NULL);
+    if (bag->atac_pairs == NULL) {
+        itr->next = 0;
+        return;
+    }
+    itr->next = 1;
+    kavl_itr_first(bt_qr_pr, bag->atac_pairs, &itr->itr);
+}
+
+int atac_pair_bag_itr_next(atac_pair_bag_itr *itr) {
+    assert(itr != NULL);
+    if (itr->next == 0) return 0;
+    itr->next = kavl_itr_next(bt_qr_pr, &itr->itr);
+    return(itr->next);
+}
+
+int atac_pair_bag_itr_alive(atac_pair_bag_itr *itr) {
+    assert(itr != NULL);
+    return(itr->next);
+}
+
+qshort *atac_pair_bag_itr_key(atac_pair_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_pair_node *p = (atac_pair_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->key);
+}
+
+atac_rd_pair_t *atac_pair_bag_itr_val(atac_pair_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_pair_node *p = (atac_pair_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->atac_pair);
+}
+
+/*******************************************************************************
+ * atac dups bag
+ ******************************************************************************/
+
+int atac_dup_node_init(atac_dup_node *node) {
+    if (node == NULL)
+        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
+
+    init_reg_pair(&node->key);
+    atac_dups_init(&node->atac_dup);
+
+     return 0;
+}
+
+void atac_dup_node_free(atac_dup_node *node) {
+    if (node == NULL) return;
+    atac_dups_free(&node->atac_dup);
+}
+
+int atac_dup_bag_init(atac_dup_bag_t *bag) {
+    if (bag == NULL) return -1;
+    bag->atac_dups = NULL;
+    return 0;
+}
+
+void atac_dup_bag_free(atac_dup_bag_t *bag) {
+    if (bag == NULL) return;
+    if (bag->atac_dups == NULL) return;
+
+    kavl_itr_t(bt_rg_dp) itr;
+    kavl_itr_first(bt_rg_dp, bag->atac_dups, &itr);  // place at first
+    do {                             // traverse
+        atac_dup_node *p = (atac_dup_node *)kavl_at(&itr);
+        atac_dup_node_free(p);
+        free((void*)p);                // free node
+    } while (kavl_itr_next(bt_rg_dp, &itr));
+    bag->atac_dups = NULL;
+}
+
+int atac_dup_bag_add_read(atac_dup_bag_t *bag, const atac_rd_pair_t *ap,
+        int skip_chim) {
+    if (bag == NULL || ap == NULL)
+        return err_msg(-1, 0, "atac_dup_bag_add_read: argument is null");
+
+    // skip if chimeric
+    if (skip_chim && ap->r1.loc.rid != ap->r2.loc.rid)
+        return 0;
+
+    atac_dup_node *node_i, *node_j = calloc(1, sizeof(atac_dup_node));
+    if (node_j == NULL)
+        return err_msg(-1, 0, "atac_dup_bag_add_read: %s", strerror(errno));
+
+    atac_dup_node_init(node_j);
+    g_reg_pair reg_pair = get_reg_pair(ap->r1.loc, ap->r2.loc);
+    node_j->key = reg_pair;
+    node_i = kavl_insert(bt_rg_dp, &bag->atac_dups, node_j, NULL);
+    if (node_i != node_j) {
+        atac_dup_node_free(node_j);
+        free(node_j);
+    }
+
+    if (atac_dups_add_pair(&node_i->atac_dup, ap) < 0)
+        return -1;
+
+    return 0;
+}
+
+void atac_dup_bag_itr_first(atac_dup_bag_itr *itr, atac_dup_bag_t *bag) {
+    assert(itr != NULL || bag != NULL);
+    if (bag->atac_dups == NULL) {
+        itr->next = 0;
+        return;
+    }
+    itr->next = 1;
+    kavl_itr_first(bt_rg_dp, bag->atac_dups, &itr->itr);
+}
+
+int atac_dup_bag_itr_next(atac_dup_bag_itr *itr) {
+    assert(itr != NULL);
+    if (itr->next == 0) return 0;
+    itr->next = kavl_itr_next(bt_rg_dp, &itr->itr);
+    return(itr->next);
+}
+
+int atac_dup_bag_itr_alive(atac_dup_bag_itr *itr) {
+    assert(itr != NULL);
+    return(itr->next);
+}
+
+g_reg_pair *atac_dup_bag_itr_key(atac_dup_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_dup_node *p = (atac_dup_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->key);
+}
+
+atac_dups_t *atac_dup_bag_itr_val(atac_dup_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_dup_node *p = (atac_dup_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->atac_dup);
+}
+
+/*******************************************************************************
+ * atac frags bag
+ ******************************************************************************/
+
+int atac_frag_node_init(atac_frag_node *node) {
+    if (node == NULL)
+        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
+
+    init_reg_pair(&node->key);
+    atac_frag_init(&node->atac_frag);
+
+    return 0;
+}
+
+void atac_frag_node_free(atac_frag_node *node) {
+    if (node == NULL) return;
+
+    atac_frag_free(&node->atac_frag);
+}
+
+int atac_frag_bag_init(atac_frag_bag_t *bag) {
+    if (bag == NULL) return -1;
+    bag->atac_frags = NULL;
+    return 0;
+}
+
+void atac_frag_bag_free(atac_frag_bag_t *bag) {
+    if (bag == NULL) return;
+    if (bag->atac_frags == NULL) return;
+
+    kavl_itr_t(bt_rg_fr) itr;
+    kavl_itr_first(bt_rg_fr, bag->atac_frags, &itr);  // place at first
+    do {                             // traverse
+        atac_frag_node *p = (atac_frag_node *)kavl_at(&itr);
+        atac_frag_node_free(p);
+        free((void*)p);                // free node
+    } while (kavl_itr_next(bt_rg_fr, &itr));
+    bag->atac_frags = NULL;
+}
+
+int atac_frag_bag_add(atac_frag_bag_t *bag, const atac_frag_t *af,
+        g_reg_pair reg) {
+    if (bag == NULL || af == NULL)
+        return err_msg(-2, 0, "atac_frag_bag_add: argument is null");
+
+    atac_frag_node *node_i, *node_j = calloc(1, sizeof(atac_frag_node));
+    if (node_j == NULL)
+        return err_msg(-2, 0, "atac_frag_bag_add: %s", strerror(errno));
+    node_j->key = reg;
+    node_j->atac_frag = *af;
+    node_i = kavl_insert(bt_rg_fr, &bag->atac_frags, node_j, NULL);
+    if (node_i != node_j) {
+        atac_frag_node_free(node_j);
+        free(node_j);
+        return -1;
+    }
+
+    return 0;
+}
+
+void atac_frag_bag_itr_first(atac_frag_bag_itr *itr, atac_frag_bag_t *bag) {
+    assert(itr != NULL || bag != NULL);
+    if (bag->atac_frags == NULL) {
+        itr->next = 0;
+        return;
+    }
+    itr->next = 1;
+    kavl_itr_first(bt_rg_fr, bag->atac_frags, &itr->itr);
+}
+
+int atac_frag_bag_itr_next(atac_frag_bag_itr *itr) {
+    assert(itr != NULL);
+    if (itr->next == 0) return 0;
+    itr->next = kavl_itr_next(bt_rg_fr, &itr->itr);
+    return(itr->next);
+}
+
+int atac_frag_bag_itr_alive(atac_frag_bag_itr *itr) {
+    assert(itr != NULL);
+    return(itr->next);
+}
+
+g_reg_pair *atac_frag_bag_itr_key(atac_frag_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_frag_node *p = (atac_frag_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->key);
+}
+
+atac_frag_t *atac_frag_bag_itr_val(atac_frag_bag_itr *itr) {
+    assert(itr != NULL);
+    atac_frag_node *p = (atac_frag_node *)kavl_at(&itr->itr);
+    if (p == NULL)
+        return NULL;
+    return(&p->atac_frag);
+}
+
+/*******************************************************************************
  * atac_dups_t
  ******************************************************************************/
 
-atac_dups_t *atac_dups_init(){
-    atac_dups_t *d = (atac_dups_t *)calloc(1, sizeof(atac_dups_t));
-    if (d == NULL){
-        err_msg(-1, 0, "atac_dups_init: %s", strerror(errno));
-        return(NULL);
-    }
+int atac_dups_init(atac_dups_t *d){
+    if (d == NULL)
+        return err_msg(-1, 0, "atac_dups_init: argument is null");
+
     d->size = 0;
     d->m = 1;
     d->dups = calloc(d->m, sizeof(struct _atac_dup1_t));
-    if (d->dups == NULL){
-        err_msg(-1, 0, "atac_dups_init: %s", strerror(errno));
-        return(NULL);
+    if (d->dups == NULL)
+        return err_msg(-1, 0, "atac_dups_init: %s", strerror(errno));
+    return 0;
+}
+
+atac_dups_t *atac_dups_alloc() {
+    atac_dups_t *d = calloc(1, sizeof(atac_dups_t));
+    if (d == NULL) {
+        err_msg(-1, 0, "atac_dups_alloc: %s", strerror(errno));
+        return NULL;
     }
-    return(d);
+    atac_dups_init(d);
+    return d;
 }
 
 void atac_dups_free(atac_dups_t *d){
@@ -329,43 +638,47 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp){
  * atac_frag_t
  ******************************************************************************/
 
-atac_frag_t *atac_frag_init(){
-    atac_frag_t *f = (atac_frag_t *)calloc(1, sizeof(atac_frag_t));
-    if (f == NULL){
-        err_msg(-1, 0, "atac_frag_init: %s", strerror(errno));
-        return(NULL);
-    }
-    f->dups = atac_dups_init();
-    if (f->dups == NULL) return(NULL);
+int atac_frag_init(atac_frag_t *f){
+    if (f == NULL)
+        return err_msg(-1, 0, "atac_frag_init: argument is null");
     seq_base_l_init(&f->bl);
     seq_vac_l_init(&f->vl);
     mv_init(&f->pks);
-    f->_dedup = 0;
     f->s = 0;
-    return(f);
+    return 1;
+}
+
+atac_frag_t *atac_frag_alloc() {
+    atac_frag_t *f = (atac_frag_t *)calloc(1, sizeof(atac_frag_t));
+    if (f == NULL){
+        err_msg(-1, 0, "atac_frag_alloc: %s", strerror(errno));
+        return(NULL);
+    }
+    if (atac_frag_init(f) < 0)
+        return NULL;
+    return f;
+}
+
+void atac_frag_free(atac_frag_t *f) {
+    if (f == NULL) return;
+
+    seq_base_l_free(&f->bl);
+    seq_vac_l_free(&f->vl);
+    mv_free(&f->pks);
 }
 
 void atac_frag_dstry(atac_frag_t *f){
     if (f == NULL) return;
-
-    atac_dups_dstry(f->dups);
-    seq_base_l_free(&f->bl);
-    seq_vac_l_free(&f->vl);
-    mv_free(&f->pks);
+    atac_frag_free(f);
     free(f);
 }
 
-int atac_frag_dedup(atac_frag_t *frag){
-    if (frag == NULL)
-        return err_msg(-1, 0, "atac_frag_dedup: frag is NULL");
-
-    atac_dups_t *dups = frag->dups;
-    assert(dups != NULL);
-
-    // check for bugs
-    if (dups->size == 0)
-        return err_msg(-1, 0, "atac_frag_dedup: no duplicates present in frag");
-
+atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret) {
+    *ret = 0;
+    if (dups == NULL) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: argument is null");
+        return NULL;
+    }
     int ix_best = 0;
     size_t max_c = 0; // store read count
     size_t rp_w_max = 0; // number of read pairs with max_c read counts
@@ -386,11 +699,8 @@ int atac_frag_dedup(atac_frag_t *frag){
     assert(max_c > 0 && rp_w_max > 0);
 
     // skip if ambiguous
-    if (rp_w_max > 1){
-        atac_dups_dstry(dups);
-        frag->dups = NULL;
-        return(0);
-    }
+    if (rp_w_max > 1)
+        return 0;
 
     atac_rd_pair_t rpb = dups->dups[ix_best].rd;
 
@@ -398,28 +708,36 @@ int atac_frag_dedup(atac_frag_t *frag){
 
     assert(rpb.s == 2);
 
+    atac_frag_t *frag = atac_frag_alloc();
+    if (frag == NULL) {
+        *ret = -1;
+        return NULL;
+    }
+
     /* add bases from read 1 */
     for (bn = ml_begin(&rpb.r1.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
-        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) return(-1);
+        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) {
+            atac_frag_dstry(frag);
+            *ret = -1;
+            return NULL;
+        }
     }
 
     /* add bases from read 2 */
     for (bn = ml_begin(&rpb.r2.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
-        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) return(-1);
+        if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) {
+            atac_frag_dstry(frag);
+            *ret = -1;
+            return NULL;
+        }
     }
 
     /* add number of supporting reads */
     frag->s = dups->dups[ix_best].n_rd;
 
-    // free dups
-    atac_dups_dstry(dups);
-    frag->dups = NULL;
-
-    frag->_dedup = 1;
-
-    return 0;
+    return frag;
 }
 
 int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap, 
@@ -494,39 +812,5 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     mv_free(&overlaps);
 
     return(mv_size(&f->pks));
-}
-
-/*******************************************************************************
- * frags hash table
- ******************************************************************************/
-
-int khaf_add_dup(khash_t(khaf) *frags, atac_rd_pair_t *rp, int skip_chim){
-    if (frags == NULL || rp == NULL)
-        return err_msg(-1, 0, "khaf_add_dup: 'frags' or 'rp' is null");
-
-    // skip if chimeric
-    if (skip_chim && rp->r1.loc.rid != rp->r2.loc.rid)
-        return(0);
-
-    int kret;
-    khint_t kf;
-    g_reg_pair reg_pair = get_reg_pair(rp->r1.loc, rp->r2.loc);
-    kf = kh_get(khaf, frags, reg_pair);
-    if (kf == kh_end(frags)){
-        // add region key
-        kf = kh_put(khaf, frags, reg_pair, &kret);// TODO: high heap alloc
-        if (kret < 0){
-            return err_msg(-1 , 0, "khaf_add_dup: failed to add "
-                    "duplicate reg key to hash table");
-        }
-        // TODO: high heap alloc
-        if ( (kh_val(frags, kf) = atac_frag_init()) == NULL) return(-1);
-    }
-    // add read pair to frag
-    atac_frag_t *frag = kh_val(frags, kf);
-    if (atac_dups_add_pair(frag->dups, rp) < 0)
-        return(-1);
-
-    return(0);
 }
 

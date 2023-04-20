@@ -116,6 +116,18 @@ khint_t kh_reg_pair_hash(g_reg_pair p){
     return(h);
 }
 
+int reg_pair_cmp(g_reg_pair p1, g_reg_pair p2) {
+    int r1 = regioncmp(p1.r1, p2.r1);
+    if (r1 != 0)
+        return r1;
+
+    int r2 = regioncmp(p1.r2, p2.r2);
+    if (r2 != 0)
+        return r2;
+
+    return 0;
+}
+
 int kh_reg_pair_equal(g_reg_pair p1, g_reg_pair p2){
 
     int r1 = regioncmp(p1.r1, p2.r1);

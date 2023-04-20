@@ -114,6 +114,60 @@ int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp){
 }
 
 /*******************************************************************************
+ * base list
+ ******************************************************************************/
+
+int seq_base_v_cmp(mv_t(seq_base_v) bv1, mv_t(seq_base_v) bv2, int cmp_qual){
+    int sc = mv_size(&bv1) - mv_size(&bv2);
+    if (sc != 0) return(sc);
+
+    uint32_t i, n_v = mv_size(&bv1);
+    for (i = 0; i < n_v; ++i) {
+        seq_base_t b1 = mv_i(&bv1, i);
+        seq_base_t b2 = mv_i(&bv2, i);
+        int bc = seq_base_cmp(b1, b2, cmp_qual);
+        if (bc != 0) return(bc);
+    }
+    return(0);
+}
+
+int seq_base_v_equal(mv_t(seq_base_v) bv1, mv_t(seq_base_v) bv2, int cmp_qual){
+    if (mv_size(&bv1) != mv_size(&bv2))
+        return(0);
+
+    uint32_t i, n_v = mv_size(&bv1);
+    for (i = 0; i < n_v; ++i) {
+        seq_base_t b1 = mv_i(&bv1, i);
+        seq_base_t b2 = mv_i(&bv2, i);
+        if ( seq_base_equal(b1, b2, cmp_qual) != 1 )
+            return(0);
+    }
+    return(1);
+}
+
+int seq_base_v_match_qual(mv_t(seq_base_v) *bv, const mv_t(seq_base_v) *cmp) {
+    if (bv == NULL || cmp == NULL)
+        return err_msg(-1, 0, "seq_base_v_match_qual: argument is null");
+
+    if (mv_size(bv) != mv_size(cmp))
+        return err_msg(-1, 0, "seq_base_v_match_qual: "
+                "number of bases don't match (%zu != %zu)", 
+                mv_size(bv), mv_size(cmp));
+
+    uint32_t i, n_v = mv_size(bv);
+    for (i = 0; i < n_v; ++i) {
+        seq_base_t b1 = mv_i(bv, i);
+        seq_base_t b2 = mv_i(cmp, i);
+        if (seq_base_cmp(b1, b2, 0) != 0)
+            return err_msg(-1, 0, "seq_base_v_match_qual: bases don't match");
+        if ( mv_i(bv, i).qual > mv_i(cmp, i).qual )
+            mv_i(bv, i).qual = mv_i(cmp, i).qual;
+    }
+
+    return(0);
+}
+
+/*******************************************************************************
  * seq_vac_t
  ******************************************************************************/
 

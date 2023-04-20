@@ -100,7 +100,7 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
     if (objs->verbose) log_msg("processing ATAC alignments");
     int iter_ret;
     bam_r = bam_init1();
-    while ( (iter_ret = sam_itr_next(objs->atac_bam, bam_itr, bam_r)) >= 0){
+    while ( (iter_ret = sam_itr_next(objs->atac_bam, bam_itr, bam_r)) >= -1){
         const char *chr = sam_hdr_tid2name(objs->atac_bam_hdr, bam_r->core.tid);
         if ( (objs->verbose) && (n_reads > 0) && (n_reads % (uint64_t)10e6 == 0)){
             if (bam1_unmapped(bam_r)){
@@ -113,6 +113,7 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
         n_reads++;
 
         if (proc_atac1(bam_r, objs, bam_data) < 0) return(-1);
+        if (iter_ret == -1) break;
 
     }
     if (iter_ret < -1)
@@ -123,10 +124,13 @@ int run_atac(obj_pars *objs, bam_data_t *bam_data){
     hts_itr_destroy(bam_itr);
     bam_destroy1(bam_r);
 
-    if (bam_data_atac_free_pairs(bam_data) < 0) return(-1);
+    // collapse read pairs into duplicates
+    if (bam_data_atac_get_dups(bam_data) < 0)
+        return -1;
 
     if (objs->verbose) log_msg("deduplicating ATAC reads");
-    if (bam_data_atac_dedup(bam_data) < 0) return(-1);
+    if (bam_data_atac_dedup(bam_data) < 0)
+        return(-1);
 
     // go from base pair to ref/alt/other allele at variants
     if (objs->verbose) log_msg("running ATAC pileup at SNP sites");
@@ -247,14 +251,6 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
 
     uint64_t n_reads = 0;
     
-    /*
-    uint8_t n_feat = 0, m_feat = 4;
-    char **feat = (char **)calloc(m_feat, sizeof(char *));
-    uint8_t *splice = (uint8_t *)calloc(m_feat, sizeof(uint8_t));;
-    if (feat == NULL || splice == NULL)
-        return err_msg(-1, 0, "run_rna: %s", strerror(errno));
-        */
-
     /* Set BAM iterator to region */
     bam_itr = sam_itr_querys(objs->rna_bam_idx, objs->rna_bam_hdr, objs->region);
     if (bam_itr == NULL){
@@ -266,7 +262,7 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
     if (objs->verbose) log_msg("processing RNA alignments");
     uint32_t ra_max = 1e6;
     bam1_t **ra = calloc(ra_max, sizeof(bam1_t *));
-    uint32_t ra_sz = 0;
+    // uint32_t ra_sz = 0;
     int iter_ret;
     bam_r = bam_init1();
     while ( (iter_ret = sam_itr_next(objs->rna_bam, bam_itr, bam_r)) >= -1){
@@ -281,6 +277,9 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
         }
         n_reads++;
 
+        if (proc_rna1(bam_r, objs, bam_data) < 0) return(-1);
+        if (iter_ret == -1) break;
+        /*
         if (iter_ret >= 0){
             // printf("ra_sz=%u\n", ra_sz);
             ra[ra_sz] = bam_dup1(bam_r);
@@ -294,8 +293,7 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
                 return(-1);
             ra_sz = 0;
         }
-        if (iter_ret == -1) break;
-
+        */
     }
     if (iter_ret < -1)
         return err_msg(-1, 0, "run_rna: failed sam_iter_next");
@@ -305,10 +303,6 @@ int run_rna(obj_pars *objs, bam_data_t *bam_data){
     hts_itr_destroy(bam_itr);
     bam_destroy1(bam_r);
     free(ra);
-    /*
-    free(feat);
-    free(splice);
-    */
 
     if (objs->verbose) log_msg("deduplicating RNA reads");
     if (bam_data_rna_dedup(bam_data) < 0)

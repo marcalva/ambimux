@@ -10,6 +10,7 @@
 #include "str_util.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
+#include "kavl.h"
 #include "variants.h"
 #include "counts.h"
 #include "gtf_anno.h"
@@ -39,6 +40,10 @@ typedef struct rna_read1_t {
     ml_t(seq_gene_l) gl;
 } rna_read1_t;
 
+/*******************************************************************************
+ * rna dups
+ ******************************************************************************/
+
 /*! @typedef
  * @abstract Store duplicate RNA read
  *
@@ -50,8 +55,47 @@ typedef struct rna_read1_t {
 typedef struct rna_dups_t {
     rna_read1_t *dups;
     uint32_t *rds_per_dup;
-    size_t size, m;
+    uint32_t size, m;
 } rna_dups_t;
+
+// (internal) node for rna_dups_t object
+typedef struct rna_dup_node {
+    umishort key; // UMI hash
+    rna_dups_t rna_dup;
+    KAVL_HEAD(struct rna_dup_node) head;
+} rna_dup_node;
+#define umishort_cmp(p, q) (((q)->key < (p)->key) - ((p)->key < (q)->key))
+KAVL_INIT2(bt_umi_dup, static, struct rna_dup_node, head, umishort_cmp);
+
+int rna_dup_node_init(rna_dup_node *node);
+rna_dup_node *rna_dup_node_alloc();
+void rna_dup_node_free(rna_dup_node *node);
+
+// container of rna_dups_t objects
+typedef struct rna_dups_bag_t {
+    rna_dup_node *rna_dups;
+} rna_dups_bag_t;
+
+int rna_dups_bag_init(rna_dups_bag_t *bag);
+void rna_dups_bag_free(rna_dups_bag_t *bag);
+int rna_dups_bag_add_read(rna_dups_bag_t *bag, const rna_read1_t *r,
+        umishort umih);
+
+typedef struct {
+    kavl_itr_t(bt_umi_dup) itr;
+    uint8_t next;
+} rna_dups_bag_itr;
+
+void rna_dups_bag_itr_first(rna_dups_bag_itr *itr, rna_dups_bag_t *bag);
+// return 0 if nothing left and no value, 1 if itr has value after call
+int rna_dups_bag_itr_next(rna_dups_bag_itr *itr);
+int rna_dups_bag_itr_alive(rna_dups_bag_itr *itr);
+umishort *rna_dups_bag_itr_key(rna_dups_bag_itr *itr);
+rna_dups_t *rna_dups_bag_itr_val(rna_dups_bag_itr *itr);
+
+/*******************************************************************************
+ * rna mol
+ ******************************************************************************/
 
 /*! @typedef
  * @abstract Store de-duplicated RNA reads representing molecules.
@@ -63,23 +107,51 @@ typedef struct rna_dups_t {
  * @field n_reads Number of supporting reads
  */
 typedef struct rna_mol_t {
-    rna_dups_t *dups;
     g_region loc;
     ml_t(seq_base_l) bl;
     ml_t(seq_vac_l) vl;
     ml_t(seq_gene_l) gl;
-    size_t n_reads;
-    uint8_t _dedup;
+    uint32_t n_reads;
 } rna_mol_t;
 
-// store reads by name
-// KHASH_INIT(khrmn, char*, rna_mol_t *, 1, kh_str_hash_func, kh_str_hash_equal);
+// (internal) node to store rna_mol_t
+typedef struct rna_mlc_node {
+    umishort key; // UMI hash
+    rna_mol_t rna_mol;
+    KAVL_HEAD(struct rna_mlc_node) head;
+} rna_mlc_node;
+KAVL_INIT2(bt_umi_mlc, static, struct rna_mlc_node, head, umishort_cmp);
 
-// store reads by UMI (hash)
-KHASH_INIT(khrmn, umishort, rna_mol_t *, 1, kh_umi_hash_func, kh_umi_hash_equal);
+int rna_mlc_node_init(rna_mlc_node *node);
+rna_mlc_node *rna_mlc_node_alloc();
+void rna_mlc_node_free(rna_mlc_node *node);
 
-#define mlar_lt(p, q) -1
-ml_declare(mlar, rna_mol_t *, mlar_lt);
+// container of rna_mols_t objects
+typedef struct rna_mlc_bag_t {
+    rna_mlc_node *rna_mlcs;
+} rna_mlc_bag_t;
+
+int rna_mlc_bag_init(rna_mlc_bag_t *bag);
+void rna_mlc_bag_free(rna_mlc_bag_t *bag);
+// return -2 on error, -1 if UMI found, 0 on success
+int rna_mlc_bag_add(rna_mlc_bag_t *bag, rna_mol_t *rna_mol, 
+        umishort umih);
+
+typedef struct {
+    kavl_itr_t(bt_umi_mlc) itr;
+    uint8_t next;
+} rna_mlc_bag_itr;
+
+void rna_mlc_bag_itr_first(rna_mlc_bag_itr *itr, rna_mlc_bag_t *bag);
+// return 0 if nothing left and no value, 1 if itr has value after call
+int rna_mlc_bag_itr_next(rna_mlc_bag_itr *itr);
+int rna_mlc_bag_itr_alive(rna_mlc_bag_itr *itr);
+umishort *rna_mlc_bag_itr_key(rna_mlc_bag_itr *itr);
+rna_mol_t *rna_mlc_bag_itr_val(rna_mlc_bag_itr *itr);
+
+/*******************************************************************************
+ * rna read1
+ ******************************************************************************/
 
 void rna_read1_init(rna_read1_t *r);
 rna_read1_t *rna_read1_alloc();
@@ -138,6 +210,10 @@ int rna_read1_add_base(rna_read1_t *r, seq_base_t base);
  */
 int rna_read1_match_qual(rna_read1_t *r, const rna_read1_t *cmp);
 
+/*******************************************************************************
+ * rna dups
+ ******************************************************************************/
+
 int rna_dups_init(rna_dups_t *rd);
 rna_dups_t *rna_dups_alloc();
 
@@ -145,6 +221,12 @@ void rna_dups_free(rna_dups_t *rd);
 void rna_dups_dstry(rna_dups_t *rd);
 
 int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r);
+
+rna_mol_t *rna_dups_dedup(rna_dups_t *dups, int *ret);
+
+/*******************************************************************************
+ * rna_mol_t
+ ******************************************************************************/
 
 int rna_mol_init(rna_mol_t *rmol);
 rna_mol_t *rna_mol_alloc();
@@ -154,24 +236,7 @@ void rna_mol_dstry(rna_mol_t *rmol);
 
 rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret);
 
-/* Add read to dups in rna_mol_t struct
- */
-int rna_mol_add_read(rna_mol_t *mol, const rna_read1_t *r);
-
-/* De-duplicate/get best RNA read and form rna_mol_t
- *
- * Expects non-null arguments.
- * If @p rd has no reads, return NULL successfully.
- */
-int rna_mol_dedup(rna_mol_t *mol);
-
 int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual);
-
-/*
-void count_umis(bam_rna_t *bam_r, int *n_umi, int *n_reads, int *n_bc);
-void print_bam_rna(bam_rna_t *b, gene_anno_t *anno, bcf_hdr_t *vcf_hdr, 
-        g_var_t *gv);
-*/
 
 #endif // RNA_DATA_H

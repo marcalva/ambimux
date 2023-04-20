@@ -2,6 +2,8 @@
 #ifndef BITS_H
 #define BITS_H
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
@@ -29,7 +31,7 @@ typedef struct {
 static inline int bflg_resize(bflg_t *bflg, size_t n){
     if (n <= bflg->n) return(0);
     size_t m = _bsize(n);
-    bflg->f = realloc(bflg->f, m * sizeof(uint8_t));
+    bflg->f = (uint8_t *)realloc(bflg->f, m * sizeof(uint8_t));
     if (bflg->f == NULL){
         fprintf(stderr, "error: bflg_init: %s", strerror(errno));
         return(-1);
@@ -45,7 +47,7 @@ static inline int bflg_resize(bflg_t *bflg, size_t n){
 static inline int bflg_init(bflg_t *bflg, size_t n){
     bflg->n = n;
     size_t m = _bsize(n);
-    bflg->f = realloc(bflg->f, m * sizeof(uint8_t));
+    bflg->f = (uint8_t *)realloc(bflg->f, m * sizeof(uint8_t));
     if (bflg->f == NULL){
         fprintf(stderr, "error: bflg_init: %s", strerror(errno));
         return(-1);

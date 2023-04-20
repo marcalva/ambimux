@@ -4,6 +4,9 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include <errno.h>
 
 #define ml_declare_i(SCOPE, name, ntype, n_cmp) \
@@ -16,7 +19,7 @@
     \
     /* initialize node */ \
     SCOPE __ml_node_##name *__ml_node_init_##name(void){ \
-        __ml_node_##name *n = calloc(1, sizeof(__ml_node_##name)); \
+        __ml_node_##name *n = (__ml_node_##name *)calloc(1, sizeof(__ml_node_##name)); \
         if (n == NULL){ \
             fprintf(stderr, "error: __ml_node_init_%s: %s\n", #name, strerror(errno)); \
             return(NULL); \
@@ -36,12 +39,12 @@
     /* struct list */ \
     typedef struct __ml_l_##name { \
         __ml_node_##name *head; \
-        size_t size; \
+        uint32_t size; \
     } ml_##name##_t; \
     \
     /* alloc list */ \
     SCOPE ml_##name##_t *ml_alloc_##name(void){ \
-        ml_##name##_t *ll = calloc(1, sizeof(ml_##name##_t)); \
+        ml_##name##_t *ll = (ml_##name##_t *)calloc(1, sizeof(ml_##name##_t)); \
         if (ll == NULL){ \
             fprintf(stderr, "error: ml_alloc_%s: %s\n", #name, strerror(errno)); \
             return(NULL); \
@@ -95,7 +98,7 @@
         dest->head = NULL; \
         __ml_node_##name *p_src = src->head; \
         __ml_node_##name *p_prev = NULL; \
-        size_t n_e = 0; \
+        uint32_t n_e = 0; \
         while (p_src != NULL){ \
             __ml_node_##name *n = __ml_node_init_##name(); \
             if (n == NULL) return(-1); \
@@ -107,7 +110,7 @@
             ++n_e; \
         } \
         if (n_e != src->size){ \
-            fprintf(stderr, "n_e=%zu src->size=%zu\n", n_e, src->size); \
+            fprintf(stderr, "n_e=%u src->size=%u\n", n_e, src->size); \
             assert(n_e == src->size); \
         } \
         return(0); \
@@ -236,7 +239,7 @@
 
 /* get number of elements in list
  * @param ll pointer to propertly initialized list object from ml_alloc(name)
- * @return size_t data
+ * @return uint32_t data
  */
 #define ml_size(ll) ((ll)->size) 
 
@@ -249,14 +252,14 @@
     /* struct */ \
     typedef struct __mv_##name { \
         type *a; \
-        size_t n, m; \
+        uint32_t n, m; \
     } __mv_##name; \
     typedef struct __mv_##name mv_##name##_t; \
     \
     SCOPE int __mv_push_##name(mv_##name##_t *v, type x){ \
         if (v->n >= v->m){ \
             v->m = v->n + 1; \
-            v->a = realloc(v->a, sizeof(type) * v->m); \
+            v->a = (type *)realloc(v->a, sizeof(type) * v->m); \
             if (v->a == NULL){ \
                 fprintf(stderr, "error: __mv_push_%s: %s\n", #name, strerror(errno)); \
                 return(-1); \
@@ -267,10 +270,10 @@
         return(0); \
     } \
     \
-    SCOPE int __mv_insert_##name(mv_##name##_t *v, type x, size_t ix){ \
+    SCOPE int __mv_insert_##name(mv_##name##_t *v, type x, uint32_t ix){ \
         if (ix >= v->m){ \
             v->m = ix + 1; \
-            v->a = realloc(v->a, sizeof(type) * v->m); \
+            v->a = (type *)realloc(v->a, sizeof(type) * v->m); \
             if (v->a == NULL){ \
                 fprintf(stderr, "error: __mv_push_%s: %s\n", #name, strerror(errno)); \
                 return(-1); \
@@ -282,10 +285,10 @@
         return(0); \
     } \
     \
-    SCOPE int __mv_resize_##name(mv_##name##_t *v, size_t n){ \
+    SCOPE int __mv_resize_##name(mv_##name##_t *v, uint32_t n){ \
         if (n == v->m) return(0); \
         v->m = n; \
-        v->a = realloc(v->a, sizeof(type) * v->m); \
+        v->a = (type *)realloc(v->a, sizeof(type) * v->m); \
         if (v->a == NULL){ \
             fprintf(stderr, "error: __mv_resize_%s: %s\n", #name, strerror(errno)); \
             return(-1); \

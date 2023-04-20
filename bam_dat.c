@@ -9,20 +9,27 @@ bc_data_t *bc_data_init(){
         err_msg(-1, 0, "bc_data_init: %s", strerror(errno));
         return(NULL);
     }
-    bcdat->rna_mols = kh_init(khrmn);
-    bcdat->atac_pairs = kh_init(khap);
-    bcdat->atac_frags = kh_init(khaf);
-    bcdat->bc_stats = NULL;
-
-    if (bcdat->rna_mols == NULL || 
-        bcdat->atac_pairs == NULL || 
-        bcdat->atac_frags == NULL){
-        err_msg(-1, 0, "bc_data_init: failed to initialize hash table");
-        return(NULL);
+    if (rna_dups_bag_init(&bcdat->rna_dups) < 0) {
+        free(bcdat);
+        return NULL;
     }
-
-    ml_init(mlaf, &bcdat->frags_l);
-    ml_init(mlar, &bcdat->mols_l);
+    if (rna_mlc_bag_init(&bcdat->rna_mlcs) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    if (atac_pair_bag_init(&bcdat->atac_prs) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    if (atac_dup_bag_init(&bcdat->atac_dups) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    if (atac_frag_bag_init(&bcdat->atac_frgs) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    bcdat->bc_stats = NULL;
 
     int err;
     if ((err = pthread_mutex_init(&bcdat->bc_lock, NULL)) != 0){
@@ -36,73 +43,19 @@ bc_data_t *bc_data_init(){
 void bc_data_free_reads(bc_data_t *bcdat){
     if (bcdat == NULL) return;
 
-    khint_t k;
-
-    if (bcdat->rna_mols != NULL){
-        for (k = kh_begin(bcdat->rna_mols); k != kh_end(bcdat->rna_mols); ++k){
-            if (!kh_exist(bcdat->rna_mols, k)) continue;
-            rna_mol_t *mol = kh_val(bcdat->rna_mols, k);
-            rna_mol_dstry(mol);
-        }
-        kh_destroy(khrmn, bcdat->rna_mols);
-    }
-    bcdat->rna_mols = NULL;
-    if (bcdat->atac_pairs != NULL){
-        for (k = kh_begin(bcdat->atac_pairs); k != kh_end(bcdat->atac_pairs); ++k){
-            if (!kh_exist(bcdat->atac_pairs, k)) continue;
-            atac_rd_pair_t *rp = kh_val(bcdat->atac_pairs, k);
-            atac_rd_pair_dstry(rp);
-        }
-        kh_destroy(khap, bcdat->atac_pairs);
-    }
-    bcdat->atac_pairs = NULL;
-    if (bcdat->atac_frags != NULL){
-        for (k = kh_begin(bcdat->atac_frags); k != kh_end(bcdat->atac_frags); ++k){
-            if (!kh_exist(bcdat->atac_frags, k)) continue;
-            atac_frag_t *frag = kh_val(bcdat->atac_frags, k);
-            atac_frag_dstry(frag);
-        }
-        kh_destroy(khaf, bcdat->atac_frags);
-    }
-    bcdat->atac_frags = NULL;
-
-    ml_free(mlaf, &bcdat->frags_l);
-    ml_free(mlar, &bcdat->mols_l);
+    rna_dups_bag_free(&bcdat->rna_dups);
+    rna_mlc_bag_free(&bcdat->rna_mlcs);
+    atac_pair_bag_free(&bcdat->atac_prs);
+    atac_dup_bag_free(&bcdat->atac_dups);
+    atac_frag_bag_free(&bcdat->atac_frgs);
 }
 
 void bc_data_dstry(bc_data_t *bcdat){
     if (bcdat == NULL) return;
 
-    khint_t k;
+    bc_data_free_reads(bcdat);
 
-    if (bcdat->rna_mols != NULL){
-        for (k = kh_begin(bcdat->rna_mols); k != kh_end(bcdat->rna_mols); ++k){
-            if (!kh_exist(bcdat->rna_mols, k)) continue;
-            rna_mol_t *mol = kh_val(bcdat->rna_mols, k);
-            rna_mol_dstry(mol);
-        }
-        kh_destroy(khrmn, bcdat->rna_mols);
-    }
-    if (bcdat->atac_pairs != NULL){
-        for (k = kh_begin(bcdat->atac_pairs); k != kh_end(bcdat->atac_pairs); ++k){
-            if (!kh_exist(bcdat->atac_pairs, k)) continue;
-            atac_rd_pair_t *rp = kh_val(bcdat->atac_pairs, k);
-            atac_rd_pair_dstry(rp);
-        }
-        kh_destroy(khap, bcdat->atac_pairs);
-    }
-    if (bcdat->atac_frags != NULL){
-        for (k = kh_begin(bcdat->atac_frags); k != kh_end(bcdat->atac_frags); ++k){
-            if (!kh_exist(bcdat->atac_frags, k)) continue;
-            atac_frag_t *frag = kh_val(bcdat->atac_frags, k);
-            atac_frag_dstry(frag);
-        }
-        kh_destroy(khaf, bcdat->atac_frags);
-    }
     bc_stats_dstry(bcdat->bc_stats);
-
-    ml_free(mlaf, &bcdat->frags_l);
-    ml_free(mlar, &bcdat->mols_l);
 
     pthread_mutex_destroy(&bcdat->bc_lock);
 
@@ -111,42 +64,7 @@ void bc_data_dstry(bc_data_t *bcdat){
 
 void bc_data_free_atac_pairs(bc_data_t *bcdat){
     if (bcdat == NULL) return;
-    if (bcdat->atac_pairs == NULL) return;
-    khash_t(khap) *pairs = bcdat->atac_pairs;
-    khint_t k;
-    for (k = kh_begin(pairs); k != kh_end(pairs); ++k){
-        if (!kh_exist(pairs, k)) continue;
-        atac_rd_pair_t *rp = kh_val(pairs, k);
-        atac_rd_pair_dstry(rp);
-    }
-    kh_destroy(khap, pairs);
-    bcdat->atac_pairs = NULL;
-}
-
-int bc_data_fill_list(bc_data_t *bcdat){
-    if (bcdat == NULL)
-        return err_msg(-1, 0, "bc_data_fill_list: argument is null");
-
-    khash_t(khrmn) *mol_hash = bcdat->rna_mols;
-    khash_t(khaf) *frag_hash = bcdat->atac_frags;
-
-    khint_t k_bc;
-    for (k_bc = kh_begin(mol_hash); k_bc != kh_end(mol_hash); ++k_bc){
-        if (!kh_exist(mol_hash, k_bc)) continue;
-        rna_mol_t *mol = kh_val(mol_hash, k_bc);
-
-        if (ml_insert(mlar, &bcdat->mols_l, mol, 1, 1) < 0)
-            return(-1);
-    }
-
-    for (k_bc = kh_begin(frag_hash); k_bc != kh_end(frag_hash); ++k_bc){
-        if (!kh_exist(frag_hash, k_bc)) continue;
-        atac_frag_t *frag = kh_val(frag_hash, k_bc);
-
-        if (ml_insert(mlaf, &bcdat->frags_l, frag, 1, 1) < 0)
-            return(-1);
-    }
-    return(1);
+    atac_pair_bag_free(&bcdat->atac_prs);
 }
 
 /*******************************************************************************
@@ -158,26 +76,8 @@ int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, umishort umih){
     if (bcdat == NULL || r == NULL)
         return err_msg(-1, 0, "bc_data_rna_add_read: argument is null");
 
-    if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_add_read: bdat->rna_mols is null");
-
-    khash_t(khrmn) *mols = bcdat->rna_mols;
-    khint_t k = kh_get(khrmn, mols, umih); // add read by UMI hash
-
-    // if mol isn't present, allocate and add
-    int kret = 0;
-    if (k == kh_end(mols)){
-        k = kh_put(khrmn, mols, umih, &kret);
-        if (kret < 0)
-            return err_msg(-1, 0, "bc_data_rna_add_read: failed to add UMI key "
-                    "to mols hash table");
-
-        if ( (kh_val(mols, k) = rna_mol_alloc()) == NULL )
-            return(-1);
-    }
-
-    rna_mol_t *mol = kh_val(mols, k);
-    if (rna_mol_add_read(mol, r) < 0) return(-1);
+    if (rna_dups_bag_add_read(&bcdat->rna_dups, r, umih) < 0)
+        return -1;
 
     return 0;
 }
@@ -186,21 +86,24 @@ int bc_data_rna_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
         return err_msg(-1, 0, "bc_data_rna_dedup: bcdat is null");
 
-    if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_dedup: bcdat->rna_mols is null");
+    rna_dups_bag_itr itr, *itrp = &itr;
+    rna_dups_bag_itr_first(itrp, &bcdat->rna_dups);
+    while (rna_dups_bag_itr_alive(itrp)) {
+        umishort *umih = rna_dups_bag_itr_key(itrp);
+        rna_dups_t *dups = rna_dups_bag_itr_val(itrp);
+        int ret;
 
-    khash_t(khrmn) *mols = bcdat->rna_mols;
+        rna_mol_t *mol = rna_dups_dedup(dups, &ret);
+        if (ret < 0)
+            return -1;
+        rna_dups_free(dups);
 
-    khint_t kd;
-    for (kd = kh_begin(mols); kd != kh_end(mols); ++kd){
-        if (!kh_exist(mols, kd)) continue;
+        ret = rna_mlc_bag_add(&bcdat->rna_mlcs, mol, *umih);
+        free(mol);
 
-        rna_mol_t *mol = kh_val(mols, kd);
-        assert(mol != NULL);
-
-        // get best RNA molecule by majority
-        if (rna_mol_dedup(mol) < 0) return(-1);
+        rna_dups_bag_itr_next(itrp);
     }
+
     return(0);
 }
 
@@ -209,23 +112,19 @@ int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap,
     if (bcdat == NULL || gv == NULL || cmap == NULL)
         return err_msg(-1, 0, "bc_data_rna_var_call: argument is null");
 
-    if (bcdat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_var_call: bcdat->rna_mols is null");
-
-    khash_t(khrmn) *mols = bcdat->rna_mols;
     int n_add = 0;
-    khint_t km;
-    for (km = kh_begin(mols); km != kh_end(mols); ++km){
-        if (!kh_exist(mols, km)) continue;
+    rna_mlc_bag_itr itr, *itrp = &itr;
+    rna_mlc_bag_itr_first(itrp, &bcdat->rna_mlcs);
+    while (rna_mlc_bag_itr_alive(itrp)) {
+        rna_mol_t *mol = rna_mlc_bag_itr_val(itrp);
+        int ret = rna_mol_var_call(mol, gv, cmap, min_qual);
+        if (ret < 0)
+            return -1;
+        n_add += ret;
 
-        rna_mol_t *mol = kh_val(mols, km);
-        assert(mol != NULL);
-
-        int a = rna_mol_var_call(mol, gv, cmap, min_qual);
-        if (a < 0)
-            return(-1);
-        n_add += a;
+        rna_mlc_bag_itr_next(itrp);
     }
+
     return(n_add);
 }
 
@@ -237,69 +136,56 @@ int bc_data_atac_add_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
     if (bcdat == NULL || ar == NULL)
         return err_msg(-1, 0, "bc_data_atac_add_read: argument is null");
 
-    khash_t(khap) *pairs = bcdat->atac_pairs;
-    khash_t(khaf) *frags = bcdat->atac_frags;
+    if (atac_pair_bag_add_read(&bcdat->atac_prs, ar, qname) < 0)
+        return -1;
 
-    if (pairs == NULL || frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_add_read: 'pairs' or 'frags' "
-                "is null");
-
-    int ret;
-    khint_t kp;
-    kp = kh_get(khap, pairs, qname);
-
-    // if read pair isn't present, allocate and add read pair t
-    if (kp == kh_end(pairs)){
-        kp = kh_put(khap, pairs, qname, &ret);
-        if (ret < 0)
-            return err_msg(-1, 0, "bc_data_atac_add_read: failed to add "
-                    "'qname' to hash");
-        
-        if ( (kh_val(pairs, kp) = atac_rd_pair_init()) == NULL ) return(-1);
-    }
-    atac_rd_pair_t *rp = kh_val(pairs, kp);
-
-    // add read (copy) to read pair
-    if ( atac_rd_pair_add_read(rp, ar) < 0 )
-        return err_msg(-1, 0, "bc_data_atac_add_read: failed to add read to pair");
-
-    // If a read pair was formed, add to duplicates and destroy read.
-    if (rp->s == 2){
-        if (khaf_add_dup(frags, rp, 1) < 0)
-            return(-1);
-        atac_rd_pair_dstry(rp);
-        kh_del(khap, pairs, kp);
-    }
     return(0);
+}
+
+int bc_data_atac_get_dups(bc_data_t *bcdat) {
+    if (bcdat == NULL)
+        return err_msg(-1, 0, "bc_data_atac_get_dups: argument is null");
+    
+    atac_pair_bag_itr itr, *itrp = &itr;
+    atac_pair_bag_itr_first(itrp, &bcdat->atac_prs);
+    for (; atac_pair_bag_itr_alive(itrp); atac_pair_bag_itr_next(itrp)) {
+        atac_rd_pair_t *ap = atac_pair_bag_itr_val(itrp);
+        assert(ap);
+        if (atac_dup_bag_add_read(&bcdat->atac_dups, ap, 1) < 0)
+            return -1;
+    }
+    // free atac pairs bag
+    atac_pair_bag_free(&bcdat->atac_prs);
+    return 0;
 }
 
 int bc_data_atac_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
         return err_msg(-1, 0, "bc_data_atac_dedup: bcdat is null");
 
-    if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_dedup: bcdat->atac_frags is null");
+    atac_dup_bag_itr itr, *itrp = &itr;
+    atac_dup_bag_itr_first(itrp, &bcdat->atac_dups);
+    for (; atac_dup_bag_itr_alive(itrp); atac_dup_bag_itr_next(itrp)) {
+        g_reg_pair *reg = atac_dup_bag_itr_key(itrp);
+        atac_dups_t *dups = atac_dup_bag_itr_val(itrp);
+        int ret;
 
-    khint_t kf;
-    khash_t(khaf) *frags = bcdat->atac_frags;
+        atac_frag_t *frag = atac_dups_dedup(dups, &ret);
+        if (ret < 0)
+            return -1;
+        atac_dups_free(dups);
 
-    // for each dup, deduplicate into frag and add to frags.
-    for (kf = kh_begin(frags); kf != kh_end(frags); ++kf){
-        if (!kh_exist(frags, kf)) continue;
-
-        g_reg_pair reg = kh_key(frags, kf);
-
-        // skip the duplicate if chimeric
-        if (reg.r1.rid != reg.r2.rid){
+        if (frag == NULL)
             continue;
-        }
 
-        atac_frag_t *frag = kh_val(frags, kf);
-        assert(frag != NULL);
+        ret = atac_frag_bag_add(&bcdat->atac_frgs, frag, *reg);
+        if (ret < 0)
+            return -1;
+        free(frag);
 
-        if (atac_frag_dedup(frag) < 0)
-            return(-1);
     }
+    atac_dup_bag_free(&bcdat->atac_dups);
+
     return 0;
 }
 
@@ -308,28 +194,22 @@ int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap,
     if (bcdat == NULL || gv == NULL || cmap == NULL)
         return err_msg(-1, 0, "bc_data_atac_var_call: argument is null");
 
-    if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_var_call: bcdat->atac_frags is null");
-
-    khash_t(khaf) *frags = bcdat->atac_frags;
     int n_add = 0;
-    khint_t kf;
-    for (kf = kh_begin(frags); kf != kh_end(frags); ++kf){
-        if (!kh_exist(frags, kf)) continue;
-
-        atac_frag_t *frag = kh_val(frags, kf);
-        if (frag == NULL)
-            return err_msg(-1, 0, "bc_data_atac_var_call: frag is NULL");
+    atac_frag_bag_itr itr, *itrp = &itr;
+    atac_frag_bag_itr_first(itrp, &bcdat->atac_frgs);
+    for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
+        g_reg_pair *reg = atac_frag_bag_itr_key(itrp);
+        atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
 
         int a = atac_frag_var_call(frag, gv, cmap, min_qual);
         if (a < 0){
-            g_reg_pair greg = kh_key(frags, kf);
-            print_g_region(stderr, greg.r1);
-            print_g_region(stderr, greg.r2);
+            print_g_region(stderr, reg->r1);
+            print_g_region(stderr, reg->r2);
             return(-1);
         }
         n_add += a;
     }
+
     return n_add;
 }
 
@@ -337,24 +217,19 @@ int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, str_map *cmap){
     if (bcdat == NULL || pks == NULL || cmap == NULL)
         return err_msg(-1, 0, "bc_data_atac_peak_call: argument is null");
 
-    if (bcdat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_peak_call: bcdat->atac_frags is null");
-
-    khash_t(khaf) *frags = bcdat->atac_frags;
     int n_add = 0;
-    khint_t kf;
-    for (kf = kh_begin(frags); kf != kh_end(frags); ++kf){
-        if (!kh_exist(frags, kf)) continue;
-
-        atac_frag_t *frag = kh_val(frags, kf);
-        assert(frag != NULL);
-        g_reg_pair reg = kh_key(frags, kf);
+    atac_frag_bag_itr itr, *itrp = &itr;
+    atac_frag_bag_itr_first(itrp, &bcdat->atac_frgs);
+    for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
+        g_reg_pair *reg = atac_frag_bag_itr_key(itrp);
+        atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
 
         int np;
-        if ( (np = atac_frag_peak_call(frag, reg, pks, cmap)) < 0)
+        if ( (np = atac_frag_peak_call(frag, *reg, pks, cmap)) < 0)
             return(-1);
         n_add += np;
     }
+
     return(n_add);
 }
 
@@ -490,7 +365,7 @@ int bam_data_rna_add_read(bam_data_t *bam_data, const char *bc,
     bam_data->has_rna = 1;
 
     if (bam_data->bc_data == NULL)
-        return err_msg(-1, 0, "bam_data_rna_dedup: bam_data->bc_data is null");
+        return err_msg(-1, 0, "bam_data_rna_add_read: bam_data->bc_data is null");
 
     if (pthread_mutex_lock(&bam_data->bam_lock) != 0)
         return err_msg(-1, 0, "bam_data_rna_add_read: failed mutex lock");
@@ -549,6 +424,9 @@ int bam_data_rna_dedup(bam_data_t *bam_data){
 
         if (bc_data_rna_dedup(bc_dat) < 0)
             return -1;
+
+        // free dups struct to save space
+        rna_dups_bag_free(&bc_dat->rna_dups);
     }
     return 0;
 }
@@ -623,6 +501,26 @@ int bam_data_atac_add_read(bam_data_t *bam_data, const char *bc,
     return(0);
 }
 
+int bam_data_atac_get_dups(bam_data_t *bam_data) {
+    if (bam_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_get_dups: bam_data is null");
+
+    if (bam_data->bc_data == NULL)
+        return err_msg(-1, 0, "bam_data_atac_get_dups: bam_data->bc_data is null");
+
+    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
+    khint_t kbc;
+    for (kbc = kh_begin(bcs_hash); kbc != kh_end(bcs_hash); ++kbc){
+        if (!kh_exist(bcs_hash, kbc)) continue;
+        bc_data_t *bc_dat = kh_val(bcs_hash, kbc);
+        assert(bc_dat != NULL);
+
+        if (bc_data_atac_get_dups(bc_dat) < 0)
+            return -1;
+    }
+    return(0);
+}
+
 int bam_data_atac_dedup(bam_data_t *bam_data){
     if (bam_data == NULL)
         return err_msg(-1, 0, "bam_data_atac_dedup: bam_data is null");
@@ -688,25 +586,6 @@ int bam_data_atac_peak_call(bam_data_t *bam_data, iregs_t *pks,
     return 0;
 }
 
-int bam_data_fill_list(bam_data_t *bam_data){
-    if (bam_data == NULL)
-        return err_msg(-1, 0, "bam_data_fill_list: argument is null");
-
-    khash_t(kh_bc_dat) *bcs_hash = bam_data->bc_data;
-    khint_t k;
-    for (k = kh_begin(bcs_hash); k != kh_end(bcs_hash); ++k){
-        if (!kh_exist(bcs_hash, k)) continue;
-
-        bc_data_t *bc_dat = kh_val(bcs_hash, k);
-        assert(bc_dat != NULL);
-
-        if (bc_data_fill_list(bc_dat) < 0)
-            return(-1);
-    }
-
-    return(0);
-}
-
 /*******************************************************************************
  * bc_stats
  ******************************************************************************/
@@ -715,17 +594,11 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
     if (bcc == NULL || rna_hdr == NULL || bc_dat == NULL)
         return err_msg(-1, 0, "bc_data_rna_fill: arguments are null");
 
-    if (bc_dat->rna_mols == NULL)
-        return err_msg(-1, 0, "bc_data_rna_fill: rna_mols is null");
-
-    khash_t(khrmn) *mols = bc_dat->rna_mols;
-
     float n_mt = 0;
-    khint_t k_mol;
-    for (k_mol = kh_begin(mols); k_mol != kh_end(mols); ++k_mol){
-        if (!kh_exist(mols, k_mol)) continue;
-        rna_mol_t *mol = kh_val(mols, k_mol);
-        if (mol == NULL) continue;
+    rna_mlc_bag_itr itr, *itrp = &itr;
+    rna_mlc_bag_itr_first(itrp, &bc_dat->rna_mlcs);
+    while (rna_mlc_bag_itr_alive(itrp)) {
+        rna_mol_t *mol = rna_mlc_bag_itr_val(itrp);
 
         // count genes
         ml_node_t(seq_gene_l) *gn;
@@ -757,6 +630,7 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
         int is_mt = 0;
         if ( (is_mt = chr_is_mt(chr)) < 0 ) return(-1);
         if (is_mt) n_mt = n_mt + 1.0;
+        rna_mlc_bag_itr_next(itrp);
     }
     if (bcc->rna_counts) bcc->rna_mt = n_mt / (float)bcc->rna_counts;
     else bcc->rna_mt = 0;
@@ -771,18 +645,13 @@ int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_
     if (bcc == NULL || atac_hdr == NULL || bc_dat == NULL)
         return err_msg(-1, 0, "bc_data_atac_fill: arguments are null");
 
-    if (bc_dat->atac_frags == NULL)
-        return err_msg(-1, 0, "bc_data_atac_fill: atac_frags is null");
-
-    uint32_t in_pk = 0;
-    khash_t(khaf) *frags = bc_dat->atac_frags;
     float n_mt = 0;
-    khint_t k_f;
-    for (k_f = kh_begin(frags); k_f != kh_end(frags); ++k_f){
-        if (!kh_exist(frags, k_f)) continue;
-        atac_frag_t *frag = kh_val(frags, k_f);
-        g_reg_pair reg = kh_key(frags, k_f);
-        if (frag == NULL) continue;
+    uint32_t in_pk = 0;
+    atac_frag_bag_itr itr, *itrp = &itr;
+    atac_frag_bag_itr_first(itrp, &bc_dat->atac_frgs);
+    for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
+        g_reg_pair reg = *atac_frag_bag_itr_key(itrp);
+        atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
 
         // peak counts
         size_t p_i;

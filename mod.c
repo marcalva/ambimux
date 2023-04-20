@@ -60,11 +60,9 @@ uint32_t mdl_mlcl_feat_count(kbtree_t(kb_mdl_mlcl) *bt){
 }
 
 f_t mdl_bc_frip(mdl_bc_t *mdl_bc){
-    kbtree_t(kb_mdl_mlcl) *bt;
-    kbitr_t itr;
-
     uint32_t counts = 0, pks = 0;
-    bt = mdl_bc->atac;
+    kbtree_t(kb_mdl_mlcl) *bt = mdl_bc->atac;
+    kbitr_t itr;
     kb_itr_first(kb_mdl_mlcl, bt, &itr); 
     for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
         mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
@@ -480,10 +478,10 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         mdl_bc_t *mdl_bc = &mv_i(&mdl->bc_dat, bc_ix);
 
         // loop through RNA
-        khint_t k_rna, k_atac;
-        for (k_rna = kh_begin(bc_data->rna_mols); k_rna != kh_end(bc_data->rna_mols); ++k_rna){
-            if (!kh_exist(bc_data->rna_mols, k_rna)) continue;
-            rna_mol_t *mol = kh_val(bc_data->rna_mols, k_rna);
+        rna_mlc_bag_itr itr, *ritrp = &itr;
+        rna_mlc_bag_itr_first(ritrp, &bc_data->rna_mlcs);
+        for (; rna_mlc_bag_itr_alive(ritrp); rna_mlc_bag_itr_next(ritrp)) {
+            rna_mol_t *mol = rna_mlc_bag_itr_val(ritrp);
 
             // skip RNA molecules with no data, and only consider unique feature
             size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
@@ -531,10 +529,10 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         }
 
         // loop through atac
-        for (k_atac = kh_begin(bc_data->atac_frags); k_atac != kh_end(bc_data->atac_frags); ++k_atac){
-            if (!kh_exist(bc_data->atac_frags, k_atac)) continue;
-
-            atac_frag_t *frag = kh_val(bc_data->atac_frags, k_atac);
+        atac_frag_bag_itr aitr, *aitrp = &aitr;
+        atac_frag_bag_itr_first(aitrp, &bc_data->atac_frgs);
+        for (; atac_frag_bag_itr_alive(aitrp); atac_frag_bag_itr_next(aitrp)) {
+            atac_frag_t *frag = atac_frag_bag_itr_val(aitrp);
 
             // always add peak since feature is always 1 or 0
             // initialize mlcl to all 0
@@ -1515,12 +1513,12 @@ int mdl_init_par_dat(mdl_t *mdl){
         kbtree_t(kb_mdl_mlcl) *mols = bc_dat.rna;
         kbtree_t(kb_mdl_mlcl) *frags = bc_dat.atac;
 
-        kbitr_t itr;
-        kbtree_t(kb_mdl_mlcl) *bt;
+        // kbtree_t(kb_mdl_mlcl) *bt;
 
         // loop over RNA
+        kbitr_t itr;
         kb_itr_first(kb_mdl_mlcl, mols, &itr); 
-        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
+        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols, &itr)){
             mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
             size_t f_ix;
             for (f_ix = 0; f_ix < mv_size(&mlcl->feat_ixs); ++f_ix){
@@ -1532,7 +1530,7 @@ int mdl_init_par_dat(mdl_t *mdl){
 
         // loop over ATAC
         kb_itr_first(kb_mdl_mlcl, frags, &itr); 
-        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
+        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, frags, &itr)){
             mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
             size_t f_ix;
             assert(mv_size(&mlcl->feat_ixs) == 1);
@@ -2012,7 +2010,7 @@ int write_lambda(mdl_t *mdl, char *fn){
     if (mdl == NULL || fn == NULL)
         return err_msg(-1, 0, "write_lambda: arguments are NULL");
 
-    if (mdl->mp == NULL || mdl->mp->lambda == NULL)
+    if (mdl->mp == NULL)
         return err_msg(-1, 0, "write_lambda: model hasn't been initialized");
 
     char nl = '\n';
@@ -2172,7 +2170,7 @@ int write_sigma(mdl_t *mdl, obj_pars *objs, char *fn){
     if (mdl == NULL || objs == NULL || fn == NULL)
         return err_msg(-1, 0, "write_sigma: arguments are NULL");
 
-    if (mdl->mp == NULL || mdl->mp->sigma == NULL)
+    if (mdl->mp == NULL)
         return err_msg(-1, 0, "write_sigma: model hasn't been initialized");
 
     char nl = '\n';
