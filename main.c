@@ -64,6 +64,7 @@ static void usage(FILE *fp, int exit_status){
             "\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-5].\n"
+            "  -j, --max-alpha     Max value alpha can take [1].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [20].\n"
             "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
             "  -T, --threads       Optional number of threads to use [1].\n"
@@ -105,6 +106,7 @@ int main(int argc, char *argv[]){
         {"atac-mapq", required_argument, NULL, 'Z'},
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
+        {"max-alpha", required_argument, NULL, 'j'},
         {"max-iter", required_argument, NULL, 'q'},
         {"seed", required_argument, NULL, 'd'},
         {"threads", required_argument, NULL, 'T'},
@@ -127,7 +129,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:q:d:T:V", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:j:q:d:T:V", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -296,6 +298,21 @@ int main(int argc, char *argv[]){
                           goto cleanup;
                       }
                       opts->eps = eps;
+                      break;
+            case 'j':
+                      errno = 0;
+                      float alpham = strtof(optarg, &p_end);
+                      if (errno == ERANGE){
+                          ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --eps %s to int: %s", 
+                                  optarg, strerror(errno));
+                          goto cleanup;
+                      }
+                      if (alpham < 0 || alpham > 1){
+                          ret = err_msg(EXIT_FAILURE, 0, "--max-alpha must be between 0 and 1"); 
+                          goto cleanup;
+                      }
+                      opts->alpha_max = alpham;
                       break;
             case 'q': errno = 0;
                       opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);

@@ -46,6 +46,7 @@ cl_opts *init_cl_opts(){
     opts->seed = (uint32_t)time(&t);
     opts->eps = 1e-5;
     opts->max_iter = 20;
+    opts->alpha_max = 1;
 
     opts->threads = 1;
 
@@ -327,6 +328,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->atac_mapq = opts->atac_mapq;
     objs->seed = opts->seed;
     objs->eps = opts->eps;
+    objs->alpha_max = opts->alpha_max;
     objs->max_iter = opts->max_iter;
     objs->threads = opts->threads;
     if (opts->out_fn) objs->out_fn = strdup(opts->out_fn);

@@ -61,6 +61,7 @@ typedef struct {
     float eps;
     uint16_t max_iter;
     uint16_t threads;
+    float alpha_max;
 
     int verbose;
 } cl_opts;
@@ -121,6 +122,7 @@ typedef struct {
     uint32_t seed;
     float eps;
     uint16_t max_iter;
+    float alpha_max;
 
     uint16_t threads;
 

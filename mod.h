@@ -94,7 +94,7 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
-    f_t *alpha; // droplet contamination prob. (D x 1 array)
+    f_t *alpha; // droplet contamination prob. (D x _nrow_hs array)
     f_t *rho; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t sigma[2]; // prob. in peak (2 x 1 array), 0: ambient, 1: cell
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
@@ -105,7 +105,8 @@ typedef struct {
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
     f_t _pi_d_sum;
-    f_t *_alpha_sum; // CM droplet contamination prob. (D x 2 array) rows droplets, col 0: ambient col 1: cell
+    f_t *_alpha0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
+    f_t *_alpha1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
@@ -155,6 +156,7 @@ typedef struct {
     bflg_t *fix_flag; // 0: unfixed, 1: fixed (ambient)
     bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
 
+    // order corresponds to all_bcs
     mv_t(mdl_bc_v) bc_dat;
     mv_t(mdl_cp_v) c_probs;
 
@@ -166,6 +168,7 @@ typedef struct {
 
     f_t eps;
     uint16_t max_iter;
+    f_t alpha_max;
 
     uint8_t has_rna, has_atac;
 
@@ -261,7 +264,7 @@ void pr_hd(mdl_t *mdl, int hd, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob);
 // Pr(T_d)
-int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, f_t *prob);
+int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, int hs_ix, f_t *prob);
 // Pr(G_dm, B_dm)
 int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 // Pr(P_dm, B_dm)
@@ -333,6 +336,8 @@ int mdl_get_llk(mdl_t *mdl);
  */
 int mdl_fit(bam_data_t *bam_dat, obj_pars *objs);
 int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs);
+
+char **mdl_s_names(mdl_t *mdl);
 
 // output functions
 int write_lambda(mdl_t *mdl, char *fn);
