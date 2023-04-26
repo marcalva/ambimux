@@ -4,8 +4,8 @@
 
 // [i,j] is [row,column]. I is number of rows, J is number of columns
 // column-major indexing
-#define CMI(i,j,I) ((I*j)+i) // column-major indexing
-#define RMI(i,j,J) ((J*i)+j) // row-major indexing
+#define CMI(i,j,I) (((I)*(j))+(i)) // column-major indexing
+#define RMI(i,j,J) (((J)*(i))+(j)) // row-major indexing
 
 /* write a matrix of doubles to file 
  *
