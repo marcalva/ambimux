@@ -69,10 +69,8 @@ int proc_atac1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
         return(-1);
 
     // add read to bam_data
-    if (bam_data_atac_add_read(bam_data, b_cb, atac_read, qs) < 0) {
-        print_bam1_t(bam_r);
-        return err_msg(-1, 0, "failed to add ATAC read");
-    }
+    if (bam_data_atac_add_read(bam_data, b_cb, atac_read, qs) < 0)
+        return err_msg(-1, 0, "proc_atac1: failed add read");
 
     atac_read_dstry(atac_read); // destroy since atac read is copied into bam_data
     return(0);
@@ -230,10 +228,8 @@ int proc_rna1(bam1_t *bam_r, obj_pars *objs, bam_data_t *bam_data){
     }
 
     // add read to rna
-    if (bam_data_rna_add_read(bam_data, b_cb, rna_read, umih) < 0) {
-        print_bam1_t(bam_r);
-        return err_msg(-1, 0, "failed to add RNA read");
-    }
+    if (bam_data_rna_add_read(bam_data, b_cb, rna_read, umih) < 0)
+        return(-1);
 
     rna_read1_dstry(rna_read);
 
