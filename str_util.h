@@ -43,6 +43,19 @@ static inline uint64_t str_int64_hash(const char *s){
 	return h;
 }
 
+static inline uint64_t str_int64_hash2(const char *s){
+    if (s == NULL)
+        return(0);
+
+    uint64_t h = 0;
+
+	h = (uint64_t)*s;
+	if (h) for (; *s; ++s)
+        h = ((uint64_t)*s) + (h << 6) + (h << 16) - h;
+
+    return h;
+}
+
 /*****************************
  * linked list of kstring 
  *****************************/
