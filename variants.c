@@ -200,8 +200,12 @@ int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *n_allele,
 
             int32_t is_miss = bcf_gt_is_missing(a[t]);
             int32_t sgt = bcf_gt_allele(a[t]);
+            if (sgt >= 2)
+                return err_msg(-1, 0, "bcf1_t_miss_maf: there are multiple "
+                        "alleles for variant '%s' and sample '%s'. Only bi-allelic variants "
+                        "are supported", b->d.id, vcf_hdr->samples[s]);
             // if this fails, need new way to check for bi-allelic
-            assert(sgt >= 0 && sgt < 2);
+            assert(sgt < 2);
 
             if (is_miss)
                 ++n_miss;
