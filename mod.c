@@ -432,6 +432,9 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
     mdl->mp->M = n_samples;
     mdl->mp->V = n_vars;
 
+    // flag to include only reads with >= variant bases overlapping
+    uint8_t flg_rd_w_vars = 1;
+
     // set indices
     mdl_set_hs_indices(mdl, n_samples);
 
@@ -485,10 +488,15 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         for (; rna_mlc_bag_itr_alive(ritrp); rna_mlc_bag_itr_next(ritrp)) {
             rna_mol_t *mol = rna_mlc_bag_itr_val(ritrp);
 
+
             // skip RNA molecules with no data, and only consider unique feature
             size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
             int skip_gene = !( mol_n_genes == 1 || mol_n_vars > 0 );
             if (skip_gene)
+                continue;
+
+            // skip RNA read if no variants and flag set
+            if (flg_rd_w_vars > 0 && mol_n_vars == 0)
                 continue;
 
             // initialize mlcl to all 0
@@ -535,6 +543,11 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         atac_frag_bag_itr_first(aitrp, &bc_data->atac_frgs);
         for (; atac_frag_bag_itr_alive(aitrp); atac_frag_bag_itr_next(aitrp)) {
             atac_frag_t *frag = atac_frag_bag_itr_val(aitrp);
+            size_t frag_n_vars = ml_size(&frag->vl);
+
+            // skip RNA read if no variants and flag set
+            if (flg_rd_w_vars > 0 && frag_n_vars == 0)
+                continue;
 
             // always add peak since feature is always 1 or 0
             // initialize mlcl to all 0
@@ -1202,9 +1215,6 @@ int mdl_m_sum(mdl_t *mdl, int *ixs, uint32_t ix_len){
                     }
                 }
             }
-            if (cp_hsx > 0.5 && hs_ix > 0) {
-                fprintf(stdout, "\tRNA=a[0]=%.02f,a[1]=%.02f\n", alpha0_sums[hs_ix], alpha1_sums[hs_ix]);
-            }
 
             // loop over ATAC
             kb_itr_first(kb_mdl_mlcl, frags, &itr_atac); 
@@ -1260,9 +1270,6 @@ int mdl_m_sum(mdl_t *mdl, int *ixs, uint32_t ix_len){
                     // sigma
                     sig_sum[ CMI(pk, a_type, sig_nrow) ] += mlcl->counts * cp_hsx * pt;
                 }
-            }
-            if (cp_hsx > 0.5 && hs_ix > 0) {
-                fprintf(stdout, "\tRNA+ATAC=a[0]=%.02f,a[1]=%.02f\n", alpha0_sums[hs_ix], alpha1_sums[hs_ix]);
             }
 
             mdl->mp->_alpha0_sum[CMI(bc_ix, hs_ix, D)] += alpha0_sums[hs_ix];
