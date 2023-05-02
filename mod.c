@@ -2430,6 +2430,10 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
     int delim = '\t';
     int nl = '\n';
 
+    char **sam_ids = mdl_s_names(mdl);
+    if (sam_ids == NULL)
+        return err_msg(-1, 0, "write_res: failed to get sample IDs");
+
     if (mkpath(fn, 0755) == -1)
         return err_msg(-1, 0, "write_res: failed to create output directory for %s", fn);
 
@@ -2447,7 +2451,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         "\tSinglet_best\tSinglet_best_llk\tSinglet_best_alpha"
         "\tSinglet_scnd\tSinglet_scnd_llk\tSinglet_scnd_alpha"
         "\tDoublet_sample1\tDoublet_sample2\tDoublet_llk\tDoublet_alpha"
-        "\tPP0\tPP1\tPP2\n";
+        "\tPP0\tPP1\tPP2\tSample_best\n";
 
     fputs(hdr, fp);
 
@@ -2613,11 +2617,28 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
             fret = fputs(pstr, fp);
         }
 
+        // write best sample ID name
+        f_t best_pp = mf->pp[CMI(bc_i, 0, bcs_n)];
+        char *best_sam = sam_ids[0];
+        if (mf->pp[CMI(bc_i, 1, bcs_n)] > best_pp) {
+            best_pp = mf->pp[CMI(bc_i, 1, bcs_n)];
+            best_sam = sam_ids[sng1_hs_ix];
+        }
+        if (mf->pp[CMI(bc_i, 2, bcs_n)] > best_pp) {
+            best_sam = sam_ids[dbl_hs_ix];
+        }
+        fret = fputc(delim, fp);
+        fputs(best_sam, fp);
+
         fret = fputc(nl, fp);
     }
 
     free(pstr);
     free(out_r_fn);
+    uint32_t hs_ix;
+    for (hs_ix = 0; hs_ix < mdl->_nrow_hs; ++hs_ix)
+        free(sam_ids[hs_ix]);
+    free(sam_ids);
 
     // close file
     if ( (fret = fclose(fp)) != 0 )
