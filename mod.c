@@ -763,17 +763,6 @@ int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
     // Pr(G_dm | T_dm, \rho)
     size_t i;
-    assert( mv_size(&mlcl->feat_ixs) < 2);
-    for (i = 0; i < mv_size(&mlcl->feat_ixs); ++i){
-        uint32_t row_ix = (uint32_t)(mv_i(&mlcl->feat_ixs, i));
-        assert(row_ix < (rho_nrow)); // TODO: remove after testing
-        uint32_t rho_ix = CMI(row_ix, c_ix, rho_nrow);
-        assert(rho_ix < (rho_nrow * 2)); // TODO: remove after testing
-        f_t rp = mdl->mp->rho[rho_ix];
-        assert(rp > 0 && rp <= 1);
-        pgbm *= mdl->mp->rho[rho_ix];
-    }
-
     for (i = 0; i < mv_size(&mlcl->var_ixs); ++i){
         uint32_t v = (uint32_t)mv_i(&mlcl->var_ixs, i);
         div_t di = div((int)v, (int)V);
@@ -793,6 +782,23 @@ int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
     *prob = pgbm;
     return(0);
+
+    // gene probability
+    assert( mv_size(&mlcl->feat_ixs) < 2);
+    for (i = 0; i < mv_size(&mlcl->feat_ixs); ++i){
+        uint32_t row_ix = (uint32_t)(mv_i(&mlcl->feat_ixs, i));
+        assert(row_ix < (rho_nrow)); // TODO: remove after testing
+        uint32_t rho_ix = CMI(row_ix, c_ix, rho_nrow);
+        assert(rho_ix < (rho_nrow * 2)); // TODO: remove after testing
+        f_t rp = mdl->mp->rho[rho_ix];
+        assert(rp > 0 && rp <= 1);
+        pgbm *= mdl->mp->rho[rho_ix];
+    }
+
+    assert(pgbm > 0 && pgbm <= 1);
+
+    *prob = pgbm;
+    return(0);
 }
 
 // not in log
@@ -806,19 +812,6 @@ int p_atac(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
     f_t ppbm = 1;
 
     // Pr(P_dm | T_dm, \sigma)
-    assert(mv_size(&mlcl->feat_ixs) == 1);
-
-    int32_t pk = mv_i(&mlcl->feat_ixs, 0); // 0 for no peak, 1 for in peak
-    assert(pk == 0 || pk == 1);
-
-    f_t p_pdm;
-    if (pk == 0) p_pdm = 1.0 - mdl->mp->sigma[c_ix];
-    else p_pdm = mdl->mp->sigma[c_ix];
-
-    assert(p_pdm > 0 && p_pdm <= 1);
-
-    ppbm *= p_pdm;
-
     size_t i;
     for (i = 0; i < mv_size(&mlcl->var_ixs); ++i){
         uint32_t v = (uint32_t)mv_i(&mlcl->var_ixs, i);
@@ -840,6 +833,21 @@ int p_atac(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
     *prob = ppbm;
     return(0);
+
+    // peak probability
+    assert(mv_size(&mlcl->feat_ixs) == 1);
+
+    int32_t pk = mv_i(&mlcl->feat_ixs, 0); // 0 for no peak, 1 for in peak
+    assert(pk == 0 || pk == 1);
+
+    f_t p_pdm;
+    if (pk == 0) p_pdm = 1.0 - mdl->mp->sigma[c_ix];
+    else p_pdm = mdl->mp->sigma[c_ix];
+
+    assert(p_pdm > 0 && p_pdm <= 1);
+
+    ppbm *= p_pdm;
+
 }
 
 /*******************************************************************************
