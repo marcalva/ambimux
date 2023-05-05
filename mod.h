@@ -94,7 +94,8 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
-    f_t *alpha; // droplet contamination prob. (D x _nrow_hs array)
+    f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
+    f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
     f_t *rho; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t sigma[2]; // prob. in peak (2 x 1 array), 0: ambient, 1: cell
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
@@ -105,8 +106,10 @@ typedef struct {
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
     f_t _pi_d_sum;
-    f_t *_alpha0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
-    f_t *_alpha1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
+    f_t *_alpha_rna0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
+    f_t *_alpha_rna1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
+    f_t *_alpha_atac0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
+    f_t *_alpha_atac1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
@@ -264,7 +267,7 @@ void pr_hd(mdl_t *mdl, int hd, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob);
 // Pr(T_d)
-int pr_tdm(mdl_t *mdl, int bc_ix, int hd, int s_ix, int hs_ix, f_t *prob);
+int pr_tdm(mdl_t *mdl, int rna, int bc_ix, int hd, int s_ix, int hs_ix, f_t *prob);
 // Pr(G_dm, B_dm)
 int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 // Pr(P_dm, B_dm)
@@ -341,7 +344,8 @@ char **mdl_s_names(mdl_t *mdl);
 
 // output functions
 int write_lambda(mdl_t *mdl, char *fn);
-int write_alpha(mdl_t *mdl, char *fn);
+int write_alpha_rna(mdl_t *mdl, char *fn);
+int write_alpha_atac(mdl_t *mdl, char *fn);
 int write_rho(mdl_t *mdl, obj_pars *objs, char *fn);
 int write_sigma(mdl_t *mdl, obj_pars *objs, char *fn);
 int write_llk(mdl_t *mdl, char *fn);
