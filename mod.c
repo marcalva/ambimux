@@ -2644,11 +2644,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         fret = fputc(delim, fp);
         fret = fputs(pstr, fp);
 
-        fret = fputc(delim, fp);
-        fret = fputs(pstr, fp);
-
         // write 2nd singlet
-
         int sng2_hs_ix = mf->sec_sng_ix[bc_i];
         s_ix1 = mdl->hs_ix[CMI(sng2_hs_ix, 1, mdl->_nrow_hs)];
         s1 = str_map_str(samples, s_ix1);
@@ -2659,9 +2655,6 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         par = mf->sec_sng_llk[bc_i];
         if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
             return err_msg(-1, 0, "write_llk: failed to convert %f to string", par);
-
-        fret = fputc(delim, fp);
-        fret = fputs(pstr, fp);
 
         fret = fputc(delim, fp);
         fret = fputs(pstr, fp);
