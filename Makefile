@@ -20,7 +20,7 @@ OBJS = main.o atac_data.o str_util.o sam_read.o \
 LDFLAGS = -L$(HTSDIR)
 LIBS = -lm -lhts -lpthread $(HTSLIB_static_LIBS)
 
-ambimux : $(OBJS) $(HTSLIB)
+ambimux : $(HTSLIB) $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 %.o: %.c %.h

@@ -308,8 +308,8 @@ int main(int argc, char *argv[]){
                                   optarg, strerror(errno));
                           goto cleanup;
                       }
-                      if (alpham < 0 || alpham > 1){
-                          ret = err_msg(EXIT_FAILURE, 0, "--max-alpha must be between 0 and 1"); 
+                      if (alpham < 0){
+                          ret = err_msg(EXIT_FAILURE, 0, "--max-alpha must be non-negative"); 
                           goto cleanup;
                       }
                       opts->alpha_max = alpham;

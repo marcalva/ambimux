@@ -59,7 +59,56 @@ uint32_t mdl_mlcl_feat_count(kbtree_t(kb_mdl_mlcl) *bt){
     return(counts);
 }
 
-f_t mdl_bc_frip(mdl_bc_t *mdl_bc){
+int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
+        int n_genes, int n_vars) {
+    size_t mol_n_genes = ml_size(&mol->gl);
+    // add gene if only 1 is present, skip multi-gene RNAs
+    if (mol_n_genes == 1){
+        ml_node_t(seq_gene_l) *g_n;
+        for (g_n = ml_begin(&mol->gl); g_n; g_n = ml_node_next(g_n)){
+            seq_gene_t gene = ml_node_val(g_n);
+            assert(gene.gene_id >= 0);
+            assert(gene.splice < 3);
+            int32_t f_ix = gene.gene_id + (n_genes * gene.splice);
+            if (mv_push(i32, &mlcl->feat_ixs, f_ix) < 0)
+                return(-1);
+        }
+    }
+
+    ml_node_t(seq_vac_l) *v_n;
+    for (v_n = ml_begin(&mol->vl); v_n; v_n = ml_node_next(v_n)){
+        seq_vac_t vac = ml_node_val(v_n);
+        assert(vac.vix >= 0);
+        // set allele to 0:ref, 1:alt, 2:any other
+        uint8_t allele = vac.allele < 2 ? vac.allele : 2;
+        int32_t v_ix = vac.vix + (n_vars * allele);
+        if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
+            return(-1);
+    }
+    return 0;
+}
+
+int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars) {
+    // add peak
+    int32_t pk_ix = mv_size(&frag->pks) > 0 ? 1 : 0;
+    if (mv_push(i32, &mlcl->feat_ixs, pk_ix) < 0)
+        return(-1);
+
+    // variant(s)
+    ml_node_t(seq_vac_l) *v_n;
+    for (v_n = ml_begin(&frag->vl); v_n; v_n = ml_node_next(v_n)){
+        seq_vac_t vac = ml_node_val(v_n);
+        assert(vac.vix >= 0);
+        // set allele to 0:ref, 1:alt, 2:any other
+        uint8_t allele = vac.allele < 2 ? vac.allele : 2;
+        int32_t v_ix = vac.vix + (n_vars * allele);
+        if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
+            return(-1);
+    }
+    return 0;
+}
+
+f_t mdl_bc_frip(mdl_mlcl_bc_t *mdl_bc){
     uint32_t counts = 0, pks = 0;
     kbtree_t(kb_mdl_mlcl) *bt = mdl_bc->atac;
     kbitr_t itr;
@@ -73,13 +122,12 @@ f_t mdl_bc_frip(mdl_bc_t *mdl_bc){
     return(ret);
 }
 
-
-void mdl_bc_counts(mdl_bc_t *mdl_bc, uint32_t *rna, uint32_t *atac){
+void mdl_bc_counts(mdl_mlcl_bc_t *mdl_bc, uint32_t *rna, uint32_t *atac){
     *rna = mdl_mlcl_feat_count(mdl_bc->rna);
     *atac = mdl_mlcl_feat_count(mdl_bc->atac);
 }
 
-void mdl_bc_print(FILE *f, mdl_bc_t *mdl_bc){
+void mdl_bc_print(FILE *f, mdl_mlcl_bc_t *mdl_bc){
 
     kbtree_t(kb_mdl_mlcl) *bt;
     kbitr_t itr;
@@ -124,17 +172,17 @@ void mdl_print_count(FILE *f, mdl_t *mdl){
     }
 }
 
-int mdl_bc_init(mdl_bc_t *mdl_bc){
+int mdl_mlcl_bc_init(mdl_mlcl_bc_t *mdl_bc){
     kbtree_t(kb_mdl_mlcl) *p;
     p = kb_init(kb_mdl_mlcl, KB_DEFAULT_SIZE);
     if (p == NULL){
-        return err_msg(-1, 0, "mdl_bc_init: %s", strerror(errno));
+        return err_msg(-1, 0, "mdl_mlcl_bc_init: %s", strerror(errno));
     }
     mdl_bc->rna = p;
 
     p = kb_init(kb_mdl_mlcl, KB_DEFAULT_SIZE);
     if (p == NULL){
-        return err_msg(-1, 0, "mdl_bc_init: %s", strerror(errno));
+        return err_msg(-1, 0, "mdl_mlcl_bc_init: %s", strerror(errno));
     }
     mdl_bc->atac = p;
 
@@ -143,7 +191,7 @@ int mdl_bc_init(mdl_bc_t *mdl_bc){
     return 0;
 }
 
-void mdl_bc_free(mdl_bc_t *mdl_bc){
+void mdl_mlcl_bc_free(mdl_mlcl_bc_t *mdl_bc){
     if (mdl_bc == NULL) return;
     kbitr_t itr;
     kbtree_t(kb_mdl_mlcl) *bt;
@@ -168,6 +216,10 @@ void mdl_bc_free(mdl_bc_t *mdl_bc){
 
     mdl_bc->n_bc = 0;
 }
+
+/*******************************************************************************
+ * mdl_pars_t
+ ******************************************************************************/
 
 mdl_pars_t *mdl_pars_init(){
     mdl_pars_t *gp = calloc(1, sizeof(mdl_pars_t));
@@ -197,6 +249,10 @@ void mdl_pars_dstry(mdl_pars_t *gp){
     free(gp->_rho_sum);
     free(gp);
 }
+
+/*******************************************************************************
+ * mdl_fit_t
+ ******************************************************************************/
 
 mdl_fit_t *init_mdl_fit(){
     mdl_fit_t *mf = calloc(1, sizeof(mdl_fit_t));
@@ -245,6 +301,254 @@ void c_probs_free(c_probs_t *c_probs){
     c_probs->cp_hs = NULL;
 }
 
+/*******************************************************************************
+ * mdl_bc_dat_t
+ ******************************************************************************/
+
+int mdl_bc_dat_init(mdl_bc_dat_t *mdl_bc_dat) {
+    if (mdl_bc_dat == NULL)
+        return err_msg(-1, 0, "mdl_bc_dat_init: argument is null");
+    mdl_bc_dat->all_bcs = init_str_map();
+    mdl_bc_dat->test_bcs = init_str_map();
+
+    mdl_bc_dat->amb_flag = calloc(1, sizeof(bflg_t));
+    mdl_bc_dat->absent_bc = calloc(1, sizeof(bflg_t));
+    if (mdl_bc_dat->absent_bc == NULL)
+        return err_msg(-1, 0, "mdl_bc_dat_init: %s", strerror(errno));
+    bflg_init_empty(mdl_bc_dat->amb_flag);
+    bflg_init_empty(mdl_bc_dat->absent_bc);
+    mdl_bc_dat->n_ix = -1;
+    return 0;
+}
+
+int mdl_bc_dat_alloc() {
+    mdl_bc_dat_t *mdl_bc_dat = calloc(1, sizeof(mdl_bc_dat_t));
+    if (mdl_bc_dat == NULL)
+        return err_msg(-1, 0, "mdl_bc_dat_alloc: %s", strerror(errno));
+
+    mv_init(&mdl_bc_dat->bc_mlcl);
+
+    return 0;
+}
+
+void mdl_bc_dat_free(mdl_bc_dat_t *mdl_bc_dat) {
+    if (mdl_bc_dat == NULL)
+        return;
+
+    destroy_str_map(mdl_bc_dat->all_bcs);
+    destroy_str_map(mdl_bc_dat->test_bcs);
+
+    bflg_free(mdl_bc_dat->amb_flag);
+    bflg_free(mdl_bc_dat->absent_bc);
+    free(mdl_bc_dat->amb_flag);
+    free(mdl_bc_dat->absent_bc);
+
+    mdl_bc_dat->n_ix = -1;
+
+    free(mdl_bc_dat->lp_hs);
+    free(mdl_bc_dat->p_x);
+}
+
+int mdl_bc_dat_add_bc(mdl_bc_dat_t *mdl_bc_dat, char *bc_key, int absent, int ambient,
+        int dup_ok, int *found){
+    if (mdl_bc_dat == NULL || bc_key == NULL)
+        return err_msg(-1, 0, "mdl_add_bc: argument is null");
+    int bc_ix;
+    if ( (bc_ix = add2str_map(mdl_bc_dat->all_bcs, bc_key, found)) < 0)
+        return(-1);
+    if (bc_ix < 0)
+        return(-1);
+
+    if ((!dup_ok) && *found)
+        return err_msg(-1, 0, "mdl_bc_dat_add_bc: barcode '%s' already added", bc_key);
+
+    // add bc_mlcl element
+    if (*found) {
+        mv_i(&mdl_bc_dat->bc_mlcl, bc_ix).n_bc += 1;
+        return 0;
+    } else {
+        mdl_mlcl_bc_t mdl_mlcl;
+        mdl_mlcl_bc_init(&mdl_mlcl);
+        mdl_mlcl.n_bc = 1;
+        if (mv_insert(mdl_bc_v, &mdl_bc_dat->bc_mlcl, mdl_mlcl, bc_ix) < 0)
+            return(-1);
+    }
+
+    if (bflg_resize(mdl_bc_dat->absent_bc, mdl_bc_dat->all_bcs->n) < 0)
+        return(-1);
+    if (bflg_resize(mdl_bc_dat->amb_flag, mdl_bc_dat->all_bcs->n) < 0)
+        return(-1);
+
+    // set to absent if no reads/empty
+    if (absent) {
+        bflg_set(mdl_bc_dat->absent_bc, bc_ix);
+    } else {
+        bflg_unset(mdl_bc_dat->absent_bc, bc_ix);
+    }
+
+    // set ambient flag and add to test_bcs
+    if (ambient) {
+        bflg_set(mdl_bc_dat->amb_flag, bc_ix);
+    } else {
+        bflg_unset(mdl_bc_dat->amb_flag, bc_ix);
+    }
+    
+    // add to test bcs if not ambient
+    if (!ambient) {
+        if (add2str_map(mdl_bc_dat->test_bcs, bc_key, found) < 0)
+            return -1;
+    }
+    
+    // allocate space for lp_hs
+    size_t D = mdl_bc_dat->all_bcs->n;
+    size_t res = mdl_bc_dat->all_bcs->n * mdl_bc_dat->n_ix;
+    mdl_bc_dat->lp_hs = realloc(mdl_bc_dat->lp_hs, res * sizeof(f_t));
+
+    // allocate space for p_x
+    mdl_bc_dat->p_x = realloc(mdl_bc_dat->p_x, D * sizeof(f_t));
+
+    return(bc_ix);
+}
+
+int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars *objs){
+    if (mdl_bc_dat == NULL || bam_data == NULL || objs == NULL)
+        return err_msg(-1, 0, "mdl_from_bam_data: argument is null");
+
+    khint_t k_bc;
+
+    uint32_t n_genes = 0;
+    if (objs->anno)
+        n_genes = objs->anno->gene_ix->n;
+    uint16_t n_samples = 0;
+    if (objs->vcf_hdr)
+        n_samples = bcf_hdr_nsamples(objs->vcf_hdr);
+    if (n_samples == 0)
+        return err_msg(-1, 0, "mdl_from_bam_data: no samples in vcf header");
+    uint32_t n_vars = 0;
+    if (objs->gv)
+        n_vars = mv_size(&objs->gv->vix2var);
+
+    // flag to include only reads with >= variant bases overlapping
+    uint8_t flg_rd_w_vars = 1;
+
+    uint32_t c_thresh = (objs->out_min);
+    if (mdl_bc_dat_init(mdl_bc_dat) < 0)
+        return -1;
+
+    int bc_ix, found = 0;
+
+    // add the empty droplets barcode
+    char bc_empty[] = "Empty";
+    bc_ix = mdl_bc_dat_add_bc(mdl_bc_dat, bc_empty, 0, 1, 1, &found);
+    if (bc_ix < 0)
+        return(-1);
+
+    khash_t(kh_bc_dat) *bam_bcs = bam_data->bc_data;
+
+    for (k_bc = kh_begin(bam_bcs); k_bc != kh_end(bam_bcs); ++k_bc){
+        if (!kh_exist(bam_bcs, k_bc)) continue;
+
+        char *bc_key = kh_key(bam_bcs, k_bc);
+
+        bc_data_t *bam_bc = kh_val(bam_bcs, k_bc);
+        assert(bam_bc != NULL);
+
+        bc_stats_t *bc_stat = bam_bc->bc_stats;
+        assert(bc_stat != NULL);
+
+        int low_count = (bc_stat->atac_counts < c_thresh) && (bc_stat->rna_counts < c_thresh);
+        int absent = 0;
+        int dup_ok = low_count; // only low count empty barcode can be duplicate
+
+        // if barcode is low count, set to empty
+        if (low_count)
+            bc_key = bc_empty;
+
+        found = 0;
+        bc_ix = mdl_bc_dat_add_bc(mdl_bc_dat, bc_key, absent, low_count, dup_ok, &found);
+        if (bc_ix < 0)
+            return(-1);
+
+        // add reads to mdl_mlcl
+        mdl_mlcl_bc_t *mdl_bc = &mv_i(&mdl_bc_dat->bc_mlcl, bc_ix);
+
+        // loop through RNA
+        rna_mlc_bag_itr itr, *ritrp = &itr;
+        rna_mlc_bag_itr_first(ritrp, &bam_bc->rna_mlcs);
+        for (; rna_mlc_bag_itr_alive(ritrp); rna_mlc_bag_itr_next(ritrp)) {
+            rna_mol_t *mol = rna_mlc_bag_itr_val(ritrp);
+
+            // skip RNA molecules with no data, and only consider unique feature
+            size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
+            int skip_gene = !( mol_n_genes == 1 || mol_n_vars > 0 );
+            if (skip_gene)
+                continue;
+
+            // skip RNA read if no variants and flag set
+            if (flg_rd_w_vars > 0 && mol_n_vars == 0)
+                continue;
+
+            // initialize mlcl to 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+            mlcl.counts = 1;
+
+            if (mdl_mlcl_add_rna(&mlcl, mol, n_genes, n_vars) < 0)
+                return -1;
+
+            mdl_mlcl_t *p; // pointer for btree add
+            p = kb_getp(kb_mdl_mlcl, mdl_bc->rna, &mlcl);
+            if (!p) {
+                kb_putp(kb_mdl_mlcl, mdl_bc->rna, &mlcl);
+            } else {
+                p->counts += 1;
+                mdl_mlcl_free(&mlcl);
+            }
+        }
+
+        // loop through atac
+        atac_frag_bag_itr aitr, *aitrp = &aitr;
+        atac_frag_bag_itr_first(aitrp, &bam_bc->atac_frgs);
+        for (; atac_frag_bag_itr_alive(aitrp); atac_frag_bag_itr_next(aitrp)) {
+            atac_frag_t *frag = atac_frag_bag_itr_val(aitrp);
+            size_t frag_n_vars = ml_size(&frag->vl);
+
+            // skip RNA read if no variants and flag set
+            if (flg_rd_w_vars > 0 && frag_n_vars == 0)
+                continue;
+
+            // initialize mlcl to all 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+            mlcl.counts = 1;
+
+            if (mdl_mlcl_add_atac(&mlcl, frag, n_vars) < 0)
+                return -1;
+
+            mdl_mlcl_t *p;
+            p = kb_getp(kb_mdl_mlcl, mdl_bc->atac, &mlcl);
+            if (!p) {
+                kb_putp(kb_mdl_mlcl, mdl_bc->atac, &mlcl);
+            } else {
+                p->counts += 1;
+                mdl_mlcl_free(&mlcl);
+            }
+        }
+        // note the read data is freed from the barcode here
+        // TODO: implement an argument flag to control this
+        bc_data_free_reads(bam_bc);
+    }
+
+    assert((uint32_t)mdl_bc_dat->all_bcs->n == mv_size(&mdl_bc_dat->bc_mlcl));
+    log_msg("initialized %zu barcodes\n", mv_size(&mdl_bc_dat->bc_mlcl));
+
+    return(0);
+}
+
+/*******************************************************************************
+ * mdl_t
+ ******************************************************************************/
+
 mdl_t *mdl_alloc(){
     mdl_t *mdl = (mdl_t *)calloc(1, sizeof(mdl_t));
     if (mdl == NULL){
@@ -256,14 +560,12 @@ mdl_t *mdl_alloc(){
     mdl->test_bcs = NULL;
     mdl->samples = NULL;
 
-    mdl->fix_flag = NULL;
+    mdl->amb_flag = NULL;
 
     mv_init(&mdl->bc_dat);
     mv_init(&mdl->c_probs);
 
-    mdl->_nrow_hs = 0;
-    mdl->_nrow_hst = 0;
-    mdl->hs_ix = NULL;
+    hs_ix_init(mdl->hs_ix);
 
     mdl->eps = 1e-5;
     mdl->max_iter = 100;
@@ -286,14 +588,14 @@ void mdl_dstry(mdl_t *m){
     if (m->test_bcs) destroy_str_map(m->test_bcs);
     if (m->samples) destroy_str_map(m->samples);
 
-    bflg_free(m->fix_flag);
+    bflg_free(m->amb_flag);
     bflg_free(m->absent_bc);
-    free(m->fix_flag);
+    free(m->amb_flag);
     free(m->absent_bc);
 
     uint32_t i;
     for (i = 0; i < mv_size(&m->bc_dat); ++i){
-        mdl_bc_free(&mv_i(&m->bc_dat, i));
+        mdl_mlcl_bc_free(&mv_i(&m->bc_dat, i));
     }
     mv_free(&m->bc_dat);
 
@@ -320,7 +622,7 @@ int mdl_add_bc(mdl_t *mdl, char *bc_key, int low_count, int *found){
 
     if (bflg_resize(mdl->absent_bc, mdl->all_bcs->n) < 0)
         return(-1);
-    if (bflg_resize(mdl->fix_flag, mdl->all_bcs->n) < 0)
+    if (bflg_resize(mdl->amb_flag, mdl->all_bcs->n) < 0)
         return(-1);
 
     // set to non-empty always: TODO: remove this since all are non-empty
@@ -338,16 +640,16 @@ int mdl_add_bc(mdl_t *mdl, char *bc_key, int low_count, int *found){
 
     // if not low count, set unfixed and add to test_bcs
     if ( !low_count ){
-        bflg_unset(mdl->fix_flag, bc_ix);
+        bflg_unset(mdl->amb_flag, bc_ix);
         if (add2str_map(mdl->test_bcs, bc_key, found) < 0)
             return(-1);
     } else {
-        bflg_set(mdl->fix_flag, bc_ix);
+        bflg_set(mdl->amb_flag, bc_ix);
     }
 
     // add bc_dat element
-    mdl_bc_t mdl_bc;
-    mdl_bc_init(&mdl_bc);
+    mdl_mlcl_bc_t mdl_bc;
+    mdl_mlcl_bc_init(&mdl_bc);
     mdl_bc.n_bc = 1;
     if (mv_insert(mdl_bc_v, &mdl->bc_dat, mdl_bc, bc_ix) < 0)
         return(-1);
@@ -359,42 +661,11 @@ int mdl_add_bc(mdl_t *mdl, char *bc_key, int low_count, int *found){
         return(-1);
 
     // allocate c_probs
-    uint32_t n_hs = low_count ? 1 : mdl->_nrow_hs;
+    uint32_t n_hs = low_count ? 1 : mdl->hs_ix->n_ixs;
     if (c_probs_set_hs(&mv_i(&mdl->c_probs, bc_ix), n_hs) < 0)
         return(-1);
 
     return(bc_ix);
-}
-
-void mdl_set_hs_indices(mdl_t *mdl, uint16_t n_samples){
-
-    // indices
-    mdl->_nrow_hs = 1 + n_samples + ( n_samples * (n_samples - 1) / 2);
-    mdl->hs_ix = calloc(3 * mdl->_nrow_hs, sizeof(int));
-    mdl->_nrow_hst = 1 + (2 * n_samples) + (3 * n_samples * (n_samples - 1) / 2);
-
-    int s1 = 0, s2 = 1;
-    uint32_t ixi = 0;
-    mdl->hs_ix[CMI(ixi, 0, mdl->_nrow_hs)] = 0;
-    mdl->hs_ix[CMI(ixi, 1, mdl->_nrow_hs)] = -1;
-    mdl->hs_ix[CMI(ixi, 2, mdl->_nrow_hs)] = -1;
-    ++ixi;
-
-    for (s1 = 0; s1 < n_samples; ++s1){
-        mdl->hs_ix[CMI(ixi, 0, mdl->_nrow_hs)] = 1;
-        mdl->hs_ix[CMI(ixi, 1, mdl->_nrow_hs)] = s1;
-        mdl->hs_ix[CMI(ixi, 2, mdl->_nrow_hs)] = -1;
-        ++ixi;
-    }
-    for (s1 = 0; s1 < n_samples - 1; ++s1){
-        for (s2 = s1 + 1; s2 < n_samples; ++s2){
-            mdl->hs_ix[CMI(ixi, 0, mdl->_nrow_hs)] = 2;
-            mdl->hs_ix[CMI(ixi, 1, mdl->_nrow_hs)] = s1;
-            mdl->hs_ix[CMI(ixi, 2, mdl->_nrow_hs)] = s2;
-            ++ixi;
-        }
-    }
-    assert(ixi == mdl->_nrow_hs);
 }
 
 int mdl_set_samples(mdl_t *mdl, obj_pars *objs){
@@ -421,15 +692,15 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
 
     uint32_t n_genes = 0;
     if (objs->anno)
-        n_genes = (uint32_t)objs->anno->gene_ix->n;
+        n_genes = objs->anno->gene_ix->n;
     uint16_t n_samples = 0;
     if (objs->vcf_hdr)
-        n_samples = (uint16_t)bcf_hdr_nsamples(objs->vcf_hdr);
+        n_samples = bcf_hdr_nsamples(objs->vcf_hdr);
     if (n_samples == 0)
-        return err_msg(-1, 0, "mdl_from_bam_data: no samples");
+        return err_msg(-1, 0, "mdl_from_bam_data: no samples in vcf header");
     uint32_t n_vars = 0;
     if (objs->gv)
-        n_vars = (uint32_t)mv_size(&objs->gv->vix2var);
+        n_vars = mv_size(&objs->gv->vix2var);
 
     mdl->mp->G = n_genes;
     mdl->mp->M = n_samples;
@@ -439,15 +710,15 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
     uint8_t flg_rd_w_vars = 1;
 
     // set indices
-    mdl_set_hs_indices(mdl, n_samples);
+    hs_ix_set(mdl->hs_ix, n_samples);
 
-    uint32_t c_thresh = (uint32_t)(objs->out_min);
+    uint32_t c_thresh = (objs->out_min);
     mdl->all_bcs = init_str_map();
     mdl->test_bcs = init_str_map();
 
-    mdl->fix_flag = calloc(1, sizeof(bflg_t));
+    mdl->amb_flag = calloc(1, sizeof(bflg_t));
     mdl->absent_bc = calloc(1, sizeof(bflg_t));
-    bflg_init_empty(mdl->fix_flag);
+    bflg_init_empty(mdl->amb_flag);
     bflg_init_empty(mdl->absent_bc);
 
     int bc_ix, found = 0;
@@ -474,7 +745,7 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
 
         int low_count = (bc_stat->atac_counts < c_thresh) && (bc_stat->rna_counts < c_thresh);
 
-        // if low count fixed, set barcode to empty
+        // if barcode is low count, set to empty
         if (low_count)
             bc_key = bc_empty;
 
@@ -483,14 +754,13 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         if (bc_ix < 0)
             return(-1);
 
-        mdl_bc_t *mdl_bc = &mv_i(&mdl->bc_dat, bc_ix);
+        mdl_mlcl_bc_t *mdl_bc = &mv_i(&mdl->bc_dat, bc_ix);
 
         // loop through RNA
         rna_mlc_bag_itr itr, *ritrp = &itr;
         rna_mlc_bag_itr_first(ritrp, &bc_data->rna_mlcs);
         for (; rna_mlc_bag_itr_alive(ritrp); rna_mlc_bag_itr_next(ritrp)) {
             rna_mol_t *mol = rna_mlc_bag_itr_val(ritrp);
-
 
             // skip RNA molecules with no data, and only consider unique feature
             size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
@@ -502,7 +772,7 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
             if (flg_rd_w_vars > 0 && mol_n_vars == 0)
                 continue;
 
-            // initialize mlcl to all 0
+            // initialize mlcl to 0
             mdl_mlcl_t mlcl;
             mdl_mlcl_init(&mlcl);
             mlcl.counts = 1;
@@ -552,7 +822,6 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
             if (flg_rd_w_vars > 0 && frag_n_vars == 0)
                 continue;
 
-            // always add peak since feature is always 1 or 0
             // initialize mlcl to all 0
             mdl_mlcl_t mlcl;
             mdl_mlcl_init(&mlcl);
@@ -598,13 +867,13 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
         mdl_bc_counts(&mv_i(&mdl->bc_dat, i), &rnac, &atacc);
     }
 
-
     FILE *fp = fopen("bc_test_counts.txt", "w");
     mdl_print_count(fp, mdl);
     fclose(fp);
 
     // set number of droplets
     mdl->mp->D = mv_size(&mdl->bc_dat);
+    mdl->mp->T = mdl->test_bcs->n;
 
     mdl->has_rna = bam_data->has_rna;
     mdl->has_atac = bam_data->has_atac;
@@ -618,20 +887,242 @@ int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
     return(0);
 }
 
+/*******************************************************************************
+ * index structs
+ ******************************************************************************/
+
+void par_ix_init(par_ix_t *par_ix) {
+    if (par_ix == NULL)
+        return;
+    par_ix->ix = -1;
+    par_ix->hd = -1;
+    par_ix->s1 = -1;
+    par_ix->s2 = -1;
+    int i;
+    for (i = 0; i < 3; ++i)
+        par_ix->t_ix[i] = -1;
+    par_ix->t_n = -1;
+}
+
+void hs_ix_init(hs_ix_t *hs_ix) {
+    if (hs_ix == NULL)
+        return;
+    hs_ix->n_sam = 0;
+    hs_ix->n_ixs = 0;
+    hs_ix->ix2pars = NULL;
+}
+
+void hs_ix_free(hs_ix_t *hs_ix) {
+    if (hs_ix == NULL)
+        return;
+    hs_ix->n_sam = 0;
+    hs_ix->n_ixs = 0;
+    free(hs_ix->ix2pars);
+    hs_ix->ix2pars = NULL;
+}
+
+void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples) {
+    if (hs_ix == NULL)
+        return;
+
+    // indices
+    hs_ix->n_sam = n_samples;
+    hs_ix->n_ixs = 1 + n_samples + ( n_samples * (n_samples - 1) / 2);
+    hs_ix->ix2pars = calloc(3 * hs_ix->n_ixs, sizeof(int));
+
+    int s1 = 0, s2 = 1;
+    uint32_t ixi = 0;
+    hs_ix->ix2pars[CMI(ixi, 0, hs_ix->n_ixs)] = 0;
+    hs_ix->ix2pars[CMI(ixi, 1, hs_ix->n_ixs)] = -1;
+    hs_ix->ix2pars[CMI(ixi, 2, hs_ix->n_ixs)] = -1;
+    ++ixi;
+
+    for (s1 = 0; s1 < n_samples; ++s1){
+        hs_ix->ix2pars[CMI(ixi, 0, hs_ix->n_ixs)] = 1;
+        hs_ix->ix2pars[CMI(ixi, 1, hs_ix->n_ixs)] = s1;
+        hs_ix->ix2pars[CMI(ixi, 2, hs_ix->n_ixs)] = -1;
+        ++ixi;
+    }
+    for (s1 = 0; s1 < n_samples - 1; ++s1){
+        for (s2 = s1 + 1; s2 < n_samples; ++s2){
+            hs_ix->ix2pars[CMI(ixi, 0, hs_ix->n_ixs)] = 2;
+            hs_ix->ix2pars[CMI(ixi, 1, hs_ix->n_ixs)] = s1;
+            hs_ix->ix2pars[CMI(ixi, 2, hs_ix->n_ixs)] = s2;
+            ++ixi;
+        }
+    }
+    assert(ixi == hs_ix->n_ixs);
+}
+
+int hs_ix_get_pars(hs_ix_t *hs_ix, int ix,
+        par_ix_t *par_ix) {
+
+    // -1 for if NA/invalid
+    par_ix->ix = ix;
+    par_ix->hd = hs_ix->ix2pars[CMI(ix, 0, hs_ix->n_ixs)];
+    par_ix->s1 = hs_ix->ix2pars[CMI(ix, 1, hs_ix->n_ixs)];
+    par_ix->s2 = hs_ix->ix2pars[CMI(ix, 2, hs_ix->n_ixs)];
+
+    switch (par_ix->hd) {
+        case 0:
+            par_ix->t_ix[0] = hs_ix->n_sam;
+            par_ix->t_ix[1] = -1;
+            par_ix->t_ix[2] = -1;
+            par_ix->t_n = 1;
+            break;
+        case 1:
+            par_ix->t_ix[0] = hs_ix->n_sam;
+            par_ix->t_ix[1] = par_ix->s1;
+            par_ix->t_ix[2] = -1;
+            par_ix->t_n = 2;
+            break;
+        case 2:
+            par_ix->t_ix[0] = hs_ix->n_sam;
+            par_ix->t_ix[1] = par_ix->s1;
+            par_ix->t_ix[2] = par_ix->s2;
+            par_ix->t_n = 3;
+            break;
+        default:
+            return err_msg(-1, 0, "hs_ix_get_pars: "
+                    "hd=%i is invalid, there is a bug", par_ix->hd);
+    }
+    return(0);
+}
+
+/*******************************************************************************
+ * mdl_pars_t
+ ******************************************************************************/
+
+int mdl_pars_pi_fix(mdl_pars_t *mp, uint16_t M){
+
+    uint32_t i, j;
+
+    // maximize pi (keep fixed uniform for now)
+    f_t pi_upd = 1.0 / M;
+    for (i = 0; i < M; ++i) mp->pi[i] = pi_upd;
+    f_t pi_sum = 0;
+    for (i = 0; i < M; ++i){
+        for (j = i+1; j < M; ++j){
+            pi_sum += (mp->pi[i] * mp->pi[j]);
+        }
+    }
+    mp->pi_d_sum = pi_sum;
+
+    return(0);
+}
+
+int mdl_pars_set_dat(mdl_pars_t *mp, obj_pars *objs, uint32_t D, uint32_t T,
+        uint32_t G, uint32_t V, uint32_t M, uint32_t n_ixs) {
+    if (mp == NULL || objs == NULL)
+        return err_msg(-1, 0, "mdl_pars_set: argument is null");
+
+    mp->D = D;
+    mp->T = T;
+    mp->G = G;
+    mp->V = V;
+    mp->M = M;
+
+    mp->lambda[0] = 0.9;
+    mp->lambda[1] = 0.09;
+    mp->lambda[2] = 0.01;
+
+
+    return 0;
+}
+
+int mdl_init_par_dat(mdl_t *mdl){
+
+    if (mdl_m_init(mdl, 1.0) < 0) return(-1);
+
+    uint32_t i;
+    uint32_t G = mdl->mp->G;
+    uint32_t D = mdl->all_bcs->n;
+    uint32_t rho_nrow = 3 * G;
+
+    uint32_t sig_nrow = 2;
+
+    mdl->mp->lambda[0] = 0.9;
+    mdl->mp->lambda[1] = 0.09;
+    mdl->mp->lambda[2] = 0.01;
+
+    // set pi as fixed
+    if (mdl_m_pi_fix(mdl) < 0) return(-1);
+
+    for (i = 0; i < D; ++i){
+        int fl;
+
+        // if no barcode
+        fl = bflg_get(mdl->absent_bc, i);
+        if (fl == 1) continue;
+
+        fl = bflg_get(mdl->amb_flag, i);
+        uint32_t c_ix = fl ? 0 : 1;
+
+        // c_probs
+        // TODO: set better initial values?
+        c_probs_t c_probs = mv_i(&mdl->c_probs, i);
+        uint32_t j, n_hs = fl ? 1 : mdl->_nrow_hs;
+        for (j = 0; j < n_hs; ++j){
+            c_probs.lp_hs[j] = j ? -INFINITY : 0;
+            c_probs.cp_hs[j] = j ? 0 : 1;
+        }
+
+        // bam data
+        mdl_mlcl_bc_t bc_dat = mv_i(&mdl->bc_dat, i);
+        kbtree_t(kb_mdl_mlcl) *mols = bc_dat.rna;
+        kbtree_t(kb_mdl_mlcl) *frags = bc_dat.atac;
+
+        // kbtree_t(kb_mdl_mlcl) *bt;
+
+        // loop over RNA
+        kbitr_t itr;
+        kb_itr_first(kb_mdl_mlcl, mols, &itr); 
+        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols, &itr)){
+            mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+            size_t f_ix;
+            for (f_ix = 0; f_ix < mv_size(&mlcl->feat_ixs); ++f_ix){
+                uint32_t row_ix = (uint32_t)(mv_i(&mlcl->feat_ixs, f_ix));
+                uint32_t rho_ix = CMI(row_ix, c_ix, rho_nrow);
+                mdl->mp->_rho_sum[rho_ix] += (f_t)mlcl->counts;
+            }
+        }
+
+        // loop over ATAC
+        kb_itr_first(kb_mdl_mlcl, frags, &itr); 
+        for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, frags, &itr)){
+            mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+            size_t f_ix;
+            assert(mv_size(&mlcl->feat_ixs) == 1);
+            for (f_ix = 0; f_ix < mv_size(&mlcl->feat_ixs); ++f_ix){
+                uint32_t pk = (uint32_t)(mv_i(&mlcl->feat_ixs, f_ix));
+                uint32_t six = CMI(pk, c_ix, sig_nrow);
+                mdl->mp->_sigma_sum[six] += (f_t)mlcl->counts;
+            }
+        }
+    }
+
+    mdl->mp->tau = TAU;
+
+    if (mdl_m_est(mdl) < 0) return(-1);
+
+    return(0);
+}
+
 // initialize the mdl_pars_t struct
 int mdl_init_mp(mdl_t *mdl, obj_pars *objs){
     uint32_t rho_nrow = mdl->mp->G * 3;
+    uint32_t n_ixs = mdl->hs_ix->n_ixs;
     // allocate mp members
     mdl->mp->pi = calloc(mdl->mp->M, sizeof(f_t));
-    mdl->mp->alpha_rna = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
-    mdl->mp->alpha_atac = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
+    mdl->mp->alpha_rna = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
+    mdl->mp->alpha_atac = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
     mdl->mp->rho = calloc(rho_nrow * 2, sizeof(f_t));
 
     mdl->mp->_pi_sum = calloc(mdl->mp->M, sizeof(f_t));
-    mdl->mp->_alpha_rna0_sum = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
-    mdl->mp->_alpha_rna1_sum = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
-    mdl->mp->_alpha_atac0_sum = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
-    mdl->mp->_alpha_atac1_sum = calloc(mdl->mp->D * mdl->_nrow_hs, sizeof(f_t));
+    mdl->mp->_alpha_rna0_sum = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
+    mdl->mp->_alpha_rna1_sum = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
+    mdl->mp->_alpha_atac0_sum = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
+    mdl->mp->_alpha_atac1_sum = calloc(mdl->mp->D * n_ixs, sizeof(f_t));
     mdl->mp->_rho_sum = calloc(rho_nrow * 2, sizeof(f_t));
     if (mdl->mp->_rho_sum == NULL)
         return err_msg(-1, 0, "mdl_pars_init_all: %s", strerror(errno));
@@ -663,41 +1154,6 @@ int mdl_init_mp(mdl_t *mdl, obj_pars *objs){
     return(1);
 }
 
-int mdl_get_hst(mdl_t *mdl, int hs_ix, int *hd, int *s1, int *s2, int t_ix[3], int *t_n){
-    // get (h,s,t) from index
-
-    uint16_t M = mdl->mp->M;
-
-    // -1 for if NA/invalid
-    *hd = mdl->hs_ix[CMI(hs_ix, 0, mdl->_nrow_hs)];
-    *s1 = mdl->hs_ix[CMI(hs_ix, 1, mdl->_nrow_hs)];
-    *s2 = mdl->hs_ix[CMI(hs_ix, 2, mdl->_nrow_hs)];
-
-    switch (*hd) {
-        case 0:
-            t_ix[0] = M;
-            t_ix[1] = -1;
-            t_ix[2] = -1;
-            *t_n = 1;
-            break;
-        case 1:
-            t_ix[0] = M;
-            t_ix[1] = *s1;
-            t_ix[2] = -1;
-            *t_n = 2;
-            break;
-        case 2:
-            t_ix[0] = M;
-            t_ix[1] = *s1;
-            t_ix[2] = *s2;
-            *t_n = 3;
-            break;
-        default:
-            return err_msg(-1, 0, "mdl_get_hst: hd=%i is invalid, there is a bug", hd);
-    }
-    return(0);
-}
-
 int mdl_initialize(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
     if (mdl_from_bam_data(mdl, bam_data, objs) < 0)
         return(-1);
@@ -716,22 +1172,22 @@ int mdl_initialize(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs){
  ******************************************************************************/
 // all functions output p(x), not log p(x)
 
-void pr_hd(mdl_t *mdl, int hd, f_t *prob){
-    *prob = mdl->mp->lambda[hd];
+void pr_hd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob){
+    *prob = mdl->mp->lambda[par_ix->hd];
 }
 
 // not in log
-void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob){
+void pr_sd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob) {
     f_t p_sd;
-    switch (hd) {
+    switch (par_ix->hd) {
         case 0:
             p_sd = 1;
             break;
         case 1:
-            p_sd = mdl->mp->pi[s1];
+            p_sd = mdl->mp->pi[par_ix->s1];
             break;
         case 2:
-            p_sd = (mdl->mp->pi[s1] * mdl->mp->pi[s2]) / mdl->mp->pi_d_sum;
+            p_sd = (mdl->mp->pi[par_ix->s1] * mdl->mp->pi[par_ix->s2]) / mdl->mp->pi_d_sum;
             break;
         default:
             p_sd = -1;
@@ -740,8 +1196,11 @@ void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob){
 }
 
 // not in log
-int pr_tdm(mdl_t *mdl, int rna, int bc_ix, int hd, int s_ix, int hs_ix, f_t *prob){
+int pr_tdm(mdl_t *mdl, int rna, int bc_ix, par_ix_t *par_ix, int t_ix, f_t *prob) {
 
+    int hs_ix = par_ix->ix;
+    int hd = par_ix->hd;
+    int s_ix = par_ix->t_ix[t_ix];
     uint16_t M = mdl->mp->M;
     uint8_t c_ix = s_ix == M ? 0 : 1; // 0 is ambient, 1 is cell
     // TODO: how many droplets are in alpha?
@@ -792,8 +1251,8 @@ int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
         div_t di = div((int)v, (int)V);
         assert(di.quot < 3);// TODO: remove after testing
         assert(di.rem < (int32_t)V);
-        uint8_t allele = (uint8_t)di.quot;
-        uint32_t v_ix = (uint32_t)di.rem;
+        uint8_t allele = di.quot;
+        uint32_t v_ix = di.rem;
         if (allele > 1) continue;
 
         f_t pp = pr_gamma_var(mdl->mp->gamma, v_ix, allele, s_ix,
@@ -809,8 +1268,11 @@ int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
     // gene probability
     assert( mv_size(&mlcl->feat_ixs) < 2);
-    for (i = 0; i < mv_size(&mlcl->feat_ixs); ++i){
-        uint32_t row_ix = (uint32_t)(mv_i(&mlcl->feat_ixs, i));
+    size_t n_feat = mv_size(&mlcl->feat_ixs);
+    if (n_feat > 1)
+        n_feat = 0;
+    for (i = 0; i < n_feat; ++i){
+        uint32_t row_ix = mv_i(&mlcl->feat_ixs, i);
         assert(row_ix < (rho_nrow)); // TODO: remove after testing
         uint32_t rho_ix = CMI(row_ix, c_ix, rho_nrow);
         assert(rho_ix < (rho_nrow * 2)); // TODO: remove after testing
@@ -874,6 +1336,33 @@ int p_atac(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
 }
 
+int p_f_v(mdl_t *mdl, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
+        f_t *p_tgb, f_t *psum) {
+    *psum = 0;
+
+    int t_im, ret;
+    for (t_im = 0; t_im < par_ix->t_n; ++t_im){
+        p_tgb[t_im] = 1;
+        int s_ix = par_ix->t_ix[t_im];
+        f_t p_t;
+        ret = pr_tdm(mdl, rna, bc_ix, par_ix, t_im, &p_t);
+        if (ret < 0)
+            return -1;
+        f_t p_fv = 0;
+        if (rna) {
+            ret = p_rna(mdl, mlcl, s_ix, &p_fv);
+        } else {
+            ret = p_atac(mdl, mlcl, s_ix, &p_fv);
+        }
+        if (ret < 0)
+            return(-1);
+        p_tgb[t_im] = p_t * p_fv;
+        assert(p_tgb[t_im] > 0 && p_tgb[t_im] <= 1);
+        *psum += p_tgb[t_im];
+    }
+    return 0;
+}
+
 /*******************************************************************************
  * Expectation
  ******************************************************************************/
@@ -890,15 +1379,17 @@ int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len){
     uint16_t M = mdl->mp->M, M1 = M + 1;
 
     // pre-calculate P(H_d, S_d)
-    f_t *lp_hs_v = calloc(mdl->_nrow_hs, sizeof(f_t));
+    par_ix_t par_ix;
+    par_ix_init(&par_ix);
+    uint32_t n_ixs = mdl->hs_ix->n_ixs;
+    f_t *lp_hs_v = calloc(n_ixs, sizeof(f_t));
     uint32_t hs_i = 0;
-    for (hs_i = 0; hs_i < mdl->_nrow_hs; ++hs_i){
-        int hd, s1, s2, t_ix[3], t_n;
-        if (mdl_get_hst(mdl, hs_i, &hd, &s1, &s2, t_ix, &t_n) < 0)
+    for (hs_i = 0; hs_i < n_ixs; ++hs_i){
+        if (hs_ix_get_pars(mdl->hs_ix, hs_i, &par_ix) < 0)
             return(-1);
         f_t p_hd = -1, p_sd = -1;
-        pr_hd(mdl, hd, &p_hd);
-        pr_sd(mdl, hd, s1, s2, &p_sd);
+        pr_hd(mdl, par_ix.hd, &p_hd);
+        pr_sd(mdl, par_ix.hd, par_ix.s1, par_ix.s2, &p_sd);
         lp_hs_v[hs_i] = log(p_hd) + log(p_sd);
     }
 
@@ -920,8 +1411,8 @@ int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len){
         if (fl == 1) continue;
 
         // if fixed, set Pr(empty) = 1
-        fl = bflg_get(mdl->fix_flag, bc_ix);
-        n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
+        fl = bflg_get(mdl->amb_flag, bc_ix);
+        n_hs = fl == 1 ? 1 : n_ixs;
 
         if (fl) ++fixed;
         else ++unfixed;
@@ -930,30 +1421,14 @@ int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len){
         c_probs_t *c_probs = &mv_i(&mdl->c_probs, bc_ix);
  
         // barcode count data
-        mdl_bc_t bc_dat = mv_i(&mdl->bc_dat, bc_ix);
-        // assert(bc_dat.n_bc == 1);
-
-        // pre-calculate P(T_dm) for this barcode
-        /*
-        h_i = 0;
-        if (pr_tdm(mdl, bc_ix, h_i, M, 0, p_tm_v[h_i] + M) < 0)
-            return(-1);
-        for (h_i = 1; h_i < 3; ++h_i){
-            for (t_i = 0; t_i < M1; ++t_i){
-                if (pr_tdm(mdl, bc_ix, h_i, t_i, p_tm_v[h_i] + t_i) < 0)
-                    return(-1);
-            }
-        }
-        */
+        mdl_mlcl_bc_t bc_dat = mv_i(&mdl->bc_dat, bc_ix);
 
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
             // get (h,s,t) from index
-           // hd: num nuc. in droplet; s1: sample 1; s2: sample 2; t: mol sample
-            int hd, s1, s2, t_ix[3], t_n;
-            if (mdl_get_hst(mdl, hs_ix, &hd, &s1, &s2, t_ix, &t_n) < 0)
+            if (hs_ix_get_pars(mdl->hs_ix, hs_ix, &par_ix) < 0)
                 return(-1);
 
-            // hold Pr(H_d, S_d, X_d)
+            // store Pr(H_d, S_d, X_d)
             f_t lp_htd = 0;
 
             // Pr(H_d, S_d | \lambda, \pi)
@@ -971,19 +1446,9 @@ int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len){
                 mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
 
                 f_t psum = 0, p_tgpb[3] = {1,1,1};
-                int t_im;
-                for (t_im = 0; t_im < t_n; ++t_im){
-                    int s_ix = t_ix[t_im];
-                    f_t p_t;
-                    if (pr_tdm(mdl, 1, bc_ix, hd, s_ix, hs_ix, &p_t) < 0)
-                        return -1;
-                    // f_t p_t = p_tm_v[hd][s_ix];
-                    f_t p_gv = 0;
-                    if (p_rna(mdl, mlcl, s_ix, &p_gv) < 0)
-                        return(-1);
-                    p_tgpb[t_im] = p_t * p_gv;
-                    psum += p_tgpb[t_im];
-                }
+                int pret = p_f_v(mdl, mlcl, 1, bc_ix, &par_ix, p_tgpb, &psum);
+                if (pret < 0)
+                    return -1;
                 // assert(mlcl->counts == 1);
                 assert(psum > 0 && psum <= 1);
                 lp_htd += mlcl->counts * log(psum);
@@ -995,18 +1460,9 @@ int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len){
                 mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
 
                 f_t psum = 0, p_tgpb[3] = {1,1,1};
-                int t_im;
-                for (t_im = 0; t_im < t_n; ++t_im){
-                    int s_ix = t_ix[t_im];
-                    f_t p_t;
-                    if (pr_tdm(mdl, 0, bc_ix, hd, s_ix, hs_ix, &p_t) < 0)
-                        return -1;
-                    f_t p_pv = 0;
-                    if (p_atac(mdl, mlcl, s_ix, &p_pv) < 0)
-                        return(-1);
-                    p_tgpb[t_im] = p_t * p_pv;
-                    psum += p_tgpb[t_im];
-                }
+                int pret = p_f_v(mdl, mlcl, 0, bc_ix, &par_ix, p_tgpb, &psum);
+                if (pret < 0)
+                    return -1;
                 // assert(mlcl->counts == 1);
                 assert(psum > 0 && psum <= 1);
                 lp_htd += mlcl->counts * log(psum);
@@ -1105,14 +1561,14 @@ int mdl_m_sum(mdl_t *mdl, int *ixs, uint32_t ix_len){
         if (fl == 1) continue;
 
         // if fixed, set Pr(empty) = 1
-        fl = bflg_get(mdl->fix_flag, bc_ix);
+        fl = bflg_get(mdl->amb_flag, bc_ix);
         n_hs = fl == 1 ? 1 : mdl->_nrow_hs;
 
         // conditional probabilities of (H_d,S_d)
         c_probs_t *c_probs = &mv_i(&mdl->c_probs, bc_ix);
  
         // barcode count data
-        mdl_bc_t bc_dat = mv_i(&mdl->bc_dat, bc_ix);
+        mdl_mlcl_bc_t bc_dat = mv_i(&mdl->bc_dat, bc_ix);
         // assert(bc_dat.n_bc == 1);
 
         // pre-calculate P(T_dm) for this barcode
@@ -1439,7 +1895,7 @@ int mdl_m_est(mdl_t *mdl){
     f_t a_total = 0, a_sum[2] = {0,0};
     for (i = 0; i < D; ++i){
         int aflg = bflg_get(mdl->absent_bc, i);
-        int eflg = bflg_get(mdl->fix_flag, i);
+        int eflg = bflg_get(mdl->amb_flag, i);
         for (j = 0; j < mdl->_nrow_hs; ++j) {
             // if fixed empty or absent, set all alpha = 1
             if (eflg == 1 || aflg == 1) {
@@ -1583,7 +2039,7 @@ int mdl_init_par_dat(mdl_t *mdl){
         fl = bflg_get(mdl->absent_bc, i);
         if (fl == 1) continue;
 
-        fl = bflg_get(mdl->fix_flag, i);
+        fl = bflg_get(mdl->amb_flag, i);
         uint32_t c_ix = fl ? 0 : 1;
 
         // c_probs
@@ -1596,7 +2052,7 @@ int mdl_init_par_dat(mdl_t *mdl){
         }
 
         // bam data
-        mdl_bc_t bc_dat = mv_i(&mdl->bc_dat, i);
+        mdl_mlcl_bc_t bc_dat = mv_i(&mdl->bc_dat, i);
         kbtree_t(kb_mdl_mlcl) *mols = bc_dat.rna;
         kbtree_t(kb_mdl_mlcl) *frags = bc_dat.atac;
 
@@ -1635,6 +2091,7 @@ int mdl_init_par_dat(mdl_t *mdl){
 
     return(0);
 }
+
 int mdl_init_par_uni(mdl_t *mdl){
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_init_par_uni: arguments are NULL");
@@ -1653,7 +2110,7 @@ int mdl_init_par_uni(mdl_t *mdl){
     // alpha
     for (i = 0; i < mdl->mp->D; ++i){
         int afl = bflg_get(mdl->absent_bc, i);
-        int efl = bflg_get(mdl->fix_flag, i);
+        int efl = bflg_get(mdl->amb_flag, i);
         for (j = 0; j < mdl->_nrow_hs; ++j) {
             if (afl || efl) {
                 mdl->mp->alpha_rna[CMI(i, j, mdl->mp->D)] = 1.0;
@@ -1706,7 +2163,7 @@ int mdl_init_par_rand(mdl_t *mdl, unsigned int seed){
     // alpha
     for (i = 0; i < mdl->mp->D; ++i){
         int afl = bflg_get(mdl->absent_bc, i);
-        int efl = bflg_get(mdl->fix_flag, i);
+        int efl = bflg_get(mdl->amb_flag, i);
         for (j = 0; j < mdl->_nrow_hs; ++j) {
             if (afl || efl) {
                 mdl->mp->alpha_rna[CMI(i, j, mdl->mp->D)] = 1.0;
@@ -1892,7 +2349,7 @@ int mdl_check_pars(mdl_t *mdl){
 
     // check c_probs
     for (i = 0; i < mdl->mp->D; ++i){
-        int fl = bflg_get(mdl->fix_flag, i);
+        int fl = bflg_get(mdl->amb_flag, i);
         uint32_t n_hs = fl ? 1 : mdl->_nrow_hs;
 
         // f_t c_sum = logsumexpd2(mdl->c_probs[i].cp_hs, n_hs);

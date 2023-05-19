@@ -33,7 +33,7 @@
 #define TAU 0.01
 
 /*******************************************************************************
- * hold bam barcode counts
+ * mdl_mlcl_t
  ******************************************************************************/
 
 typedef struct mdl_mlcl_t {
@@ -69,17 +69,69 @@ static inline int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2){
 // btree to hold molecules per barcode
 KBTREE_INIT(kb_mdl_mlcl, mdl_mlcl_t, mdl_mlcl_cmp);
 
-typedef struct mdl_bc_t {
+typedef struct {
     kbtree_t(kb_mdl_mlcl) *rna;
     kbtree_t(kb_mdl_mlcl) *atac;
     uint32_t n_bc; // number of barcodes
-} mdl_bc_t;
+} mdl_mlcl_bc_t;
 
-mv_declare(mdl_bc_v, mdl_bc_t);
+mv_declare(mdl_bc_v, mdl_mlcl_bc_t);
 
-/*********************
- * parameters
- *********************/
+void mdl_mlcl_init(mdl_mlcl_t *mlcl);
+void mdl_mlcl_free(mdl_mlcl_t *mlcl);
+
+/*******************************************************************************
+ * index structs
+ ******************************************************************************/
+
+/*@typedef struct par_ix_t
+ * Store the indexes for nuc. num, sample 1, sample 2, T_i, N_T
+ */
+typedef struct {
+    int ix; // index
+    int hd; // num. of nuclei
+    int s1; // sample 1 index
+    int s2; // sample 2 index
+    int t_ix[3]; // droplet source index
+    int t_n; // num. of droplet sources
+} par_ix_t;
+
+void par_ix_init(par_ix_t *par_ix);
+
+/*@typedef struct hst_ix
+ * Specify the possible indices for num of nuclei, sample 1, sample 2,
+ * and droplet source.
+ * H values are 0, 1, 2
+ * S values are 2 values specifying sources in droplet (0, ..., M-1, M)
+ * source values are 0, ..., M-1 for samples, and M for ambient. -1 for invalid
+ *
+ * @field hs_ix a (1 + M + M(M-1)/2) by 3 array. Columns correspond to
+ *  H, S1 (sample 1), and S2 (sample2)
+ */
+typedef struct {
+    uint16_t n_sam;
+    uint32_t n_ixs;
+    int *ix2pars; // (1 + M + M(M-1)/2) by 3 array, columns are H, S (sample 1), S (sample 2)
+              // Array is stored in column major vector
+} hs_ix_t;
+
+void hs_ix_init(hs_ix_t *hs_ix);
+void hs_ix_free(hs_ix_t *hs_ix);
+void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples);
+
+/* hs index to parameters
+ * Given an hs index, return num nuclei, sample 1, and sample 2
+ * t_ix stores the possible sources in the droplet
+ * t_n stores the number of possible sources in droplet
+ *
+ * @return 0 if successfull, -1 on error
+ */
+int hs_ix_get_pars(hs_ix_t *hs_ix, int ix,
+        par_ix_t *par_ix);
+
+/*******************************************************************************
+ * mdl_pars_t
+ ******************************************************************************/
 
 /*! @typedef mdl_pars_t
  * All matrices are column major indexed.
@@ -87,6 +139,7 @@ mv_declare(mdl_bc_v, mdl_bc_t);
 typedef struct {
     // Parameters
     uint32_t D; // number of droplets
+    uint32_t T; // number of test droplets
     uint32_t G; // number of genes
     uint32_t V; // number of variants
     uint16_t M; // number of samples
@@ -134,7 +187,6 @@ typedef struct {
 } mdl_fit_t;
 
 /*! @typedef c_probs_t
- * These are log probabilities
  * p(x) is P(X | D) = \sum_Z P(X, Z | D).
  * cp_hs is length 1 + M + M(M-1)/2
  */
@@ -146,17 +198,41 @@ typedef struct {
 
 mv_declare(mdl_cp_v, c_probs_t);
 
+typedef struct {
+    // do not add directly to str_map, use provided functions mdl_bc_add and mdl_set_samples
+    str_map *all_bcs; // barcode ID strings of all barcodes in the data. Don't add
+    str_map *test_bcs; // barcodes to calculate llk (those that are unfixed in amb_flag)
+
+    // order of barcodes in flags is the order of barcodes in all_bcs
+    // all length of all_bcs
+    bflg_t *amb_flag; // 0: unfixed, 1: fixed (ambient)
+    bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
+
+    // store the barcode counts, order corresponds to all_bcs
+    mv_t(mdl_bc_v) bc_mlcl;
+
+    // store the droplet log conditional probabilities for each (H,S)
+    // order corresponds to all_bcs
+    int n_ix;
+    f_t *lp_hs; // log P(H_d, S_d | Theta) D x n_ix
+
+    // store the droplet log probabilities
+    // order corresponds to all_bcs
+    f_t *p_x; // P(X_d | Theta) length D
+        
+} mdl_bc_dat_t;
+
 /*! @typedef mdl_t
  */
 typedef struct {
     // do not add directly to str_map, use provided functions mdl_bc_add and mdl_set_samples
     str_map *all_bcs; // barcode ID strings of all barcodes in the data. Don't add
-    str_map *test_bcs; // barcodes to calculate llk (those that are unfixed in fix_flag)
+    str_map *test_bcs; // barcodes to calculate llk (those that are unfixed in amb_flag)
     str_map *samples;
 
     // order of barcodes in flags is the order of barcodes in all_bcs
     // all length of all_bcs
-    bflg_t *fix_flag; // 0: unfixed, 1: fixed (ambient)
+    bflg_t *amb_flag; // 0: unfixed, 1: fixed (ambient)
     bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
 
     // order corresponds to all_bcs
@@ -166,8 +242,7 @@ typedef struct {
     // H values are 0, 1, 2
     // S values are 2 values specifying sources in droplet (0, ..., M-1, M)
     // source values are 0, ..., M-1 for samples, and M for ambient. -1 for invalid
-    uint32_t _nrow_hs, _nrow_hst;
-    int *hs_ix; // (1 + M + M(M-1)/2) by 3 array, columns are H, S (sample 1), S (sample 2)
+    hs_ix_t *hs_ix;
 
     f_t eps;
     uint16_t max_iter;
@@ -182,18 +257,11 @@ typedef struct {
 } mdl_t;
 
 /*******************************************************************************
- * mdl_mlcl_t
+ * mdl_mlcl_bc_t
  ******************************************************************************/
 
-void mdl_mlcl_init(mdl_mlcl_t *mlcl);
-void mdl_mlcl_free(mdl_mlcl_t *mlcl);
-
-/*******************************************************************************
- * mdl_bc_t
- ******************************************************************************/
-
-int mdl_bc_init(mdl_bc_t *mdl_bc);
-void mdl_bc_free(mdl_bc_t *mdl_bc);
+int mdl_mlcl_bc_init(mdl_mlcl_bc_t *mdl_bc);
+void mdl_mlcl_bc_free(mdl_mlcl_bc_t *mdl_bc);
 
 /*******************************************************************************
  * mdl_pars_t
@@ -219,6 +287,10 @@ int c_probs_set_hs(c_probs_t *c_probs, uint32_t n_hs);
 void c_probs_free(c_probs_t *c_probs);
 
 /*******************************************************************************
+ * mdl_fit_t
+ ******************************************************************************/
+
+/*******************************************************************************
  * mdl_t
  ******************************************************************************/
 
@@ -227,12 +299,10 @@ mdl_t *mdl_alloc();
 void mdl_dstry(mdl_t *m);
 
 int mdl_add_bc(mdl_t *mdl, char *bc_key, int low_count, int *found);
-void mdl_set_hs_indices(mdl_t *mdl, uint16_t n_samples);
-int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
 int mdl_set_samples(mdl_t *mdl, obj_pars *objs);
 int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
+
 int mdl_init_mp(mdl_t *mdl, obj_pars *objs);
-int mdl_get_hst(mdl_t *mdl, int hs_ix, int *hd, int *s1, int *s2, int t_ix[3], int *t_n);
 int mdl_initialize(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
 
 /*******************************************************************************
@@ -263,15 +333,27 @@ static inline f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele,
 }
 
 // Pr(H_d)
-void pr_hd(mdl_t *mdl, int hd, f_t *prob);
+void pr_hd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
-void pr_sd(mdl_t *mdl, int hd, int s1, int s2, f_t *prob);
+void pr_sd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob);
 // Pr(T_d)
-int pr_tdm(mdl_t *mdl, int rna, int bc_ix, int hd, int s_ix, int hs_ix, f_t *prob);
+int pr_tdm(mdl_t *mdl, int rna, int bc_ix, par_ix_t *par_ix, int t_ix, f_t *prob);
 // Pr(G_dm, B_dm)
 int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 // Pr(P_dm, B_dm)
 int p_atac(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
+
+// Pr(T_dm, G_dm, B_dm)
+int p_t_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int bc_ix, par_ix_t *par_ix, f_t *p_tgb, f_t *psum);
+int p_t_rna(mdl_t *mdl);
+
+/* Calculate Pr(T_dm, F_dm, B_dm) = \sum_t=1^tn Pr(T_dm = t, F_dm, B_dm)
+ * where F_dm is gene or peak probability.
+ * Set rna != 0 if mlcl is RNA, and rna = 0 if mlcl is ATAC
+ * @return 0 on success, -1 on error.
+ */
+int p_f_v(mdl_t *mdl, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
+        f_t *p_tgb, f_t *psum);
 
 /*******************************************************************************
  * Expectation
