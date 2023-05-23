@@ -216,7 +216,7 @@ int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar){
         }
     } else {
         free(rtmp);
-        return err_msg(-1, 0, "atac_rd_pair_add_read: trying to add read to full pair "
+        return err_msg(0, 1, "atac_rd_pair_add_read: trying to add read to full pair "
                 "(query name was found a third time)");
     }
     ++rp->s;

@@ -1,6 +1,6 @@
 
 CC = gcc
-# CFLAGS = -g -O1 -Wall -Wextra -Wfloat-equal -Wno-unused-function -fsanitize=address -fno-omit-frame-pointer
+# CFLAGS = -g -O1 -Wall -Wextra -Wfloat-equal -Wno-unused-function -fsanitize=address -Wshadow -fno-omit-frame-pointer
 CFLAGS = -g -O2 -Wall -Wextra -Wfloat-equal -Wno-unused-function -Wpointer-arith -Wshadow
 
 all : ambimux

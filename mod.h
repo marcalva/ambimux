@@ -32,6 +32,8 @@
 
 #define TAU 0.01
 
+#define frac_valid(x) ((x) >= 0 && (x) <= 1)
+
 /*******************************************************************************
  * mdl_mlcl_t
  ******************************************************************************/
@@ -116,7 +118,9 @@ typedef struct {
 } hs_ix_t;
 
 void hs_ix_init(hs_ix_t *hs_ix);
+hs_ix_t *hs_ix_alloc();
 void hs_ix_free(hs_ix_t *hs_ix);
+void hs_ix_dstry(hs_ix_t *hs_ix);
 void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples);
 
 /* hs index to parameters
@@ -143,6 +147,7 @@ typedef struct {
     uint32_t G; // number of genes
     uint32_t V; // number of variants
     uint16_t M; // number of samples
+    uint32_t n_ix;
 
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
@@ -158,7 +163,6 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
-    f_t _pi_d_sum;
     f_t *_alpha_rna0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
     f_t *_alpha_rna1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
     f_t *_alpha_atac0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
@@ -169,34 +173,9 @@ typedef struct {
     f_t _par_diff;
 } mdl_pars_t;
 
-/*! @typedef mdl_fit_t
- * The indexes are the hs_ix indices
- */
-typedef struct {
-    f_t *bc_llks; // BC x ix array. The indices follow hs_ix
-
-    // All vectors are length BC
-    f_t *best_sng_llk;
-    f_t *sec_sng_llk;
-    f_t *best_dbl_llk;
-    uint32_t *best_sng_ix;
-    uint32_t *sec_sng_ix;
-    uint32_t *best_dbl_ix;
-
-    f_t *pp; // BC x 3 array; posterior probs for empty, singlet, doublet
-} mdl_fit_t;
-
-/*! @typedef c_probs_t
- * p(x) is P(X | D) = \sum_Z P(X, Z | D).
- * cp_hs is length 1 + M + M(M-1)/2
- */
-typedef struct {
-    f_t p_x; // P(X_d | Theta) data probability
-    f_t *lp_hs; // log P(H_d, S_d | Theta) length: _nrow_hs
-    f_t *cp_hs; // P(H_d, S_d | X_d, Theta) length: _nrow_hs
-} c_probs_t;
-
-mv_declare(mdl_cp_v, c_probs_t);
+/*******************************************************************************
+ * mdl_bc_dat_t
+ ******************************************************************************/
 
 typedef struct {
     // do not add directly to str_map, use provided functions mdl_bc_add and mdl_set_samples
@@ -209,40 +188,39 @@ typedef struct {
     bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
 
     // store the barcode counts, order corresponds to all_bcs
+    uint32_t G; // num of genes
+    uint32_t V; // num of variants
     mv_t(mdl_bc_v) bc_mlcl;
 
-    // store the droplet log conditional probabilities for each (H,S)
-    // order corresponds to all_bcs
-    int n_ix;
-    f_t *lp_hs; // log P(H_d, S_d | Theta) D x n_ix
-
-    // store the droplet log probabilities
-    // order corresponds to all_bcs
-    f_t *p_x; // P(X_d | Theta) length D
-        
 } mdl_bc_dat_t;
+
+/*******************************************************************************
+ * mdl_t
+ ******************************************************************************/
 
 /*! @typedef mdl_t
  */
 typedef struct {
-    // do not add directly to str_map, use provided functions mdl_bc_add and mdl_set_samples
-    str_map *all_bcs; // barcode ID strings of all barcodes in the data. Don't add
-    str_map *test_bcs; // barcodes to calculate llk (those that are unfixed in amb_flag)
+    // sample IDs
     str_map *samples;
-
-    // order of barcodes in flags is the order of barcodes in all_bcs
-    // all length of all_bcs
-    bflg_t *amb_flag; // 0: unfixed, 1: fixed (ambient)
-    bflg_t *absent_bc; // 0: unfixed, 1: fixed (absent)
-
-    // order corresponds to all_bcs
-    mv_t(mdl_bc_v) bc_dat;
-    mv_t(mdl_cp_v) c_probs;
 
     // H values are 0, 1, 2
     // S values are 2 values specifying sources in droplet (0, ..., M-1, M)
     // source values are 0, ..., M-1 for samples, and M for ambient. -1 for invalid
     hs_ix_t *hs_ix;
+
+    // store the droplet log conditional probabilities for each (H,S)
+    // order corresponds to all_bcs
+    int n_ix;
+    f_t *lp_hs; // log P(H_d, S_d , X_d| Theta) D x n_ix (column-major order)
+    f_t *p_x; // P(X_d | Theta) length D
+
+    // store best samples and posterior probs
+    // order corresponds to test_bcs
+    uint32_t *best_sng_ix;
+    uint32_t *sec_sng_ix;
+    uint32_t *best_dbl_ix;
+    f_t *pp; // BC x 3 array; posterior probs for empty, singlet, doublet
 
     f_t eps;
     uint16_t max_iter;
@@ -252,8 +230,9 @@ typedef struct {
 
     uint16_t threads;
 
+    mdl_bc_dat_t *mdl_bc_dat;
+
     mdl_pars_t *mp;
-    mdl_fit_t *mf;
 } mdl_t;
 
 /*******************************************************************************
@@ -267,28 +246,67 @@ void mdl_mlcl_bc_free(mdl_mlcl_bc_t *mdl_bc);
  * mdl_pars_t
  ******************************************************************************/
 
-mdl_pars_t *mdl_pars_init();
-void destroy_mdl_pars(mdl_pars_t *gp);
+int mdl_pars_init(mdl_pars_t *mp);
+mdl_pars_t *mdl_pars_alloc();
+void mdl_pars_free(mdl_pars_t *mp);
+void mdl_pars_dstry(mdl_pars_t *mp);
+
+/* Set the parameter number fields (D, T, G, V, M).
+ * Allocate memory for the parameter fields in @p mp.
+ * Allocate memory for the _sum fields in @p mp.
+ */
+int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
+        uint32_t G, uint32_t V, uint16_t M);
+
+/* Set the _sum variables in the mdl_pars_t object to psc value.
+ */
+int mdl_pars_reset_sums(mdl_pars_t *mp, f_t psc);
+
+/* Set pi value to uniform across samples/indices
+ */
+int mdl_pars_pi_fix(mdl_pars_t *mp);
+
+/* Add gamma parameters
+ *
+ * The gamma parameters are the genotypes (probabilities of alternate allele).
+ * Adds gamma (M+1) rows and V columns stored in an array in column major 
+ * format.
+ * 
+ * @return 0 if successful, -1 on error.
+ */
+int mdl_pars_add_gamma(mdl_pars_t *gp, float **a, int nv, int ns);
+
+/* Set the ambient gamma parameter as a linear function of the 
+ * sample proportions from parameter pi
+ * @return 0 if successful, -1 on error.
+ */
+int mdl_pars_set_gamma_amb(mdl_pars_t *mp);
+
+/* Initialize parameters from data
+ *
+ * Initializes the parameters in @mp from the data in @p bd.
+ */
+int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
+        uint16_t n_samples);
+
+/* Check validity of parameters
+ * @return -1 if any invalid, 0 if OK
+ */
+int mdl_pars_check(mdl_pars_t *mp);
 
 /*******************************************************************************
- * mdl_fit_t
+ * mdl_bc_dat
  ******************************************************************************/
 
-/* initialize/destroy mdl_fit_t */
-mdl_fit_t *init_mdl_fit();
-void destroy_mdl_fit(mdl_fit_t *mf);
+int mdl_bc_dat_init(mdl_bc_dat_t *mdl_bc_dat);
+mdl_bc_dat_t *mdl_bc_dat_alloc();
+void mdl_bc_dat_free(mdl_bc_dat_t *mdl_bc_dat);
+void mdl_bc_dat_dstry(mdl_bc_dat_t *mdl_bc_dat);
 
-/*******************************************************************************
- * c_probs_t
- ******************************************************************************/
+int mdl_bc_dat_add_bc(mdl_bc_dat_t *mdl_bc_dat, char *bc_key, int absent, int ambient,
+        int dup_ok, int *found);
 
-int c_probs_init(c_probs_t *c_probs);
-int c_probs_set_hs(c_probs_t *c_probs, uint32_t n_hs);
-void c_probs_free(c_probs_t *c_probs);
-
-/*******************************************************************************
- * mdl_fit_t
- ******************************************************************************/
+int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars *objs);
 
 /*******************************************************************************
  * mdl_t
@@ -298,107 +316,56 @@ void c_probs_free(c_probs_t *c_probs);
 mdl_t *mdl_alloc();
 void mdl_dstry(mdl_t *m);
 
-int mdl_add_bc(mdl_t *mdl, char *bc_key, int low_count, int *found);
-int mdl_set_samples(mdl_t *mdl, obj_pars *objs);
-int mdl_from_bam_data(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
-
-int mdl_init_mp(mdl_t *mdl, obj_pars *objs);
-int mdl_initialize(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
+int mdl_set_samples(mdl_t *mdl, bcf_hdr_t *vcf_hdr);
+int mdl_set_hs_ix(mdl_t *mdl);
+int mdl_set_rna_atac(mdl_t *mdl, uint8_t has_rna, uint8_t has_atac);
+int mdl_alloc_probs(mdl_t *mdl);
 
 /*******************************************************************************
  * Probability functions
  ******************************************************************************/
 
-// get rho
-static inline f_t pr_rho_gene(f_t *rho, seq_gene_t seq_gene, uint32_t col, uint32_t G, uint32_t rho_nrow){
-    uint32_t g_ix = (uint32_t)seq_gene.gene_id;
-    uint32_t spl = (uint32_t)seq_gene.splice;
-    uint32_t f_ix = g_ix + (spl * G);
-    f_t p_gdm = rho[CMI(f_ix, col, rho_nrow)];
-    return(p_gdm);
-}
-
-// get gamma
-static inline f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele, 
-        uint32_t s_ix, uint32_t gamma_nrow, f_t tau){
-    if (allele > 1) return(1.0); // return 1 if allele is missing
-    uint32_t eix = CMI(s_ix, v_ix, gamma_nrow);
-    f_t ap = gamma[eix];
-    if (ap < 0) return 1.0; // if allele is missing
-    if (allele == 0) ap = 1.0 - ap;
-    f_t p_be0 = (1.0 - tau) * ap;
-    f_t p_be1 = tau * 0.25;
-    f_t p_bdm = p_be0 + p_be1;
-    return(p_bdm);
-}
-
 // Pr(H_d)
-void pr_hd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob);
+void pr_hd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
-void pr_sd(mdl_t *mdl, par_ix_t *par_ix, f_t *prob);
+void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(T_d)
-int pr_tdm(mdl_t *mdl, int rna, int bc_ix, par_ix_t *par_ix, int t_ix, f_t *prob);
+int pr_tdm(mdl_pars_t *mp, int rna, int bc_ix, par_ix_t *par_ix, int t_ix, f_t *prob);
+// get rho
+f_t pr_rho_gene(f_t *rho, seq_gene_t seq_gene, uint32_t col,
+        uint32_t G, uint32_t rho_nrow);
+// get gamma
+f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele, 
+        uint32_t s_ix, uint32_t gamma_nrow, f_t tau);
 // Pr(G_dm, B_dm)
-int p_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
+int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 // Pr(P_dm, B_dm)
-int p_atac(mdl_t *mdl, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
-
-// Pr(T_dm, G_dm, B_dm)
-int p_t_rna(mdl_t *mdl, mdl_mlcl_t *mlcl, int bc_ix, par_ix_t *par_ix, f_t *p_tgb, f_t *psum);
-int p_t_rna(mdl_t *mdl);
+int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 
 /* Calculate Pr(T_dm, F_dm, B_dm) = \sum_t=1^tn Pr(T_dm = t, F_dm, B_dm)
  * where F_dm is gene or peak probability.
  * Set rna != 0 if mlcl is RNA, and rna = 0 if mlcl is ATAC
  * @return 0 on success, -1 on error.
  */
-int p_f_v(mdl_t *mdl, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
+int p_f_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
         f_t *p_tgb, f_t *psum);
 
 /*******************************************************************************
  * Expectation
  ******************************************************************************/
 
+/* this calculates the conditional probabilities.
+ */
 int mdl_e_hs(mdl_t *mdl, int *ixs, uint32_t ix_len);
 
 /*******************************************************************************
  * Maximization
  ******************************************************************************/
 
-/* Maximize parameters for model.
- *
- * @param ixs Barcode indices to run maximization over. Currently just use all
- *  barcodes.
- * @param ix_len Length of ixs vector.
- * @param prior Prior for each element of the maximization.
- */
-int mdl_m_init(mdl_t *mdl, f_t prior);
 int mdl_m_sum(mdl_t *mdl, int *ixs, uint32_t ix_len);
-int mdl_m_pi_fix(mdl_t *mdl);
-
-/* Add gamma parameters
- *
- * The gamma parameters are the genotypes (probabilities of alternate allele).
- * Adds gamma (M+1) rows and V columns stored in an array in column major 
- * format.
- * 
- * @return 0 if successful, 1 on error.
- * 
- */
-int mdl_pars_add_gamma(mdl_pars_t *gp, float **a, int nv, int ns);
-
-int mdl_m_set_gamma_amb(mdl_t *mdl);
-
 int mdl_m_est(mdl_t *mdl);
-int mdl_delta(mdl_t *mdl, f_t *delta);
-
-/*******************************************************************************
- * parameter initialization
- ******************************************************************************/
-
-int mdl_init_par_dat(mdl_t *mdl);
-int mdl_init_par_uni(mdl_t *mdl);
-int mdl_init_par_rand(mdl_t *mdl, unsigned int seed);
+int mdl_delta_pars(mdl_t *mdl, f_t *delta);
+int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
 
 /*******************************************************************************
  * EM functions
@@ -410,8 +377,6 @@ int mdl_em(mdl_t *mdl, bam_data_t *bam_data, obj_pars *objs);
 
 int mdl_data_llk(mdl_t *mdl, f_t *llk);
 
-int mdl_check_pars(mdl_t *mdl);
-
 int mdl_get_llk(mdl_t *mdl);
 
 /* main function to fit model.
@@ -420,7 +385,6 @@ int mdl_get_llk(mdl_t *mdl);
  *
  */
 int mdl_fit(bam_data_t *bam_dat, obj_pars *objs);
-int fit_mdl_pars(bam_data_t *bam_dat, obj_pars *objs);
 
 char **mdl_s_names(mdl_t *mdl);
 
