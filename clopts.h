@@ -46,6 +46,7 @@ typedef struct {
     int out_min;
     int min_phred;
     int max_nh;
+    int k;
     char rna_bc_tag[3];
     char atac_bc_tag[3];
     char rna_umi_tag[3];
@@ -109,6 +110,7 @@ typedef struct {
     // options
     int out_min;
     int max_nh;
+    int k;
     char rna_bc_tag[3];
     char atac_bc_tag[3];
     char rna_umi_tag[3];

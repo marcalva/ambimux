@@ -27,6 +27,7 @@ cl_opts *init_cl_opts(){
     opts->out_min = 100;
     opts->min_phred = 30;
     opts->max_nh = 0;
+    opts->k = 1;
 
     strcpy(opts->rna_bc_tag, "CB");
     strcpy(opts->atac_bc_tag, "CB");
@@ -104,6 +105,7 @@ obj_pars *init_obj_pars(){
 
     p->out_min = 100;
     p->max_nh = 0;
+    p->k = 1;
 
     strcpy(p->rna_bc_tag, "CB");
     strcpy(p->atac_bc_tag, "CB");
@@ -329,6 +331,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->seed = opts->seed;
     objs->eps = opts->eps;
     objs->alpha_max = opts->alpha_max;
+    objs->k = opts->k;
     objs->max_iter = opts->max_iter;
     objs->threads = opts->threads;
     if (opts->out_fn) objs->out_fn = strdup(opts->out_fn);

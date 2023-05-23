@@ -94,6 +94,7 @@ typedef struct {
     int hd; // num. of nuclei
     int s1; // sample 1 index
     int s2; // sample 2 index
+    int k; // cell type index
     int t_ix[3]; // droplet source index
     int t_n; // num. of droplet sources
 } par_ix_t;
@@ -112,9 +113,10 @@ void par_ix_init(par_ix_t *par_ix);
  */
 typedef struct {
     uint16_t n_sam;
+    uint16_t k;
     uint32_t n_ixs;
     int *ix2pars; // (1 + M + M(M-1)/2) by 3 array, columns are H, S (sample 1), S (sample 2)
-              // Array is stored in column major vector
+                  // Array is stored in column major vector
 } hs_ix_t;
 
 void hs_ix_init(hs_ix_t *hs_ix);
@@ -147,11 +149,13 @@ typedef struct {
     uint32_t G; // number of genes
     uint32_t V; // number of variants
     uint16_t M; // number of samples
+    uint16_t K; // number of cell types
     uint32_t n_ix;
 
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
+    f_t *kappa; // cell type probability (K x 1 array)
     f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
     f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
     f_t *rho; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
@@ -163,6 +167,7 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
+    f_t *_kappa_sum; // cell type prop (K x 1 array)
     f_t *_alpha_rna0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
     f_t *_alpha_rna1_sum; // CM droplet cell prob. (D x _nrow_hs array) rows droplets
     f_t *_alpha_atac0_sum; // CM droplet ambient prob. (D x _nrow_hs array) rows droplets
@@ -211,8 +216,8 @@ typedef struct {
 
     // store the droplet log conditional probabilities for each (H,S)
     // order corresponds to all_bcs
-    int n_ix;
-    f_t *lp_hs; // log P(H_d, S_d , X_d| Theta) D x n_ix (column-major order)
+    int n_ix, k;
+    f_t *lp_hsk; // log P(H_d, S_d , X_d, K_d| Theta) D x (n_ix*k) (column-major order)
     f_t *p_x; // P(X_d | Theta) length D
 
     // store best samples and posterior probs
@@ -256,7 +261,7 @@ void mdl_pars_dstry(mdl_pars_t *mp);
  * Allocate memory for the _sum fields in @p mp.
  */
 int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
-        uint32_t G, uint32_t V, uint16_t M);
+        uint32_t G, uint32_t V, uint16_t M, uint16_t K);
 
 /* Set the _sum variables in the mdl_pars_t object to psc value.
  */
@@ -287,7 +292,7 @@ int mdl_pars_set_gamma_amb(mdl_pars_t *mp);
  * Initializes the parameters in @mp from the data in @p bd.
  */
 int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
-        uint16_t n_samples);
+        uint16_t n_samples, uint16_t K);
 
 /* Check validity of parameters
  * @return -1 if any invalid, 0 if OK
@@ -318,6 +323,7 @@ void mdl_dstry(mdl_t *m);
 
 int mdl_set_samples(mdl_t *mdl, bcf_hdr_t *vcf_hdr);
 int mdl_set_hs_ix(mdl_t *mdl);
+int mdl_set_k(mdl_t *mdl, int k);
 int mdl_set_rna_atac(mdl_t *mdl, uint8_t has_rna, uint8_t has_atac);
 int mdl_alloc_probs(mdl_t *mdl);
 
@@ -329,6 +335,8 @@ int mdl_alloc_probs(mdl_t *mdl);
 void pr_hd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
+// Pr(K_d)
+int pr_kd(mdl_pars_t *mp, uint16_t k, f_t *prob);
 // Pr(T_d)
 int pr_tdm(mdl_pars_t *mp, int rna, int bc_ix, par_ix_t *par_ix, int t_ix, f_t *prob);
 // get rho
@@ -338,7 +346,7 @@ f_t pr_rho_gene(f_t *rho, seq_gene_t seq_gene, uint32_t col,
 f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele, 
         uint32_t s_ix, uint32_t gamma_nrow, f_t tau);
 // Pr(G_dm, B_dm)
-int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
+int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, uint16_t k, f_t *prob);
 // Pr(P_dm, B_dm)
 int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 
@@ -348,7 +356,7 @@ int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
  * @return 0 on success, -1 on error.
  */
 int p_f_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
-        f_t *p_tgb, f_t *psum);
+        uint16_t k, f_t *p_tgb, f_t *psum);
 
 /*******************************************************************************
  * Expectation
