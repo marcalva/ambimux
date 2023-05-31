@@ -21,7 +21,7 @@
 
 typedef struct {
     int ix;
-    uint32_t counts[MAX_ALLELE];
+    float counts[MAX_ALLELE];
 } cnt_node_t;
 
 #define cnt_node_cmp(p, q) ((p).ix - (q).ix)
@@ -39,6 +39,9 @@ typedef struct  bc_counts_t {
 } bc_counts_t;
 
 KHASH_INIT(kh_bc_cnode, char *, bc_counts_t *, 1, kh_str_hash_func, kh_str_hash_equal);
+
+bc_counts_t *bc_counts_init();
+void bc_counts_dstry(bc_counts_t *bcc);
 
 /*******************************************************************************
  * BAM counts
@@ -77,14 +80,15 @@ int bam_counts_add_peaks(bam_counts_t *agc, iregs_t *pks);
 
 int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data);
 
-int write_num(BGZF *fp, int n, char *c, char **intstrp, size_t *intstrp_m);
+int write_num(BGZF *fp, float n, char **intstrp, size_t *intstrp_m,
+        int write_float, int decp);
 
-int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn);
-int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn);
-int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn);
-int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn);
-int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn);
+int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn, int write_float);
+int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn, int write_float);
+int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn, int write_float);
+int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn, int write_float);
+int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn, int write_float);
 
-int mtx_write_hdr(BGZF *fp, char *len1, char *len2, char *len3, char *delim);
+int mtx_write_hdr(BGZF *fp, char *len1, char *len2, char *len3, char *delim, int write_float);
 
 #endif // R_COUNT_H

@@ -65,6 +65,8 @@ static void usage(FILE *fp, int exit_status){
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-5].\n"
             "  -K, --n-clust       Number of cell types [1].\n"
+            "  -A, --alpha-all     Estimate alpha with all reads. The default is to use only reads.\n"
+            "                      that overlap variants.\n"
             "  -j, --max-alpha     Max value alpha can take [1].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [20].\n"
             "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
@@ -108,6 +110,7 @@ int main(int argc, char *argv[]){
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
         {"n-clust", required_argument, NULL, 'K'},
+        {"alpha-all", no_argument, NULL, 'A'},
         {"max-alpha", required_argument, NULL, 'j'},
         {"max-iter", required_argument, NULL, 'q'},
         {"seed", required_argument, NULL, 'd'},
@@ -131,7 +134,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:K:j:q:d:T:V", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:K:Aj:q:d:T:V", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -314,6 +317,9 @@ int main(int argc, char *argv[]){
                           ret = err_msg(EXIT_FAILURE, 0, "--n-clust must be > 0"); 
                           goto cleanup;
                       }
+                      break;
+            case 'A':
+                      opts->alpha_vars = 0;
                       break;
             case 'j':
                       errno = 0;

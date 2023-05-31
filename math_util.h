@@ -27,6 +27,7 @@ static inline float logsum2expf(float x1, float x2, int *ret){
 }
 
 double maxd(double *x, uint32_t n);
+double maxdi(double *x, uint32_t n, uint32_t *i);
 double logsumexpd(double *x, uint32_t n, int *ret);
 
 double logsumexpd2(double *x, uint32_t n);

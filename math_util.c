@@ -27,6 +27,21 @@ double maxd(double *x, uint32_t n){
     return max_val;
 }
 
+double maxdi(double *x, uint32_t n, uint32_t *i){
+    assert(x != NULL);
+    assert(n > 0);
+    *i = 0;
+    double max_val = x[*i];
+    uint32_t j;
+    for (j = 1; j < n; ++j){
+        if (x[j] > max_val) {
+            max_val = x[j];
+            *i = j;
+        }
+    }
+    return max_val;
+}
+
 float logsumexpf(float *x, uint32_t n, int *ret){
     *ret = 0;
     if (x == NULL){

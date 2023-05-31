@@ -337,7 +337,7 @@ int bam_count(bam_data_t *bam_dat, obj_pars *objs, char *filename){
         return(-1);
 
     if (objs->verbose) log_msg("writing feature counts");
-    if (bam_counts_write(agc, objs->anno, objs->gv, filename) < 0)
+    if (bam_counts_write(agc, objs->anno, objs->gv, filename, 0) < 0)
         return -1;
 
     bam_counts_dstry(agc);

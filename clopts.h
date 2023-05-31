@@ -56,6 +56,7 @@ typedef struct {
     int atac_mapq;
     int tx_basic;
     int counts_only;
+    int alpha_vars;
     char *region;
     int region_set;
     uint32_t seed;
@@ -121,6 +122,7 @@ typedef struct {
     int min_phred;
     int rna_mapq;
     int atac_mapq;
+    int alpha_vars;
     uint32_t seed;
     float eps;
     uint16_t max_iter;

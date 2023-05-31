@@ -171,13 +171,13 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     cnt_node_t *p, t;
                     memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = (int)fix;
-                    t.counts[spl] = 1;
+                    t.counts[spl] = 1.0;
                     p = kb_getp(kh_cnode, bcc->rna_gc, &t);
                     if (!p){
                         kb_putp(kh_cnode, bcc->rna_gc, &t);
                         ++agc->rna_gcs_nz;
                     } else {
-                        p->counts[spl] += 1;
+                        p->counts[spl] += 1.0;
                     }
                     agc->has_rna_gc = 1;
                 }
@@ -192,14 +192,14 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     cnt_node_t *p, t;
                     memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = vix;
-                    t.counts[allele] = 1;
+                    t.counts[allele] = 1.0;
                     p = kb_getp(kh_cnode, bcc->rna_ac, &t);
                     if (!p){
                         kb_putp(kh_cnode, bcc->rna_ac, &t);
                         ++agc->rna_acs_nz;
                     }
                     else {
-                        p->counts[allele] += 1;
+                        p->counts[allele] += 1.0;
                     }
                     agc->has_rna_ac = 1;
                 }
@@ -227,13 +227,13 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     cnt_node_t *p, t;
                     memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = mv_i(&frag->pks, ip);
-                    t.counts[0] = 1;
+                    t.counts[0] = 1.0;
                     p = kb_getp(kh_cnode, bcc->atac_pc, &t);
                     if (p == NULL){
                         kb_putp(kh_cnode, bcc->atac_pc, &t);
                         ++agc->atac_pcs_nz;
                     } else {
-                        p->counts[0] += 1;
+                        p->counts[0] += 1.0;
                     }
                     agc->has_atac_pc = 1;
                 }
@@ -249,14 +249,14 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     cnt_node_t *p, t;
                     memset(&t, 0, sizeof(cnt_node_t));
                     t.ix = vix;
-                    t.counts[allele] = 1;
+                    t.counts[allele] = 1.0;
                     p = kb_getp(kh_cnode, bcc->atac_ac, &t);
                     if (!p){
                         kb_putp(kh_cnode, bcc->atac_ac, &t);
                         ++agc->atac_acs_nz;
                     }
                     else{
-                        p->counts[allele] += 1;
+                        p->counts[allele] += 1.0;
                     }
                     agc->has_atac_ac = 1;
                 }
@@ -272,20 +272,25 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
  * write out counts
  ******************************************************************************/
 
-int write_num(BGZF *fp, int n, char *c, char **intstrp, size_t *intstrp_m){
+int write_num(BGZF *fp, float n, char **intstrp, size_t *intstrp_m,
+        int write_float, int decp){
     int il, ret;
-    if ( (il = int2strp(n, intstrp, intstrp_m)) < 0 ) return(-1);
+    if (write_float == 0) {
+        int n_int = roundf(n);
+        if ((il = int2strp(n_int, intstrp, intstrp_m)) < 0)
+            return -1;
+    } else {
+        if ((il = float2str_ip(n, intstrp, intstrp_m, decp)) < 0)
+            return -1;
+    }
     ret = bgzf_write(fp, *intstrp, il);
     if (ret < 0)
         return err_msg(-1, 0, "write_num: failed to write %i", n);
-    ret = bgzf_write(fp, c, 1);
-    if (ret < 0)
-        return err_msg(-1, 0, "write_num: failed to write %s", c);
     return(0);
 }
 
 
-int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
+int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn, int write_float){
     char delim[] = " ";
 
     if (agc == NULL)
@@ -327,7 +332,7 @@ int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
 
     // write header
     for (i = 0; i < 3; ++i){
-        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim) < 0){
+        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim, write_float) < 0){
             for (i = 0; i < 3; ++i) bgzf_close(fp[i]);
             for (i = 0; i < 3; ++i) free(ofn[i]);
             return err_msg(-1, 0, "bam_counts_write_atac_ac: failed to write to file %s", fn);
@@ -360,6 +365,7 @@ int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
             int bc_ix = k + 1;
 
             // write variant index
+
             if ((il = int2strp(vix, &intstrp, &intstrp_m)) < 0) return -1;
             for (i = 0; i < 3; ++i){
                 ret = bgzf_write(fp[i], intstrp, il);
@@ -374,21 +380,17 @@ int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
             }
 
             // write ref allele counts
-            if ((il = int2strp((int)n->counts[0], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[0], intstrp, il);
+            ret = write_num(fp[0], n->counts[0], &intstrp, &intstrp_m, write_float, 6);
 
             // write alt allele counts
-            if ((il = int2strp((int)n->counts[1], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[1], intstrp, il);
+            ret = write_num(fp[1], n->counts[1], &intstrp, &intstrp_m, write_float, 6);
 
             // write all other counts
-            uint32_t oth_counts = 0;
+            float oth_counts = 0;
             for (i = 2; i < MAX_ALLELE; ++i)
                 oth_counts += n->counts[i];
+            ret = write_num(fp[2], oth_counts, &intstrp, &intstrp_m, write_float, 6);
 
-            if ((il = int2strp((int)oth_counts, &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[2], intstrp, il);
-            
             for (i = 0; i < 3; ++i)
                 ret = bgzf_write(fp[i], "\n", 1);
 
@@ -408,7 +410,7 @@ int bam_counts_write_atac_ac(bam_counts_t *agc, char *fn){
     return(0);
 }
 
-int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn){
+int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn, int write_float){
     char delim[] = " ";
     if (agc == NULL) return(0);
     if (mkpath(fn, 0755) == -1)
@@ -435,7 +437,7 @@ int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn){
     strs[2] = int2str((int)agc->atac_pcs_nz, &len);
 
     // write out header
-    if (mtx_write_hdr(fp, strs[0], strs[1], strs[2], delim) < 0){
+    if (mtx_write_hdr(fp, strs[0], strs[1], strs[2], delim, write_float) < 0){
         bgzf_close(fp);
         free(ofn);
         return err_msg(-1, 0, "bam_counts_write_atac_pc: failed to write to file %s", fn);
@@ -463,13 +465,25 @@ int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn){
             cnt_node_t *n = &kb_itr_key(cnt_node_t, &itr);
 
             // write peak index
-            if (write_num(fp, n->ix+1, delim, &intstrp, &intstrp_m) < 0) return(-1);
+            float ix_flt = (float)(n->ix + 1);
+            if (write_num(fp, ix_flt, &intstrp, &intstrp_m, 0, 6) < 0)
+                return(-1);
+            if (bgzf_write(fp, delim, 1) < 0)
+                return -1;
 
             // write barcode index
-            if (write_num(fp, k+1, delim, &intstrp, &intstrp_m) < 0) return(-1);
+            float k_flt = (float)(k + 1);
+            if (write_num(fp, k_flt, &intstrp, &intstrp_m, 0, 6) < 0)
+                return(-1);
+            if (bgzf_write(fp, delim, 1) < 0)
+                return -1;
 
             // write peak counts
-            if (write_num(fp, (int)n->counts[0], "\n", &intstrp, &intstrp_m) < 0) return(-1);
+            if (write_num(fp, n->counts[0], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
+
+            if (bgzf_write(fp, "\n", 1) < 0)
+                return -1;
         }
         ++bci;
     }
@@ -484,7 +498,7 @@ int bam_counts_write_atac_pc(bam_counts_t *agc, char *fn){
     return(0);
 }
 
-int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
+int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn, int write_float){
     char delim[] = " ";
 
     if (agc == NULL)
@@ -526,7 +540,7 @@ int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
 
     // write header
     for (i = 0; i < 3; ++i){
-        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim) < 0){
+        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim, write_float) < 0){
             for (i = 0; i < 3; ++i) bgzf_close(fp[i]);
             for (i = 0; i < 3; ++i) free(ofn[i]);
             return err_msg(-1, 0, "bam_counts_write_rna_ac: failed to write to file %s", fn);
@@ -575,21 +589,19 @@ int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
             }
 
             // write ref allele counts
-            if ((il = int2strp((int)n->counts[0], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[0], intstrp, il);
+            if (write_num(fp[0], n->counts[0], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
 
             // write alt allele counts
-            if ((il = int2strp((int)n->counts[1], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[1], intstrp, il);
+            if (write_num(fp[1], n->counts[1], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
 
             // write all other counts
-            uint32_t oth_counts = 0;
+            float oth_counts = 0;
             for (i = 2; i < MAX_ALLELE; ++i)
                 oth_counts += n->counts[i];
+            ret = write_num(fp[2], oth_counts, &intstrp, &intstrp_m, write_float, 6);
 
-            if ((il = int2strp((int)oth_counts, &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[2], intstrp, il);
-            
             for (i = 0; i < 3; ++i)
                 ret = bgzf_write(fp[i], "\n", 1);
 
@@ -609,7 +621,7 @@ int bam_counts_write_rna_ac(bam_counts_t *agc, char *fn){
     return(0);
 }
 
-int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn){
+int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn, int write_float){
     char delim[] = " ";
 
     if (mkpath(fn, 0755) == -1)
@@ -645,7 +657,7 @@ int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn){
 
     // write header
     for (i = 0; i < 3; ++i){
-        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim) < 0){
+        if (mtx_write_hdr(fp[i], strs[0], strs[1], strs[2], delim, write_float) < 0){
             for (i = 0; i < 3; ++i) bgzf_close(fp[i]);
             for (i = 0; i < 3; ++i) free(ofn[i]);
             return err_msg(-1, 0, "bam_counts_write: failed to write to file %s", fn);
@@ -691,14 +703,14 @@ int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn){
                 ret = bgzf_write(fp[i], delim, 1);
             }
 
-            if ((il = int2strp((int)n->counts[SPLICE], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[0], intstrp, il);
+            if (write_num(fp[SPLICE], n->counts[SPLICE], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
 
-            if ((il = int2strp((int)n->counts[UNSPLICE], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[1], intstrp, il);
+            if (write_num(fp[UNSPLICE], n->counts[UNSPLICE], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
 
-            if ((il = int2strp((int)n->counts[AMBIG], &intstrp, &intstrp_m)) < 0) return -1;
-            ret = bgzf_write(fp[2], intstrp, il);
+            if (write_num(fp[AMBIG], n->counts[AMBIG], &intstrp, &intstrp_m, write_float, 6) < 0)
+                return -1;
             
             for (i = 0; i < 3; ++i)
                 ret = bgzf_write(fp[i], "\n", 1);
@@ -719,24 +731,24 @@ int bam_counts_write_rna_gc(bam_counts_t *agc, char *fn){
     return 0;
 }
 
-int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn){
+int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn, int write_float){
     if (agc == NULL)
         return err_msg(-1, 0, "bam_counts_write: agc is NULL");
 
     if (agc->has_rna_ac){
-        if (bam_counts_write_rna_gc(agc, fn) < 0)
+        if (bam_counts_write_rna_gc(agc, fn, write_float) < 0)
             return -1;
     }
     if (agc->has_rna_ac){
-        if (bam_counts_write_rna_ac(agc, fn) < 0)
+        if (bam_counts_write_rna_ac(agc, fn, write_float) < 0)
             return -1;
     }
     if (agc->has_atac_ac){
-        if (bam_counts_write_atac_ac(agc, fn) < 0)
+        if (bam_counts_write_atac_ac(agc, fn, write_float) < 0)
             return -1;
     }
     if (agc->has_atac_pc){
-        if (bam_counts_write_atac_pc(agc, fn) < 0)
+        if (bam_counts_write_atac_pc(agc, fn, write_float) < 0)
             return(-1);
     }
 
@@ -759,26 +771,28 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
     }
 
     // write variants
-    char var_fn[] = ".var.txt.gz";
-    ofn = strcat2((const char*)fn, (const char*)var_fn);
-    if (ofn == NULL) return -1;
-    fp = bgzf_open(ofn, "wg1");
-    if (fp == NULL)
-        return err_msg(-1, 0, "bam_counts_write: failed to open file %s", ofn);
-    int i;
-    int32_t ne = mv_size(&gv->vix2var);
-    for (i = 0; i < ne; ++i){
-        var_t *var = gv_vari(gv, i);
-        if (var == NULL) continue;
-        char *vid = var_id(agc->gv->vcf_hdr, var->b, '\t');
-        if (bgzf_write(fp, vid, strlen(vid)) < 0)
-            return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
-        if (bgzf_write(fp, "\n", 1) < 0)
-            return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
-        free(vid);
+    if (agc->has_rna_ac || agc->has_atac_ac) {
+        char var_fn[] = ".var.txt.gz";
+        ofn = strcat2((const char*)fn, (const char*)var_fn);
+        if (ofn == NULL) return -1;
+        fp = bgzf_open(ofn, "wg1");
+        if (fp == NULL)
+            return err_msg(-1, 0, "bam_counts_write: failed to open file %s", ofn);
+        int i;
+        int32_t ne = mv_size(&gv->vix2var);
+        for (i = 0; i < ne; ++i){
+            var_t *var = gv_vari(gv, i);
+            if (var == NULL) continue;
+            char *vid = var_id(agc->gv->vcf_hdr, var->b, '\t');
+            if (bgzf_write(fp, vid, strlen(vid)) < 0)
+                return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
+            if (bgzf_write(fp, "\n", 1) < 0)
+                return err_msg(-1, 0, "bam_counts_write: failed to write variants to %s", ofn);
+            free(vid);
+        }
+        bgzf_close(fp);
+        free(ofn);
     }
-    bgzf_close(fp);
-    free(ofn);
 
     // write peaks
     if (agc->has_atac_pc){
@@ -803,8 +817,13 @@ int bam_counts_write(bam_counts_t *agc, gene_anno_t *anno, g_var_t *gv, char *fn
     return 0;
 }
 
-int mtx_write_hdr(BGZF *fp, char *len1, char *len2, char *len3, char *delim){
-    char mtx_hdr[] = "%%MatrixMarket matrix coordinate integer general\n";
+int mtx_write_hdr(BGZF *fp, char *len1, char *len2, char *len3, char *delim, int write_float){
+    char *mtx_hdr;
+    if (write_float) {
+        mtx_hdr = "%%MatrixMarket matrix coordinate real general\n";
+    } else {
+        mtx_hdr = "%%MatrixMarket matrix coordinate integer general\n";
+    }
     int ret;
     ret = bgzf_write(fp, mtx_hdr, strlen(mtx_hdr));
     ret = bgzf_write(fp, "%\n", 2);

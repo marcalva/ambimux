@@ -39,6 +39,7 @@ cl_opts *init_cl_opts(){
     opts->atac_mapq = 30;
     opts->tx_basic = 0;
     opts->counts_only = 0;
+    opts->alpha_vars = 1;
 
     opts->region = strdup(".");
     opts->region_set = 0;
@@ -119,6 +120,7 @@ obj_pars *init_obj_pars(){
     p->min_phred = 30;
     p->rna_mapq = 30;
     p->atac_mapq = 30;
+    p->alpha_vars = 1;
 
     time_t t;
     p->seed = (uint32_t)time(&t);
@@ -328,6 +330,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->min_phred = opts->min_phred;
     objs->rna_mapq = opts->rna_mapq;
     objs->atac_mapq = opts->atac_mapq;
+    objs->alpha_vars = opts->alpha_vars;
     objs->seed = opts->seed;
     objs->eps = opts->eps;
     objs->alpha_max = opts->alpha_max;
