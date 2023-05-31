@@ -2012,7 +2012,7 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
             // RNA alpha
             a_tot = ar[0] + ar[1];
-            new_par = ar[0] / a_tot;
+            new_par = a_tot <= 0.0 ? 0.5 : ar[0] / a_tot;
             pdiff = new_par - mdl->mp->alpha_rna[CMI(bc_ix, hs_ix, D)];
             mdl->mp->_par_diff += fabs(pdiff);
             mdl->mp->alpha_rna[CMI(bc_ix, hs_ix, D)] = new_par;
@@ -2055,7 +2055,7 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
             // ATAC alpha
             a_tot = aa[0] + aa[1];
-            new_par = aa[0] / a_tot;
+            new_par = a_tot <= 0.0 ? 0.5 : aa[0] / a_tot;
             pdiff = new_par - mdl->mp->alpha_atac[CMI(bc_ix, hs_ix, D)];
             mdl->mp->_par_diff += fabs(pdiff);
             mdl->mp->alpha_atac[CMI(bc_ix, hs_ix, D)] = new_par;
