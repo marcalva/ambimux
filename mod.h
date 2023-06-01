@@ -90,7 +90,6 @@ void mdl_mlcl_free(mdl_mlcl_t *mlcl);
  * Store the indexes for nuc. num, sample 1, sample 2, T_i, N_T
  */
 typedef struct {
-    int ix; // (H,S,K) index
     int hs_ix; // (H,S) index
     int hd; // num. of nuclei
     int s1; // sample 1 index
@@ -102,7 +101,7 @@ typedef struct {
 
 void par_ix_init(par_ix_t *par_ix);
 
-/*@typedef struct hst_ix
+/* hs_ix_t struct
  * Specify the possible indices for num of nuclei, sample 1, sample 2,
  * and droplet source.
  * H values are 0, 1, 2
@@ -114,10 +113,8 @@ void par_ix_init(par_ix_t *par_ix);
  */
 typedef struct {
     uint16_t n_sam;
-    uint16_t k;
-    uint32_t n_ixs;
-    uint32_t n_hs;
-    int *ix2pars; // (1 + M + M(M-1)/2) by 3 array, columns are H, S (sample 1), S (sample 2)
+    uint32_t n_hs; // Total number of (H,S) indices.
+    int *ix2pars; // 3 by (1 + M + M(M-1)/2) by 3 array, rows are H, S (sample 1), S (sample 2)
                   // Array is stored in column major vector
 } hs_ix_t;
 
@@ -125,7 +122,7 @@ void hs_ix_init(hs_ix_t *hs_ix);
 hs_ix_t *hs_ix_alloc();
 void hs_ix_free(hs_ix_t *hs_ix);
 void hs_ix_dstry(hs_ix_t *hs_ix);
-void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples, uint16_t n_clust);
+void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples);
 
 /* hs index to parameters
  * Given an hs index, return num nuclei, sample 1, and sample 2
@@ -134,8 +131,7 @@ void hs_ix_set(hs_ix_t *hs_ix, uint16_t n_samples, uint16_t n_clust);
  *
  * @return 0 if successfull, -1 on error
  */
-int hs_ix_get_pars(hs_ix_t *hs_ix, int ix,
-        par_ix_t *par_ix);
+int hs_ix_get_pars(hs_ix_t *hs_ix, unsigned ix, par_ix_t *par_ix);
 
 /*******************************************************************************
  * mdl_pars_t
@@ -151,16 +147,16 @@ typedef struct {
     uint32_t G; // number of genes
     uint32_t V; // number of variants
     uint16_t M; // number of samples
-    uint16_t K; // number of cell types
-    uint32_t n_hs, n_ix;
+    uint16_t K; // number of cell types (not including ambient)
+    uint32_t n_hs;
 
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
-    f_t *kappa; // cell type probability (K x 1 array)
+    f_t *kappa; // cell type probability (K array) given H > 0
     f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
     f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
-    f_t *rho; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
+    f_t *rho; // CM expression probs (3G x 2(K+1) array) col 0 is ambient col, then cell types
     f_t sigma[2]; // prob. in peak (2 x 1 array), 0: ambient, 1: cell
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
     f_t tau; // probability of a sequencing error (fixed at 0.01)
@@ -169,7 +165,7 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
-    f_t *_kappa_sum; // cell type prop (K x 1 array)
+    f_t *_kappa_sum; // cell type prop (K array)
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
@@ -192,6 +188,7 @@ typedef struct {
 
     // store the barcode counts, order corresponds to all_bcs
     uint32_t G; // num of genes
+    uint32_t P; // num of genes
     uint32_t V; // num of variants
     mv_t(mdl_bc_v) bc_mlcl;
 
@@ -212,24 +209,20 @@ typedef struct {
     // source values are 0, ..., M-1 for samples, and M for ambient. -1 for invalid
     hs_ix_t *hs_ix;
 
-    // store the droplet log conditional probabilities for each (H,S)
-    // order corresponds to all_bcs
-    int n_hs, n_ix, k;
-    f_t *lp_hsk; // log P(H_d, S_d , X_d, K_d| Theta) D x n_ix (column-major order)
-    f_t *lp_h; // P(H_d | X_d) T x 3 array (column major)
-    f_t *p_x; // P(X_d | Theta) length D
-    f_t *pp; // BC x 3 array; posterior probs for empty, singlet, doublet
-
-    f_t *sub_lp_hs; // log Pr(H_d, S_d, X_d | \Theta) D x n_hs (column major)
-    int32_t *sub_best_hs; // Best (H,S) index for each droplet d under 
+    int n_hs; // Number of (H,S) indices
+    f_t *sub_lp_hs; // log Pr(H_d, S_d, X_d | \Theta) n_hs x D (column major)
+    f_t *sub_lp_h; // log Pr(H_d, X_d | \Theta) 3 x D (column major)
+    f_t *sub_lp_x; // log Pr(X_d | \Theta) D x 1 (column major)
+    int32_t *sub_best_hs; // D x 1 array. Best (H,S) index for each droplet d under 
                            // the sub model.
+    f_t *sub_pp_h; // 3 x BC array; posterior probabilities `H_d` for each droplet.
 
-    // store best samples and posterior probs
-    // order corresponds to test_bcs
-    uint32_t *best_hsk_ix;
-    uint32_t *best_sng_ix;
-    uint32_t *sec_sng_ix;
-    uint32_t *best_dbl_ix;
+    int k; // number of cell types
+    f_t *full_lp_k; // full model w cell types log Pr(K_d | \Theta) (k+1) x D (column major)
+                    // first column is ambient cell type
+    f_t *full_lp_x; // full model w cell types log Pr(X_d | \Theta) D x 1 (column major)
+                    // calculated as logsumexp of full_lp_k
+    int32_t *full_best_k; // D x 1 array. Best (K) index for each droplet d under full model
 
     f_t eps;
     uint16_t max_iter;
@@ -325,6 +318,8 @@ void mdl_dstry(mdl_t *m);
 
 int mdl_set_samples(mdl_t *mdl, bcf_hdr_t *vcf_hdr);
 int mdl_set_hs_ix(mdl_t *mdl);
+
+/* Set the number of cell types, not including the ambient cluster. */
 int mdl_set_k(mdl_t *mdl, int k);
 int mdl_set_rna_atac(mdl_t *mdl, uint8_t has_rna, uint8_t has_atac);
 int mdl_alloc_probs(mdl_t *mdl);
@@ -338,9 +333,9 @@ void pr_hd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(K_d)
-int pr_kd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
+int pr_kd(mdl_pars_t *mp, int k, f_t *prob);
 // Pr(T_d)
-int pr_tdm(mdl_pars_t *mp, int rna, int bc_ix, par_ix_t *par_ix,
+int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
         int t_ix, f_t *prob);
 // get rho
 f_t pr_rho_gene(f_t *rho, seq_gene_t seq_gene, uint32_t col,
@@ -360,9 +355,27 @@ f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele,
  * Returns 0 on success, -1 on error.
  */
 int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
-// Pr(G_dm, B_dm)
+
+/* Get Pr(G_dm, B_dm, X_d | \Theta) for an RNA molecule.
+ * Calculate probability of observed bases and probability of observed gene.
+ * `s_ix` gives the sample index, must be within range [0, M+1). Last index
+ * is the ambient cluster.
+ * `k` gives the cluster index, must be within range [0, K+1). The first index
+ * is the ambient cluster, the rest are cell types.
+ * Stores the probability in `prob`.
+ * Returns 0 on success, -1 on error.
+ */
 int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, uint16_t k, f_t *prob);
-// Pr(P_dm, B_dm)
+
+/* Get Pr(P_dm, B_dm, X_d | \Theta) for an ATAC molecule.
+ * Calculate probability of observed bases and probability of observed peak.
+ * `s_ix` gives the sample index, must be within range [0, M+1). Last index
+ * is the ambient cluster.
+ * `k` gives the cluster index, must be within range [0, K+1). The first index
+ * is the ambient cluster, the rest are cell types.
+ * Stores the probability in `prob`.
+ * Returns 0 on success, -1 on error.
+ */
 int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 
 /* Get Pr(B_dm) = \sum_t=1^tn Pr(T_dm = t, B_dm).
@@ -379,7 +392,7 @@ int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
  * If any pointer arguments are null, behaviour is undefined.
  * Returns 0 on success, -1 on error.
  */
-int p_bd(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
+int p_bd(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix, par_ix_t *par_ix,
         f_t *p_b, f_t *psum);
 
 /* Calculate Pr(T_dm, F_dm, B_dm) = \sum_t=1^tn Pr(T_dm = t, F_dm, B_dm)
@@ -406,10 +419,19 @@ int mdl_full_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
  * Maximization
  ******************************************************************************/
 
+/* Maximization step for sub model.
+ * Maximizes parameters lambda, alpha, pi.
+ */
 int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len);
+
+/* Maximization for full model.
+ * Maximizes kappa, rho, and sigma.
+ */
 int mdl_full_m(mdl_t *mdl, int *ixs, uint32_t ix_len);
+
 int mdl_sub_est(mdl_t *mdl);
-int mdl_delta_pars(mdl_t *mdl, f_t *delta);
+int mdl_full_est(mdl_t *mdl);
+
 int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
 
 /*******************************************************************************
@@ -420,19 +442,31 @@ void *mdl_sub_thrd_fx(void *arg);
 int mdl_thrd_call(mdl_t *mdl, int *ixs, uint32_t ix_len, int sub);
 int mdl_em(mdl_t *mdl, obj_pars *objs, int sub);
 
-int mdl_data_llk(mdl_t *mdl, f_t *llk);
+int mdl_full_llk(mdl_t *mdl, f_t *llk);
+int mdl_sub_llk(mdl_t *mdl, f_t *llk);
 
 /* Get the best (H,S) index for each droplet.
- * This function gets the maximum index from `mdl.sub_lp_hs` and stores in
+ * This function gets the index of the best `mdl.sub_lp_hs` and stores in
  * `mdl.sub_best_hs` for each of `D` droplets. 
  * If the model isn't initialized, returns -1 on error.
  * Returns 0 on success, -1 on error.
  */
 int mdl_sub_best_hs(mdl_t *mdl);
-f_t *mdl_get_lp_hs(mdl_t *mdl);
-f_t *mdl_get_cp_hsk(mdl_t *mdl);
-int mdl_get_prob_h(mdl_t *mdl);
-int mdl_get_best(mdl_t *mdl);
+
+/* Get the posterior probabilities Pr(H_d | X_d) for each droplet.
+ * Takes the log probabilities from `mdl.sub_lp_h` and 
+ * calculates each H_d = 0, 1, 2 for all droplets `D`.
+ * Stores the results in `mdl.sub_pp_h`.
+ * Returns 0 on success, -1 on error.
+ */
+int mdl_sub_pp_h(mdl_t *mdl);
+
+/* get the best (K) index for each droplet.
+ * Gets the index of best `mdl.full_lp_k` and stores in `mdl.full_best_k`.
+ * If the model isn't initialized, returns -1 on error.
+ * Returns 0 on success, -1 on error.
+ */
+int mdl_full_best_k(mdl_t *mdl);
 
 /* main function to fit model.
  *
@@ -441,15 +475,29 @@ int mdl_get_best(mdl_t *mdl);
  */
 int mdl_fit(bam_data_t *bam_dat, obj_pars *objs);
 
-char **mdl_s_names(mdl_t *mdl);
-
 // output functions
 int write_lambda(mdl_t *mdl, char *fn);
 int write_alpha_rna(mdl_t *mdl, char *fn);
 int write_alpha_atac(mdl_t *mdl, char *fn);
 int write_rho(mdl_t *mdl, obj_pars *objs, char *fn);
 int write_sigma(mdl_t *mdl, obj_pars *objs, char *fn);
-int write_llk(mdl_t *mdl, char *fn);
+
+/* Write the log likelihoods `log Pr(H_d, S_d, X_d | \Theta)` for test
+ * droplets under the sub model. Write to file `fn.sample_llk.txt.gz`.
+ * The test barcodes are in the rows, and columns correspond to the (H,S)
+ * indices. The row names are written but the header is excluded.
+ * Returns 0 on success, -1 on error.
+ */
+int write_sub_llk(mdl_t *mdl, char *fn);
+
+/* Write the log likelihoods `log Pr(K_d, X_d | \Theta)` for test
+ * droplets under the full model. Write to file `fn.cluster_llk.txt.gz`.
+ * The test barcodes are in the rows, and columns correspond to the (K)
+ * indices, ambient + cell types. The row names are written but the header
+ * is excluded.
+ * Returns 0 on success, -1 on error.
+ */
+int write_full_llk(mdl_t *mdl, char *fn);
 int write_samples(mdl_t *mdl, char *fn);
 int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn);
 
