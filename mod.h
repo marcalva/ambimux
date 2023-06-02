@@ -153,7 +153,7 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
-    f_t *kappa; // cell type probability (K array) given H > 0
+    f_t *kappa; // cell type probability (K x D array) given H > 0
     f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
     f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
     f_t *rho; // CM expression probs (3G x 2(K+1) array) col 0 is ambient col, then cell types
@@ -165,7 +165,7 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
-    f_t *_kappa_sum; // cell type prop (K array)
+    f_t *_kappa_sum; // cell type prop (K x D array)
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
@@ -333,7 +333,7 @@ void pr_hd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(K_d)
-int pr_kd(mdl_pars_t *mp, int k, f_t *prob);
+int pr_kd(mdl_pars_t *mp, uint32_t d, int k, f_t *prob);
 // Pr(T_d)
 int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
         int t_ix, f_t *prob);
@@ -402,6 +402,9 @@ int p_bd(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix, par_ix_t *pa
  */
 int p_f_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
         f_t *p_tgb, f_t *psum);
+
+int p_kf_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_ix,
+        f_t **p_tgb, uint32_t p_len, f_t *psum);
 
 /*******************************************************************************
  * Expectation
@@ -477,6 +480,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs);
 
 // output functions
 int write_lambda(mdl_t *mdl, char *fn);
+int write_kappa(mdl_t *mdl, char *fn);
 int write_alpha_rna(mdl_t *mdl, char *fn);
 int write_alpha_atac(mdl_t *mdl, char *fn);
 int write_rho(mdl_t *mdl, obj_pars *objs, char *fn);
