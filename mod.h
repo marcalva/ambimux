@@ -153,10 +153,10 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum;
-    f_t *kappa; // cell type probability (K x D array) given H > 0
+    f_t *kappa; // cluster probability (K x D array) 
     f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
     f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
-    f_t *rho; // CM expression probs (3G x 2(K+1) array) col 0 is ambient col, then cell types
+    f_t *rho; // CM expression probs (3G x (K+1) array) col 0 is ambient col, then cell types
     f_t sigma[2]; // prob. in peak (2 x 1 array), 0: ambient, 1: cell
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
     f_t tau; // probability of a sequencing error (fixed at 0.01)
@@ -165,7 +165,6 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
-    f_t *_kappa_sum; // cell type prop (K x D array)
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
     f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
@@ -188,7 +187,7 @@ typedef struct {
 
     // store the barcode counts, order corresponds to all_bcs
     uint32_t G; // num of genes
-    uint32_t P; // num of genes
+    uint32_t P; // num of peaks
     uint32_t V; // num of variants
     mv_t(mdl_bc_v) bc_mlcl;
 
@@ -218,10 +217,8 @@ typedef struct {
     f_t *sub_pp_h; // 3 x BC array; posterior probabilities `H_d` for each droplet.
 
     int k; // number of cell types
-    f_t *full_lp_k; // full model w cell types log Pr(K_d | \Theta) (k+1) x D (column major)
-                    // first column is ambient cell type
     f_t *full_lp_x; // full model w cell types log Pr(X_d | \Theta) D x 1 (column major)
-                    // calculated as logsumexp of full_lp_k
+                    // calculated as logsumexp during E step
     int32_t *full_best_k; // D x 1 array. Best (K) index for each droplet d under full model
 
     f_t eps;
@@ -332,8 +329,6 @@ int mdl_alloc_probs(mdl_t *mdl);
 void pr_hd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 // Pr(S_d)
 void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
-// Pr(K_d)
-int pr_kd(mdl_pars_t *mp, uint32_t d, int k, f_t *prob);
 // Pr(T_d)
 int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
         int t_ix, f_t *prob);
@@ -464,8 +459,9 @@ int mdl_sub_best_hs(mdl_t *mdl);
  */
 int mdl_sub_pp_h(mdl_t *mdl);
 
-/* get the best (K) index for each droplet.
- * Gets the index of best `mdl.full_lp_k` and stores in `mdl.full_best_k`.
+/* get the best (K) index for each droplet `d` in `D`.
+ * Gets the index of highest `mdl.mp.kappa` and stores in `mdl.full_best_k`.
+ * Index 0 is empty, while 1, ..., K give the clusters.
  * If the model isn't initialized, returns -1 on error.
  * Returns 0 on success, -1 on error.
  */
