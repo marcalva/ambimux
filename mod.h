@@ -145,6 +145,7 @@ typedef struct {
     uint32_t D; // number of droplets
     uint32_t T; // number of test droplets
     uint32_t G; // number of genes
+    uint32_t P; // number of peaks (includes outside peak as index 0)
     uint32_t V; // number of variants
     uint16_t M; // number of samples
     uint16_t K; // number of cell types (not including ambient)
@@ -157,7 +158,7 @@ typedef struct {
     f_t *alpha_rna; // droplet contamination prob. (D x _nrow_hs array)
     f_t *alpha_atac; // droplet contamination prob. (D x _nrow_hs array)
     f_t *rho; // CM expression probs (3G x (K+1) array) col 0 is ambient col, then cell types
-    f_t sigma[2]; // prob. in peak (2 x 1 array), 0: ambient, 1: cell
+    f_t *sigma; // prob. peak (P x (K+1) array), 0: ambient, then cell types
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
     f_t tau; // probability of a sequencing error (fixed at 0.01)
 
@@ -166,7 +167,7 @@ typedef struct {
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
     f_t *_rho_sum; // CM expression probs (3G x 2 array) col 0 is ambient col 1 is cell
-    f_t _sigma_sum[4]; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
+    f_t *_sigma_sum; // CM open chromatin peak (2 x 2 array), col: ambient,cell; row: outside,inside peak
 
     f_t _par_diff;
 } mdl_pars_t;
@@ -253,7 +254,7 @@ void mdl_pars_dstry(mdl_pars_t *mp);
  * Allocate memory for the _sum fields in @p mp.
  */
 int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
-        uint32_t G, uint32_t V, uint16_t M, uint16_t K);
+        uint32_t G, uint32_t P, uint32_t V, uint16_t M, uint16_t K);
 
 /* Set the _sum variables in the mdl_pars_t object to psc value.
  */
@@ -371,7 +372,7 @@ int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, uint16_t k, f_t *prob);
  * Stores the probability in `prob`.
  * Returns 0 on success, -1 on error.
  */
-int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
+int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, uint16_t k, f_t *prob);
 
 /* Get Pr(B_dm) = \sum_t=1^tn Pr(T_dm = t, B_dm).
  * This calculates the probability of observing a base call B_dm = b after
