@@ -157,29 +157,30 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
         if (bcc == NULL) return(-1);
 
         if (bam_data->has_rna){
-            rna_mlc_bag_itr itr, *itrp = &itr;
-            rna_mlc_bag_itr_first(itrp, &bc_data->rna_mlcs);
-            for (; rna_mlc_bag_itr_alive(itrp); rna_mlc_bag_itr_next(itrp)) {
-                rna_mol_t *mol = rna_mlc_bag_itr_val(itrp);
+            rna_mlc_bag_itr itr;
+            rna_mlc_bag_itr_first(&itr, &bc_data->rna_mlcs);
+            for (; rna_mlc_bag_itr_alive(&itr); rna_mlc_bag_itr_next(&itr)) {
+                rna_mol_t *mol = rna_mlc_bag_itr_val(&itr);
                 ml_node_t(seq_gene_l) *gn;
-                if (ml_size(&mol->gl) != 1) continue; // discard multigene UMIs
-                for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
-                    seq_gene_t gene = ml_node_val(gn);
-                    int32_t fix = gene.gene_id;
-                    uint8_t spl = gene.splice;
-                    assert(spl <= N_SPL);
-                    cnt_node_t *p, t;
-                    memset(&t, 0, sizeof(cnt_node_t));
-                    t.ix = (int)fix;
-                    t.counts[spl] = 1.0;
-                    p = kb_getp(kh_cnode, bcc->rna_gc, &t);
-                    if (!p){
-                        kb_putp(kh_cnode, bcc->rna_gc, &t);
-                        ++agc->rna_gcs_nz;
-                    } else {
-                        p->counts[spl] += 1.0;
+                if (ml_size(&mol->gl) == 1) {
+                    for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
+                        seq_gene_t gene = ml_node_val(gn);
+                        int32_t fix = gene.gene_id;
+                        uint8_t spl = gene.splice;
+                        assert(spl <= N_SPL);
+                        cnt_node_t *p, t;
+                        memset(&t, 0, sizeof(cnt_node_t));
+                        t.ix = (int)fix;
+                        t.counts[spl] = 1.0;
+                        p = kb_getp(kh_cnode, bcc->rna_gc, &t);
+                        if (!p){
+                            kb_putp(kh_cnode, bcc->rna_gc, &t);
+                            ++agc->rna_gcs_nz;
+                        } else {
+                            p->counts[spl] += 1.0;
+                        }
+                        agc->has_rna_gc = 1;
                     }
-                    agc->has_rna_gc = 1;
                 }
                 ml_node_t(seq_vac_l) *vn;
                 for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
@@ -203,14 +204,13 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     }
                     agc->has_rna_ac = 1;
                 }
-                rna_mlc_bag_itr_next(itrp);
             }
         }
         if (bam_data->has_atac){
-            atac_frag_bag_itr itr, *itrp = &itr;
-            atac_frag_bag_itr_first(itrp, &bc_data->atac_frgs);
-            for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
-                atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
+            atac_frag_bag_itr itr;
+            atac_frag_bag_itr_first(&itr, &bc_data->atac_frgs);
+            for (; atac_frag_bag_itr_alive(&itr); atac_frag_bag_itr_next(&itr)) {
+                atac_frag_t *frag = atac_frag_bag_itr_val(&itr);
             /*
             khash_t(khaf) *frags = bc_data->atac_frags;
             khint_t k_m;
@@ -276,7 +276,7 @@ int write_num(BGZF *fp, float n, char **intstrp, size_t *intstrp_m,
         int write_float, int decp){
     int il, ret;
     if (write_float == 0) {
-        int n_int = roundf(n);
+        int n_int = lroundf(n);
         if ((il = int2strp(n_int, intstrp, intstrp_m)) < 0)
             return -1;
     } else {

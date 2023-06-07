@@ -1125,10 +1125,10 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
         mdl_mlcl_bc_t *mdl_bc = &mv_i(&mdl_bc_dat->bc_mlcl, bc_ix);
 
         // loop through RNA
-        rna_mlc_bag_itr itr, *ritrp = &itr;
-        rna_mlc_bag_itr_first(ritrp, &bam_bc->rna_mlcs);
-        for (; rna_mlc_bag_itr_alive(ritrp); rna_mlc_bag_itr_next(ritrp)) {
-            rna_mol_t *mol = rna_mlc_bag_itr_val(ritrp);
+        rna_mlc_bag_itr ritr;
+        rna_mlc_bag_itr_first(&ritr, &bam_bc->rna_mlcs);
+        for (; rna_mlc_bag_itr_alive(&ritr); rna_mlc_bag_itr_next(&ritr)) {
+            rna_mol_t *mol = rna_mlc_bag_itr_val(&ritr);
 
             // skip RNA molecules with no data, and only consider unique feature
             size_t mol_n_genes = ml_size(&mol->gl), mol_n_vars = ml_size(&mol->vl);
@@ -3581,7 +3581,7 @@ int mod_correct_counts(mdl_t *mdl, g_var_t *gv, gene_anno_t *gene_anno,
             // add feature read count
             for (mv_ix = 0; mv_ix < mv_size(&mlcl->feat_ixs); ++mv_ix) {
                 int32_t fs_ix, s_ix, f_ix;
-                fs_ix = mv_i(&mlcl->feat_ixs, 0);
+                fs_ix = mv_i(&mlcl->feat_ixs, mv_ix);
                 s_ix = fs_ix / n_genes;
                 f_ix = fs_ix % n_genes;
 
