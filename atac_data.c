@@ -775,6 +775,10 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     int rid = (int)reg.r1.rid;
     const char *chr = str_map_str(cmap, rid);
 
+    // if chr not present, no peaks to overlap
+    if (chr == NULL)
+        return 0;
+
     int32_t beg = reg.r1.start;
     int32_t end = reg.r2.end - 1;
     if (end < beg)
