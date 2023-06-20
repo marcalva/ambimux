@@ -706,7 +706,6 @@ int g_var_get_region_vars(g_var_t *gv, const char* ref, int32_t beg,
     if (tid < 0)
         return err_msg(-1, 1, "region_vars: Chromosome %s not found", ref);
 
-    if (end <= beg)
     if (beg < 0 || end < 0 || end <= beg)
         return err_msg(-2, 0, "region_vars: end (%i) < beg (%i)", beg, end);
 

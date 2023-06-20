@@ -522,11 +522,11 @@ int mdl_pars_reset_sums(mdl_pars_t *mp, f_t psc) {
 
     uint32_t rho_ne = (mp->G * 3) * (mp->K + 1);
     for (i = 0; i < rho_ne; ++i)
-        mp->_rho_sum[i] = 0;
+        mp->_rho_sum[i] = psc;
 
     uint32_t sigma_ne = mp->P * (mp->K + 1);
     for (i = 0; i < sigma_ne; ++i)
-        mp->_sigma_sum[i] = 0;
+        mp->_sigma_sum[i] = psc;
 
     return 0;
 }
@@ -1663,7 +1663,7 @@ int p_kf_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_i
 
             f_t ptfv = p_t * p_fv;
             if (prob_invalid(ptfv))
-                return err_msg(-1, 0, "p_f_v: Pr(tk, f, v)=%f is invalid", ptfv);
+                return err_msg(-1, 0, "p_kf_v: Pr(tk, f, v)=%f is invalid", ptfv);
 
             (*p_tgb)[ct_col] += ptfv;
             *psum += ptfv;
@@ -1671,7 +1671,7 @@ int p_kf_v(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int rna, int bc_ix, par_ix_t *par_i
     }
     if (num_invalid(*psum)) {
         fprintf(stderr, "ix=%i\n", par_ix->hs_ix);
-        return err_msg(-1, 0, "sum p_f_v: Pr(f, v)=%e is invalid", psum);
+        return err_msg(-1, 0, "sum p_kf_v: Pr(f, v)=%e is invalid", psum);
     }
     return 0;
 }
@@ -2242,11 +2242,13 @@ int mdl_full_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     return err_msg(-1, 0, "mdl_full_m: invalid prob pt=%f", pt);
                 
                 // kappa
+                /*
                 if (t_im > 0) {
                     f_t kappa_add = mlcl->counts * p_tgpb[t_im] / kct_sum;
                     kappa_sum[k_ix] += kappa_add;
                     kappa_tot += kappa_add;
                 }
+                */
 
                 // sigma
                 uint32_t sig_ix = CMI(pk, c_ix, sig_nrow);

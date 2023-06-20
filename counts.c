@@ -202,6 +202,12 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
     const char *b_ref = str_map_str(cmap, b_rid);
     if (b_ref == NULL)
         return err_msg(-1, 0, "seq_base_call_var: cannot find chromosome ID %i", b_rid);
+
+    // if chromosome not present in g_var_t, skip
+    if (str_map_ix(gv->chrm_ix, (char *)b_ref) < 0)
+        return 0;
+
+    // chrm. positions
     int32_t b_beg = b.pos.pos, b_end = b_beg + 1;
 
     /* base call */

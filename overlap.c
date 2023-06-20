@@ -295,6 +295,11 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
     int32_t left_pos = (int32_t)b->core.pos; // position of first base that consumes the reference.
 
     int n_vars = 0;
+
+    // if chromosome not present in g_var_t, no variants to overlap
+    if (str_map_ix(gv->chrm_ix, (char *)ref) < 0)
+        return 0;
+
     /* r_pos stores position in ref. sequence 0-based */
     int32_t r_pos_beg = left_pos;
     int32_t r_pos_end = left_pos;
