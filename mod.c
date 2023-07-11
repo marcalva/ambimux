@@ -1850,7 +1850,7 @@ int mdl_full_e(mdl_t *mdl, int *ixs, uint32_t ix_len){
         pr_hd(mdl->mp, &par_ix, &p_hd);
         pr_sd(mdl->mp, &par_ix, &p_sd);
         if (prob_invalid(p_hd) || prob_invalid(p_sd))
-            return err_msg(-1, 0, "mdl_sub_e: failed to get pr_hd or pr_sd");
+            return err_msg(-1, 0, "mdl_full_e: failed to get pr_hd or pr_sd");
         lp_hs_v[hs_ix] = log(p_hd) + log(p_sd);
     }
 
@@ -2832,6 +2832,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         return -1;
 
     // correct counts
+    /*
     if (objs->verbose)
         log_msg("correcting counts");
     iregs_t *pks = NULL;
@@ -2842,6 +2843,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
     if (mod_correct_counts(mdl, objs->gv, objs->anno, pks, corr_pre) < 0)
         return -1;
     free(corr_pre);
+    */
     if (objs->verbose)
         log_msg("model fit finished");
 
