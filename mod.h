@@ -470,6 +470,7 @@ int mdl_full_best_k(mdl_t *mdl);
 
 /* main function to fit model.
  *
+ * Main wrapper function.
  * Call this function to set parameters and fit the model.
  *
  */

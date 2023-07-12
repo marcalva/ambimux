@@ -2121,7 +2121,7 @@ int mdl_full_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     // sig_sum col 0: ambient, col 1: cell, row 0: outside peak, row 1: inside peak
     f_t *sig_sum = malloc(sig_ne * sizeof(f_t)); // outside/inside peak by ambient/nuclear
     for (i = 0; i < sig_ne; ++i)
-        sig_sum[i] = 0;
+        sig_sum[i] = 1e-8;
 
     // kappa counter
     uint32_t kappa_ne = K;
