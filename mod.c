@@ -1942,12 +1942,13 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     uint32_t D = mdl->mp->D;
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
     uint32_t n_hs = mdl->hs_ix->n_hs;
+    f_t psc = 1e-8;
 
     par_ix_t par_ix;
     par_ix_init(&par_ix);
 
     // lambda counter
-    f_t lambda_sums[3] = {0,0,0};
+    f_t lambda_sums[3] = {psc, psc, psc};
 
     uint32_t hs_ix;
     for (i = 0; i < ix_len; ++i){
@@ -1974,7 +1975,6 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
             // for alpha
             f_t a_tot, new_par, pdiff;
-            f_t psc = 1e-8;
             f_t ar[2] = {psc, psc}; // 1st index is ambient
             f_t aa[2] = {psc, psc};
 
