@@ -9,10 +9,10 @@ The source code can be downloaded using
 ```
 git clone --recurse-submodules git@github.com:marcalva/ambimux.git
 ```
-The `--recurse-submodules` makes sure the `htslib` dependency is downloaded.
+The `--recurse-submodules` flag makes sure the `htslib` dependency is downloaded.
 
 To create the binary, run `make`. After a successful build, the `ambimux` 
-binary file will be present in the directory.
+binary file will be present in the current directory.
 
 The only dependency is htslib, which is 
 included as a subdirectory. Note that ambimux requires htslib to be built 

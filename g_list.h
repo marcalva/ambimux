@@ -275,7 +275,7 @@
             v->m = ix + 1; \
             v->a = (type *)realloc(v->a, sizeof(type) * v->m); \
             if (v->a == NULL){ \
-                fprintf(stderr, "error: __mv_push_%s: %s\n", #name, strerror(errno)); \
+                fprintf(stderr, "error: __mv_insert_%s: %s\n", #name, strerror(errno)); \
                 return(-1); \
             } \
         } \

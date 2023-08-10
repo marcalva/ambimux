@@ -23,9 +23,9 @@ typedef struct {
 #define bflg_init_empty(flg) ( (flg)->f = NULL, (flg)->n = 0, (flg)->n_buckets = 0 ) 
 
 #define bflg_free(flg) ( free((flg)->f), (flg)->n = 0, (flg)->n_buckets = 0 )
-#define bflg_unset(flg, ix) ( flg->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
-#define bflg_set(flg, ix) ( flg->f[(ix) >> 3] |= (1UL << ((ix) & 0x7U)) )
-#define bflg_get(flg, ix) ( ( flg->f[(ix) >> 3] >> ((ix) & 0x7U) ) & 1 ) 
+#define bflg_unset(flg, ix) ( (flg)->f[(ix) >> 3] &= ~(1UL << ((ix) & 0x7U)) )
+#define bflg_set(flg, ix) ( (flg)->f[(ix) >> 3] |= (1UL << ((ix) & 0x7U)) )
+#define bflg_get(flg, ix) ( ( (flg)->f[(ix) >> 3] >> ((ix) & 0x7U) ) & 1UL ) 
 #define bflg_size(flg) (flg)->n
 
 static inline int bflg_resize(bflg_t *bflg, size_t n){
