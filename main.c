@@ -39,8 +39,6 @@ static void usage(FILE *fp, int exit_status){
             "\n"
             "  -o, --out           Output file prefix [ambimux]. File names are appended with '.' delimiter\n"
             "  -C, --counts-only   Flag argument to produce counts only and not fit a demultiplexing model.\n"
-            "  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many \n"
-            "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip. [100]\n"
             "\n"
             "Alignment options\n"
             "\n"
@@ -62,13 +60,11 @@ static void usage(FILE *fp, int exit_status){
             "\n"
             "EM options\n"
             "\n"
+            "  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many \n"
+            "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip. [100]\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-5].\n"
-            "  -K, --n-clust       Number of cell types [1].\n"
-            "  -A, --alpha-all     Estimate alpha with all reads. The default is to use only reads.\n"
-            "                      that overlap variants.\n"
-            "  -j, --max-alpha     Max value alpha can take [1].\n"
-            "  -q, --max-iter      Maximum number of iterations to perform for EM [20].\n"
+            "  -q, --max-iter      Maximum number of iterations to perform for EM [100].\n"
             "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
             "  -T, --threads       Optional number of threads to use [1].\n"
             "\n"
@@ -109,9 +105,6 @@ int main(int argc, char *argv[]){
         {"atac-mapq", required_argument, NULL, 'Z'},
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
-        {"n-clust", required_argument, NULL, 'K'},
-        {"alpha-all", no_argument, NULL, 'A'},
-        {"max-alpha", required_argument, NULL, 'j'},
         {"max-iter", required_argument, NULL, 'q'},
         {"seed", required_argument, NULL, 'd'},
         {"threads", required_argument, NULL, 'T'},
@@ -134,7 +127,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:tR:h:K:Aj:q:d:T:V", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:R:h:q:d:T:tV", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -282,9 +275,6 @@ int main(int argc, char *argv[]){
                           goto cleanup;
                       }
                       break;
-            case 't':
-                      opts->tx_basic = 1;
-                      break;
             case 'R': free(opts->region);
                       opts->region = strdup(optarg);
                       opts->region_set = 1;
@@ -303,38 +293,6 @@ int main(int argc, char *argv[]){
                           goto cleanup;
                       }
                       opts->eps = eps;
-                      break;
-            case 'K':
-                      errno = 0;
-                      opts->k = (int)strtol(optarg, &p_end, 10);
-                      if (opts->k == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --n-clust %s to int: %s", 
-                                  optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (opts->k <= 0){
-                          ret = err_msg(EXIT_FAILURE, 0, "--n-clust must be > 0"); 
-                          goto cleanup;
-                      }
-                      break;
-            case 'A':
-                      opts->alpha_vars = 0;
-                      break;
-            case 'j':
-                      errno = 0;
-                      float alpham = strtof(optarg, &p_end);
-                      if (errno == ERANGE){
-                          ret = err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --eps %s to int: %s", 
-                                  optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (alpham < 0){
-                          ret = err_msg(EXIT_FAILURE, 0, "--max-alpha must be non-negative"); 
-                          goto cleanup;
-                      }
-                      opts->alpha_max = alpham;
                       break;
             case 'q': errno = 0;
                       opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);
@@ -370,6 +328,9 @@ int main(int argc, char *argv[]){
                                   optarg, strerror(errno));
                           goto cleanup;
                       }
+                      break;
+            case 't':
+                      opts->tx_basic = 1;
                       break;
             case 'V': opts->verbose = 1;
                       break;

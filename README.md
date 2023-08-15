@@ -1,7 +1,7 @@
 
 # Ambimux
 
-Software tools to process aligned multiome data.
+Software tool for demultiplexing single cell multiome data.
 
 ## Installation
 
@@ -10,37 +10,43 @@ The source code can be downloaded using
 git clone --recurse-submodules git@github.com:marcalva/ambimux.git
 ```
 The `--recurse-submodules` flag makes sure the `htslib` dependency is downloaded.
+If not, you can also clone this manually.
 
-To create the binary, run `make`. After a successful build, the `ambimux` 
-binary file will be present in the current directory.
+After cloning, run `make` to build the binary, which can be found in the
+current directory after successful compilation.
 
-The only dependency is htslib, which is 
-included as a subdirectory. Note that ambimux requires htslib to be built 
-successfully during `make`.
+The only dependency is htslib, which is included as a subdirectory. Note that
+ambimux requires htslib to be built successfully during the `make` step.
+Thus all dependencies for htslib are also required for ambimux.
 
 ## Usage
 
-An example usage of ambimux is
+An example usage of ambimux is below.
 ```
-./ambimux \
-    --rna-bam $rna_bam \
-    --atac-bam $atac_bam \
-    --vcf $vcf \
-    --gtf $gtf \
-    --peaks $peaks \
-    --exclude $excl \
-    --samples $samples \
+ambimux \
+    --atac-bam "$atac_bam" \
+    --rna-bam "$gex_bam" \
+    --vcf "$vcf" \
+    --gtf "$gtf" \
+    --peaks "$peaks" \
+    --samples "$samples" \
+    --bc-wl "$bcsd" \
     --rna-mapq 30 \
     --atac-mapq 30 \
-    --out-min 100 \
-    --bc-wl $wl_bcs \
+    --tx-basic \
+    --eps 1-e6 \
+    --max-iter 100 \
+    --seed 123 \
     --threads 8 \
     --verbose \
-    --eps 10 \
-    --max-iter 10 \
-    --out mulitome
+    --out path/to/output/dir/ambimux
+
+    --exclude $excl \
+    --out-min 100 \
 ```
 where the variables are replaced by your own files.
+
+For a detailed explanation of each parameter, see below.
 
 ## Alignment data
 
@@ -48,55 +54,114 @@ Ambimux can use data from single cell ATAC, RNA, or both. The ATAC and RNA
 BAM files are specified with the `--atac-bam` and `--rna-bam` options.
 These files need to be indexed, for example with [samtools](https://github.com/samtools/samtools).
 
-The alignments in the BAM files need the barcode tags to map to its 
-corresponding droplet. These are given by the `--rna-bc-tag` and 
-`--atac-bc-tag`. By default these are set to `CB` as provided by the 10X 
+The alignment records in the BAM files need the barcode tag field to provide
+the droplet of origin. These are given by the `--rna-bc-tag` and
+`--atac-bc-tag`. By default these are set to `CB` as provided by the 10X
 mapping pipeline.
 
 Similarly, the RNA BAM file requires the alignments to have the UMI tags to map 
 the alignment to the corresponding molecule. The tag is specified 
 with the `--rna-umi-tag` option (set to `UB` by default).
 
-## Mapping thresholds
+## Mapping filtering parameters
 
-There are two main thresholds to consider with ambimux. The first is the
-phred-based quality score of the base calls in the reads. Low-quality base
-calls from the sequencer can lead to reading an incorrect base and consequently
-reading the wrong allele at a variant. The default minimum is set to 30,
-meaning a 1 in 1,000 chance of a sequencing error.
+The `--max-nh` filter specifies the maximum number of hits for a query read. Setting
+this option to `1` means that only uniquely mapped reads are considered while,
+for example, setting this to `10` means that a query with up to 10 alignments is
+used for demultiplexing. Setting this to `0` ignores any filtering, and all reads
+will be used. The field in the record that the number of hits is found in is
+tyipcally `NH` but this can be changed with `--nh-tag`.
 
-The second threshold is the mapping quality score of the alignment.  This gives
-the probability that the alignment position is incorrect.  By default, the
+An important point is that if reads are multimapped, the primary alignment given by
+the aligner is used. All alignments that are tagged as `secondary` or 
+`supplementary` in the record's flag [flag](http://www.htslib.org/doc/samtools-flags.html)
+are skipped.
+
+The `--min-phredq` parameter specifies the phred-based quality score of the
+base calls in the reads. Low-quality base calls from the sequencer can lead to
+reading an incorrect base and consequently reading the wrong allele at a
+variant. The default minimum is set to 30, meaning a 1 in 1,000 chance of a
+sequencing error. This can be set to 20, for example, if a looser but
+reasonable criteria is desired.
+
+The `--rna-mapq` and `--atac-mapq` specify the mapping quality score threshold of
+the RNA and ATAC BAM files, respectively. This gives
+the probability that the alignment position is incorrect. By default, the
 threshold is set at 30, meaning a 1 in 1,000 chance of an error in mapping
 position.
 
+The `--region` parameter can be used to specify a region of analysis, although
+using the entire genome is recommended for normal analyses.
+
 ## VCF file
 
-Ambimux takes variant and genotype data from a VCF file. It uses either hard
-genotype calls in the `GT` field or genotype probabilities in the `GP` field.
-Ambimux currently only uses bi-allelic SNPs and ignores indels. However, VCF
-files can have multiallelic SNPs split into two or more records. Ambimux will
-not ignore these SNPs and will incorrectly treat them as independent, with a
-warning.  To avoid multiallic SNPs, it is recommended to run `bcftools norm`
+Ambimux takes variant and genotype data from a VCF file. Currently, only the
+genotype calls in the `GT` field are used. Ambimux will only use bi-allelic
+SNPs and ignore indels. However, VCF files can have multiallelic SNPs present
+in two or more records. Ambimux will not ignore these?
+
+To avoid multiallic SNPs, it is recommended to run `bcftools norm`
 with the `--multiallelics +snps` option first to merge these multiallelic SNPs.
 Then, we can include only biallelic SNPs by filtering with `bcftools view` with
-the `-m2 -M2 -v snps` options set.
+the `-m2 -M2 -v snps` options set. An example filtering strategy is below:
+
+```bash
+bcftools view \
+    --apply-filters .,PASS \
+    -S $sfile \
+    -m 2 -M 2 \
+    --types snps \
+    "$vcf_in" \
+| bcftools plugin fill-tags \
+    - \
+    -- -t AC,AN,AF,MAF \
+| bcftools view \
+    --include 'INFO/AF > 0 & INFO/AF < 1' \
+| bcftools norm \
+    --check-ref ws \
+    --multiallelics +both \
+    --fasta-ref "$fa" \
+| bcftools view \
+    -m 2 -M 2  \
+| bcftools annotate \
+    --set-id '%CHROM\_%POS\_%REF\_%FIRST_ALT' \
+    -O z \
+> "$vcf_out" \
+```
+This takes a VCF input file `$vcf_in`, a list of sample IDs to include in
+the file `$sfile`, and a fasta file `$fa` and outputs a filtered, normalized
+VCF file `$vcf_out`. This filters to include biallelic SNPs only samples
+present in `$sfile`, updates the allele frequencies, removes monomorphic SNPs,
+normalizes SNPs to a reference genome, merges multiallic SNPs, and again
+removes multiallic SNPs. The last annotates SNP IDs by their position and
+alleles, and this step can be skipped if original IDs are desired.
+
+Note the chromosome names should match the BAM file.
 
 ## Peak and gene annotations
 
-Peak annotations are input as a BED file with the `--peaks` option.
-Gene annotations are input as a GTF file with the `--gtf` option.
+The peak and gene annotations are provided by the `--peaks` and `--gtf`
+options. The peaks file should be in BED format while the gene annotations
+should be in GTF format. Note that the chromosome names should match with
+the BAM file.
+
+These aren't strictly necessary for demultiplexing and will not affect the
+singlet assignments. They are used for peak, gene, and allele read counting,
+as well as for summary statistics.
 
 ## Exclusion regions
 
-Reads that align to problematic regions of the genome can be excluded. 
+ATAC reads that align to problematic regions of the genome can be excluded. 
 To do so, provide a BED file of the exclusion regions with the 
 `--exclude` option.
 
+A list of exclusion regions used by ENCODE can be found
+[here](https://github.com/Boyle-Lab/Blacklist.git).
+
 ## Counting reads
 
-Ambimux generates gene and variant allele counts for the model and these are 
-output by default. Counts are in 
+Ambimux generates variant allele counts for the model and these are 
+output by default. Additionally, gene and peak counts are produced. Counts are in 
 [Matrix Market exchange format](https://math.nist.gov/MatrixMarket/formats.html).
 The complete list of counts are 
 
@@ -129,15 +194,22 @@ strand, gene type, gene ID, and gene name.
 It is also possible to only generate these counts and not run the likelihood 
 model by including the `--counts-only` argument.
 
-## Output filtering
+## EM options
 
-Droplets with very few counts are not useful for analyses and are typically 
-empty. We avoid calculating the likelihood for these droplets to save time 
-and resources. To specify the threshold at which to keep or remove droplets, 
-add the `--out-min` option, which is set at `100` by default.
-If a barcode has at least this many RNA UMIs or this many ATAC fragments, 
-it is included in the likelihood calculation. If neither UMIs or fragments 
-pass this threshold, the barcode is skipped.
+The `--out-min` option specifies the count threshold to to fix droplets as
+empty. By default, this option is set to `100`, meaning droplets with less
+than 100 RNA UMIs and less than 100 ATAC fragments are fixed as empty. If a
+droplet has at least 100 UMIs or 100 fragments, it is considered a
+candidate droplet.
+
+The parameters for convergence include `--eps`, which is set to `1e-5` by
+default, and `--max-iter`, which is set to `100` by default. The eps parameter
+specifies when to stop the EM based on the percent change in the log likelihood.
+The max-iter specifies the maximum number of iterations to run, regardless of
+convergence by `--eps`.
+
+The `--seed` option can be used to specify the random seed for reproducible
+runs.
 
 ## Program options
 
@@ -161,9 +233,6 @@ Output options
 
   -o, --out           Output file prefix [ambimux]. File names are appended with '.' delimiter
   -C, --counts-only   Flag argument to produce counts only and not fit a demultiplexing model.
-  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many 
-                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, 
-skip. [100]
 
 Alignment options
 
@@ -185,9 +254,11 @@ Mapping thresholds
 
 EM options
 
+  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many 
+                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip. [100]
   -h, --eps           Convergence threshold, where the percent change in parameters
                       must be less than this value [1e-5].
-  -q, --max-iter      Maximum number of iterations to perform for EM [20].
+  -q, --max-iter      Maximum number of iterations to perform for EM [100].
   -d, --seed          Optional random seed to initialize parameters for EM.
   -T, --threads       Optional number of threads to use [1].
 
