@@ -158,7 +158,7 @@ To do so, provide a BED file of the exclusion regions with the
 A list of exclusion regions used by ENCODE can be found
 [here](https://github.com/Boyle-Lab/Blacklist.git).
 
-## Counting reads
+## Gene, peak, and allele counts
 
 Ambimux generates variant allele counts for the model and these are 
 output by default. Additionally, gene and peak counts are produced. Counts are in 
@@ -210,6 +210,44 @@ convergence by `--eps`.
 
 The `--seed` option can be used to specify the random seed for reproducible
 runs.
+
+## Output and filtering
+
+The `summary.txt` output file contains the main demultiplexing results for the
+test droplets, removing fixed empty droplets with low coverage. 
+This file contains the following columns
+
+1. **Barcode** The barcode of the droplet. For multiome runs, this is usually the RNA barcode.
+2. **n_rna_molecules** Total number of RNA UMIs aligned to the genome passing filters.
+3. **n_atac_molecules** Total number of ATAC deduplicated fragments aligned to the genome passing filters.
+4. **n_features** Number of genes detected in the RNA modality.
+5. **n_peaks** Number of peaks detected in the ATAC modality.
+6. **n_rna_variants** Number of variants passing filters detected in the RNA modality.
+7. **n_atac_variants** Number of variants passing filters detected in the ATAC modality.
+8. **atac_pct_mt** Percent of ATAC fragments aligned to the mitochondrial genome.
+9. **rna_pct_mt** Percent of RNA UMIs aligned to the mitochondrial genome.
+10. **FRIP** Fraction of ATAC fragments inside peaks.
+11. **best_type** Droplet type with the maximum likelihood among empty, singlet, and doublet.
+  This does not assign ambiguous droplets and further filtering is recommended.
+12. **best_sample** Among best droplet type, the sample assignment with the highest likelihood.
+13. **best_rna_alpha** The RNA ambient fraction estimate of the best droplet and sample assignment.
+14. **best_atac_alpha** The ATAC ambient fraction estimate of the best droplet and sample assignment.
+15. **PP0** Posterior probability of an empty droplet type.
+16. **PP1** Posterior probability of a singlet droplet type.
+17. **PP2** Posterior probability of a doublet droplet type.
+18. **LLK0** Log likelihood of an empty droplet type.
+19. **LLK1** Log likelihood of a singlet droplet type.
+20. **LLK2** Log likelihood of a doublet droplet type.
+
+To call singlets, we recommend applying a filter on the singlet posterior probability.
+Thresholds of 0.9, 0.95, or 0.99 are suitable, and ultimately depend on the desired
+level of confidence in the call. Alternatively, thresholding the log likelihood
+differences can provide another filtering strategy.
+
+In addition to calling singlets, you can filter out highly contaminated droplets
+with low coverage. The **alpha** columns contain the ambient fraction estimates.
+For example, droplets with **alpha** values greater than 0.25 could be excluded
+from analyses.
 
 ## Program options
 
