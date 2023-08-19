@@ -822,7 +822,7 @@ void mdl_bc_dat_free(mdl_bc_dat_t *mdl_bc_dat) {
     if (mdl_bc_dat == NULL)
         return;
 
-    int i;
+    uint32_t i;
     for (i = 0; i < mv_size(&mdl_bc_dat->bc_mlcl); ++i)
         mdl_mlcl_bc_free(&mv_i(&mdl_bc_dat->bc_mlcl, i));
 
@@ -907,7 +907,6 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
 
     // not modeling genes or peaks currently
     uint32_t n_genes = 0;
-    uint32_t n_peaks = 0;
     uint32_t n_vars = 0;
     if (objs->gv)
         n_vars = mv_size(&objs->gv->vix2var);
@@ -1382,7 +1381,6 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     if (lp_htd == NULL)
         return err_msg(-1, 0, "mdl_sub_e: %s", strerror(errno));
 
-    uint32_t fixed = 0, unfixed = 0;
     uint32_t i;
     for (i = 0; i < ix_len; ++i){
         // get barcode and bam data
@@ -1395,9 +1393,6 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
         // if fixed, set Pr(empty) = 1
         int afl = bflg_get(&bd->amb_flag, bc_ix);
         uint32_t bc_n_ix = afl ? 1 : n_hs;
-
-        if (afl) ++fixed;
-        else ++unfixed;
 
         // barcode count data
         mdl_mlcl_bc_t bc_dat = mv_i(&bd->bc_mlcl, bc_ix);
@@ -1761,7 +1756,7 @@ int mdl_thrd_call(mdl_t *mdl, int *ixs, uint32_t ix_len){
     return 0;
 }
 
-int mdl_em(mdl_t *mdl, obj_pars *objs, int sub){
+int mdl_em(mdl_t *mdl, obj_pars *objs){
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_em_step: arguments are NULL");
 
@@ -1958,7 +1953,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         log_msg("running EM");
 
     // run sub model
-    if (mdl_em(mdl, objs, 1) < 0)
+    if (mdl_em(mdl, objs) < 0)
         return -1;
 
     // get best (H,S) index
@@ -1966,10 +1961,6 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         return -1;
     // get posterior prob for (H)
     if (mdl_sub_pp_h(mdl) < 0)
-        return -1;
-
-    // run full model
-    if (mdl_em(mdl, objs, 0) < 0)
         return -1;
 
     if (objs->verbose)

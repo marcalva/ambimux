@@ -406,7 +406,7 @@ int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
 
 void *mdl_sub_thrd_fx(void *arg);
 int mdl_thrd_call(mdl_t *mdl, int *ixs, uint32_t ix_len);
-int mdl_em(mdl_t *mdl, obj_pars *objs, int sub);
+int mdl_em(mdl_t *mdl, obj_pars *objs);
 
 int mdl_sub_llk(mdl_t *mdl, f_t *llk);
 
