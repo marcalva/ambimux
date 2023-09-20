@@ -12,8 +12,13 @@ git clone --recurse-submodules git@github.com:marcalva/ambimux.git
 The `--recurse-submodules` flag makes sure the `htslib` dependency is downloaded.
 If not, you can also clone this manually.
 
-After cloning, run `make` to build the binary, which can be found in the
-current directory after successful compilation.
+After cloning, you can build htslib and then ambimux using the following
+sequence of commands. `make hts` will download htslib and build the library,
+while make will build ambimux
+```bash
+make hts
+make
+```
 
 The only dependency is htslib, which is included as a subdirectory. Note that
 ambimux requires htslib to be built successfully during the `make` step.
