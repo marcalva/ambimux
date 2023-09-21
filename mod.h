@@ -75,6 +75,14 @@ void mdl_mlcl_init(mdl_mlcl_t *mlcl);
 // free an allocated mdl_mlcl_t object.
 void mdl_mlcl_free(mdl_mlcl_t *mlcl);
 
+uint32_t mdl_mlcl_feat_count(kbtree_t(kb_mdl_mlcl) *bt);
+int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
+        int n_genes, int n_vars);
+int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars);
+f_t mdl_bc_frip(mdl_mlcl_bc_t *mdl_bc);
+void mdl_bc_counts(mdl_mlcl_bc_t *mdl_bc, uint32_t *rna, uint32_t *atac);
+void mdl_bc_print(FILE *f, mdl_mlcl_bc_t *mdl_bc);
+
 /*******************************************************************************
  * index structs
  ******************************************************************************/

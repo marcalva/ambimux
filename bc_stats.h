@@ -9,25 +9,28 @@
 #include "str_util.h"
 
 // hash table of flags to see if index is present
+// key is index, no value since hash is not a map/dict.
 KHASH_INIT(kh_cnt, int32_t, char, 0, kh_int_hash_func, kh_int_hash_equal);
 
 typedef struct bc_stats_t {
     char *bc;
-    uint32_t counts;
-    uint32_t atac_counts;
-    uint32_t rna_counts;
+    uint32_t counts; // total number of UMIs + fragments
+    uint32_t atac_counts; // total number of atac fragments
+    uint32_t rna_counts; // total number of rna UMIs
 
-    uint32_t n_atac_vars;
-    uint32_t n_rna_vars;
+    uint32_t n_atac_vars; // total number of atac variants detected
+    uint32_t n_rna_vars; // total number of rna variants detected
 
-    uint32_t n_gene;
-    uint32_t n_peak;
+    uint32_t n_gene; // total number of rna genes detected
+    uint32_t n_peak; // total number of atac peaks detected
 
-    float frip;
+    float frip; // fraction of reads in peaks
+    float frig; // fraction of reads in genes
 
-    float rna_mt;
-    float atac_mt;
+    float rna_mt; // percent of rna umis from mitochondria
+    float atac_mt; // percent of atac fragments from mitochondria
 
+    // used to store how many genes, peaks, and variants have been detected.
     khash_t(kh_cnt) *genes;
     khash_t(kh_cnt) *atac_vars;
     khash_t(kh_cnt) *rna_vars;

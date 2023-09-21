@@ -58,13 +58,19 @@ static void usage(FILE *fp, int exit_status){
             "  -Z, --atac-mapq     Minimum MAPQ (mapping quality) of an ATAC alignment [30].\n"
             "  -R, --region        Region (hts format), for example 'chr21,chr21:10-,chr21-10-20'.\n"
             "\n"
-            "EM options\n"
+            "Model options\n"
             "\n"
             "  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many \n"
             "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip. [100]\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-5].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [100].\n"
+            "  -i, --mdl-reads     The type of reads to use for demultiplexing and ambient estimation.\n"
+            "                      One of 'intra', 'inter', or 'all'. 'intra' (default) specifies the model\n"
+            "                      should use only reads contained in peaks or genes.\n"
+            "                      'inter' specifies to use only inter-peak or inter-gene reads that\n"
+            "                      fall outside peaks or genes. 'all' specifies to use all reads including\n"
+            "                      inter- and intra- gene and peak reads. [intra]\n"
             "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
             "  -T, --threads       Optional number of threads to use [1].\n"
             "\n"
@@ -106,6 +112,7 @@ int main(int argc, char *argv[]){
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
         {"max-iter", required_argument, NULL, 'q'},
+        {"mdl-reads", required_argument, NULL, 'i'},
         {"seed", required_argument, NULL, 'd'},
         {"threads", required_argument, NULL, 'T'},
         {"tx-basic", no_argument, NULL, 't'}, 
@@ -127,7 +134,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:R:h:q:d:T:tV", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:R:h:q:i:d:T:tV", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -304,6 +311,23 @@ int main(int argc, char *argv[]){
                           goto cleanup;
                       }
                       break;
+            case 'i': errno = 0;
+                if ( strcmp(optarg, "intra") == 0 ) {
+                    opts->mdl_intra_reads = 1;
+                    opts->mdl_inter_reads = 0;
+                } else if ( strcmp(optarg, "inter") == 0 ) {
+                    opts->mdl_intra_reads = 0;
+                    opts->mdl_inter_reads = 1;
+                } else if ( strcmp(optarg, "all") == 0 ) {
+                    opts->mdl_intra_reads = 1;
+                    opts->mdl_inter_reads = 1;
+                } else {
+                    ret = err_msg(EXIT_FAILURE, 0, 
+                                  "invalid argument for --mdl-reads: %s", 
+                                  optarg);
+                    goto cleanup;
+                }
+                break;
             case 'd':
                       errno = 0;
                       int seed = (int)strtol(optarg, &p_end, 10);
@@ -338,9 +362,9 @@ int main(int argc, char *argv[]){
                       usage(stdout, EXIT_SUCCESS);
                       break;
             default: 
-                      err_msg(EXIT_FAILURE, 0, 
-                              "unrecognized option: %s", loptions[option_index].name);
+                      // err_msg(EXIT_FAILURE, 0, "unrecognized option: %s", loptions[option_index].name);
                       usage(stdout, EXIT_FAILURE);
+                      break;
         }
     }
 

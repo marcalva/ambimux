@@ -139,6 +139,7 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
         char *bc_key = kh_key(bcs_hash, k_bc);
         bc_data_t *bc_data = kh_val(bcs_hash, k_bc);
 
+        // add barcode to barcode index
         int bci, found;
         if ( (bci = add2str_map(agc->bc_ix, bc_key, &found)) < 0)
             return -1;

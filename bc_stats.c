@@ -19,6 +19,7 @@ int bc_stats_init(bc_stats_t *bcc){
     bcc->n_peak = 0;
 
     bcc->frip = -1;
+    bcc->frig = -1;
 
     bcc->rna_mt = 0;
     bcc->atac_mt = 0;

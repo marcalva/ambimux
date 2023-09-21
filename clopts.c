@@ -50,6 +50,9 @@ cl_opts *init_cl_opts(){
     opts->max_iter = 100;
     // opts->alpha_max = 1;
 
+    opts->mdl_intra_reads = 1;
+    opts->mdl_inter_reads = 0;
+
     opts->threads = 1;
 
     opts->verbose = 0;
@@ -126,6 +129,9 @@ obj_pars *init_obj_pars(){
     p->seed = (uint32_t)time(&t);
     p->eps = 1e-5;
     p->max_iter = 100;
+
+    p->mdl_intra_reads = 1;
+    p->mdl_inter_reads = 0;
 
     p->threads = 1;
 
@@ -336,6 +342,8 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->k = opts->k;
     objs->max_iter = opts->max_iter;
     objs->threads = opts->threads;
+    objs->mdl_intra_reads = opts->mdl_intra_reads;
+    objs->mdl_inter_reads = opts->mdl_inter_reads;
     if (opts->out_fn) objs->out_fn = strdup(opts->out_fn);
     objs->verbose = opts->verbose;
 

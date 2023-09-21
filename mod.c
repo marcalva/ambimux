@@ -123,6 +123,8 @@ int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
 
 int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars) {
     // add peak
+    // index 0 is outside peak
+    // index 1+ is peak.
     int32_t in_pk = mv_size(&frag->pks) > 0;
     int32_t pk_ix = in_pk ? mv_i(&frag->pks, 0) + 1 : 0;
     if (mv_push(i32, &mlcl->feat_ixs, pk_ix) < 0)
@@ -936,8 +938,9 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
         bc_stats_t *bc_stat = bam_bc->bc_stats;
         assert(bc_stat != NULL);
 
-        // barcode can be both absent or empty
-        // since all low count droplets are collapsed, absent always is 0
+        // barcode can be both absent and empty
+        // since all low count droplets are collapsed, absent is always 0
+        // low_count=1 when num. atac and num. rna are both below threshold
         int absent = 0;
         int low_count = (bc_stat->atac_counts < c_thresh) && (bc_stat->rna_counts < c_thresh);
         int dup_ok = low_count; // only low count empty barcode can be duplicate
@@ -965,6 +968,14 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             int skip_mol = mol_n_vars == 0;
             if (skip_mol)
                 continue;
+
+            // filter intra/inter gene reads
+            uint32_t n_feats = ml_size(&mol->gl);
+            if (n_feats == 0 && objs->mdl_inter_reads == 0) {
+                continue;
+            } else if (n_feats > 0 && objs->mdl_intra_reads == 0) {
+                continue;
+            }
 
             // initialize mlcl to 0
             mdl_mlcl_t mlcl;
@@ -996,6 +1007,14 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             int skip_mol = frag_n_vars == 0;
             if (skip_mol)
                 continue;
+
+            // filter intra/inter peak reads
+            uint32_t n_feats = mv_size(&frag->pks);
+            if (n_feats == 0 && objs->mdl_inter_reads == 0) {
+                continue;
+            } else if (n_feats > 0 && objs->mdl_intra_reads == 0) {
+                continue;
+            }
 
             // initialize mlcl to all 0
             mdl_mlcl_t mlcl;
@@ -1560,14 +1579,13 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                 if (n_vars < 1)
                     continue;
 
-                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
+                // Recalculate Pr(T_dm, B_dm | \Theta)
                 f_t psum = 0, p_tfb[3] = {1,1,1};
                 int pret = p_bd(mdl->mp, mlcl, RNA_IX, bc_ix, &par_ix, p_tfb, &psum);
                 if (pret < 0)
                     return -1;
                 assert(psum > 0);
 
-                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
                 int t_im;
                 for (t_im = 0; t_im < par_ix.t_n; ++t_im){
                     int s_ix = par_ix.t_ix[t_im];
@@ -1599,14 +1617,13 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                 if (n_vars < 1)
                     continue;
 
-                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
+                // Recalculate Pr(T_dm, B_dm | \Theta)
                 f_t psum = 0, p_tfb[3] = {1,1,1};
                 int pret = p_bd(mdl->mp, mlcl, ATAC_IX, bc_ix, &par_ix, p_tfb, &psum);
                 if (pret < 0)
                     return -1;
                 assert(psum > 0);
 
-                // Recalculate Pr(T_dm, P_dm, B_dm | \Theta)
                 int t_im;
                 for (t_im = 0; t_im < par_ix.t_n; ++t_im){
                     int s_ix = par_ix.t_ix[t_im];
@@ -2294,7 +2311,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
     }
 
     char hdr[] = "Barcode\tn_rna_molecules\tn_atac_molecules\tn_features\tn_peaks"
-        "\tn_rna_variants\tn_atac_variants\tatac_pct_mt\trna_pct_mt\tFRIP"
+        "\tn_rna_variants\tn_atac_variants\tatac_pct_mt\trna_pct_mt\tFRIP\tFRIG"
         "\tbest_type\tbest_sample"
         "\tbest_rna_alpha\tbest_atac_alpha"
         "\tPP0\tPP1\tPP2"
@@ -2359,6 +2376,10 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
 
         fputc(delim, fp);
         double2str_in((double)bcc->frip, &pstr, &buf_size, 4);
+        fputs(pstr, fp);
+
+        fputc(delim, fp);
+        double2str_in((double)bcc->frig, &pstr, &buf_size, 4);
         fputs(pstr, fp);
 
         // get best (H,S) assignment

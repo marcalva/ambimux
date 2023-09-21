@@ -789,8 +789,9 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     int ret = iregs_overlap(pks, chr, beg, end, &overlaps);
     if (ret < 0) return(-1);
 
-    // check if peak overlaps by at least one base
-    // if so, add to f->pks
+    // check if the individual cut sites overlap peaks
+    // A fragment fully contained within a peak will contain two counts/instances
+    //   for the peak, one for each cut site.
     size_t i;
     for (i = 0; i < mv_size(&overlaps); ++i){
         int ix = mv_i(&overlaps, i);

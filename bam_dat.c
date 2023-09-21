@@ -595,6 +595,7 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
         return err_msg(-1, 0, "bc_data_rna_fill: arguments are null");
 
     float n_mt = 0;
+    uint32_t in_gene = 0;
     rna_mlc_bag_itr itr, *itrp = &itr;
     rna_mlc_bag_itr_first(itrp, &bc_dat->rna_mlcs);
     while (rna_mlc_bag_itr_alive(itrp)) {
@@ -609,6 +610,7 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
             if (ret < 0)
                 return err_msg(-1, 0, "bc_data_rna_fill_stats: failed to add to gene ID");
         }
+        if (ml_size(&mol->gl)) ++in_gene;
 
         // count variant calls
         ml_node_t(seq_vac_l) *vn;
@@ -635,6 +637,11 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
     if (bcc->rna_counts) bcc->rna_mt = n_mt / (float)bcc->rna_counts;
     else bcc->rna_mt = 0;
 
+    if (bcc->rna_counts)
+        bcc->frig = (float)in_gene / (float)bcc->rna_counts;
+    else
+        bcc->frig = 0;
+
     bcc->n_gene = kh_size(bcc->genes);
     bcc->n_rna_vars = kh_size(bcc->rna_vars);
 
@@ -653,11 +660,12 @@ int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_
         g_reg_pair reg = *atac_frag_bag_itr_key(itrp);
         atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
 
-        // peak counts
+        // peaks present
         size_t p_i;
         for (p_i = 0; p_i < mv_size(&frag->pks); ++p_i){
             int ret;
-            kh_put(kh_cnt, bcc->peaks, mv_i(&frag->pks, p_i), &ret);
+            int32_t pk_ix = mv_i(&frag->pks, p_i);
+            kh_put(kh_cnt, bcc->peaks, pk_ix, &ret);
             if (ret < 0)
                 return err_msg(-1, 0, "bc_data_atac_fill_stats: failed to add to peak ID");
         }

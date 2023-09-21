@@ -64,6 +64,10 @@ typedef struct {
     uint16_t max_iter;
     uint16_t threads;
 
+    // by default, only intra-peak, intra-gene reads are used
+    int mdl_intra_reads; // use all reads for model
+    int mdl_inter_reads; // use only inter-peak, inter-gene reads for model
+
     int verbose;
 } cl_opts;
 
@@ -127,6 +131,10 @@ typedef struct {
     uint16_t max_iter;
 
     uint16_t threads;
+
+    // by default, only intra-peak, intra-gene reads are used
+    int mdl_intra_reads; // use all reads for model
+    int mdl_inter_reads; // use only inter-peak, inter-gene reads for model
 
     char *out_fn;
 
