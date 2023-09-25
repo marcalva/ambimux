@@ -92,25 +92,11 @@ uint32_t mdl_mlcl_tot_count(kbtree_t(kb_mdl_mlcl) *bt){
     return(counts);
 }
 
-uint32_t mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt) {
-    if (bt == NULL)
-        return 0;
-
-    kbitr_t itr;
-    uint32_t counts = 0;
-    kb_itr_first(kb_mdl_mlcl, bt, &itr); 
-    for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
-        mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
-        if (mv_size(&mlcl->var_ixs) > 0)
-            counts += mlcl->counts;
-    }
-    return(counts);
-}
-
-int mdl_mlcl_var_flg(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg) {
+int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg, uint32_t *counts) {
     if (bt == NULL || var_flg == NULL)
         return err_msg(-1, 0, "mdl_mlcl_var_flg: argument is null");
 
+    *counts = 0;
     kbitr_t itr;
     kb_itr_first(kb_mdl_mlcl, bt, &itr); 
     for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
@@ -128,31 +114,29 @@ int mdl_mlcl_var_flg(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg) {
             }
             bflg_set(var_flg, var_ix);
         }
+        if (n_var > 0)
+            *counts += mlcl->counts;
     }
     return 0;
 }
 
-int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc,
+int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
                            uint32_t *rna_count, uint32_t *atac_count,
                            uint32_t *rna_var_count, uint32_t *atac_var_count) {
     if (mlcl_bc == NULL)
         return err_msg(-1, 0, "mdl_mlcl_bc_info: argument is null");
 
-    *rna_count = mdl_mlcl_info_count(mlcl_bc->rna);
-    *atac_count = mdl_mlcl_info_count(mlcl_bc->atac);
-
     bflg_t rna_var_flg, atac_var_flg;
     bflg_init_empty(&rna_var_flg);
     bflg_init_empty(&atac_var_flg);
-    size_t isize = 0x1 << 28;
-    if (bflg_init(&rna_var_flg, isize) < 0)
+    if (bflg_init(&rna_var_flg, n_var) < 0)
         return -1;
-    if (bflg_init(&atac_var_flg, isize) < 0)
+    if (bflg_init(&atac_var_flg, n_var) < 0)
         return -1;
     
-    if (mdl_mlcl_var_flg(mlcl_bc->rna, &rna_var_flg) < 0)
+    if (mdl_mlcl_info_count(mlcl_bc->rna, &rna_var_flg, rna_count) < 0)
         return -1;
-    if (mdl_mlcl_var_flg(mlcl_bc->atac, &atac_var_flg) < 0)
+    if (mdl_mlcl_info_count(mlcl_bc->atac, &atac_var_flg, atac_count) < 0)
         return -1;
 
     *rna_var_count = 0;
@@ -2369,6 +2353,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
     uint32_t n_test_bc = mdl->mp->T;
     uint32_t n_all_bc = mdl->mp->D;
+    uint32_t n_vars = bd->V;
     str_map *samples = mdl->samples;
     str_map *test_bcs = bd->test_bcs;
     par_ix_t par_ix;
@@ -2422,7 +2407,8 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
 
         // get number of informative reads and num. variants
         uint32_t n_rna_info = 0, n_atac_info = 0, n_rna_var = 0, n_atac_var = 0;
-        if (mdl_mlcl_bc_info_count(mlcl_bc, &n_rna_info, &n_atac_info, &n_rna_var, &n_atac_var) < 0)
+        if (mdl_mlcl_bc_info_count(mlcl_bc, n_vars, &n_rna_info, &n_atac_info,
+                                   &n_rna_var, &n_atac_var) < 0)
             return -1;
 
         // write bc stats

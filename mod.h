@@ -79,16 +79,14 @@ void mdl_mlcl_free(mdl_mlcl_t *mlcl);
 uint32_t mdl_mlcl_tot_count(kbtree_t(kb_mdl_mlcl) *bt);
 
 // Get number of reads that overlap a variant
-// sum the ->counts field when num. variants > 0
-uint32_t mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt);
-
+// sum the ->counts field when num. variants > 0 and store in counts
 // set the variants present by index in a bflg object.
-int mdl_mlcl_var_flg(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg);
+int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg, uint32_t *counts);
 
 // count the number of informative reads that overlap variants, and the number
 // of variants detected that have overlapping reads in this barcode.
 // returns -1 on error, 0 on success.
-int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc,
+int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
                            uint32_t *rna_count, uint32_t *atac_count,
                            uint32_t *rna_var_count, uint32_t *atac_var_count);
 
