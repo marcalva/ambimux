@@ -51,18 +51,30 @@ static int psum_invalid(f_t x, f_t lb, f_t ub) {
 }
 
 /*******************************************************************************
+ * seq bases
+ ******************************************************************************/
+
+f_t phred_to_perr(uint8_t phred) {
+    f_t nfphred = -(f_t)phred / 10.0;
+    f_t perr = pow(10.0, nfphred);
+    return perr;
+}
+
+/*******************************************************************************
  * mdl_mlcl_t
  ******************************************************************************/
 
 void mdl_mlcl_init(mdl_mlcl_t *mlcl){
     mv_init(&mlcl->feat_ixs);
     mv_init(&mlcl->var_ixs);
+    mv_init(&mlcl->bquals);
     mlcl->counts = 0;
 }
 void mdl_mlcl_free(mdl_mlcl_t *mlcl){
     if (mlcl == NULL) return;
     mv_free(&mlcl->feat_ixs);
     mv_free(&mlcl->var_ixs);
+    mv_free(&mlcl->bquals);
     mlcl->counts = 0;
 }
 
@@ -75,7 +87,7 @@ void mdl_mlcl_print(FILE *f, mdl_mlcl_t *mlcl){
     }
     fprintf(f, " variants:");
     for (i = 0; i < mv_size(&mlcl->var_ixs); ++i){
-        fprintf(f, ", %i", mv_i(&mlcl->var_ixs, i));
+        fprintf(f, ", %i (%i)", mv_i(&mlcl->var_ixs, i), mv_i(&mlcl->bquals, i));
     }
     fprintf(f, ", count=%u", mlcl->counts);
     fprintf(f, "\n");
@@ -178,6 +190,9 @@ int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
         int32_t v_ix = vac.vix + (n_vars * allele);
         if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
             return(-1);
+        int32_t bqual = (int32_t)vac.qual;
+        if (mv_push(i32, &mlcl->bquals, bqual) < 0)
+            return(-1);
     }
     return 0;
 }
@@ -200,6 +215,9 @@ int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars) {
         uint8_t allele = vac.allele < 2 ? vac.allele : 2;
         int32_t v_ix = vac.vix + (n_vars * allele);
         if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
+            return(-1);
+        int32_t bqual = (int32_t)vac.qual;
+        if (mv_push(i32, &mlcl->bquals, bqual) < 0)
             return(-1);
     }
     return 0;
@@ -773,6 +791,9 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
 
     // set tau
     mp->tau = TAU;
+    if (prob_invalid(mp->tau))
+        return err_msg(-1, 0, "mdl_pars_set_dat: invalid prob tau = %f", mp->tau);
+
 
     // free
     for (i = 0; i < bd->V; ++i){
@@ -839,11 +860,6 @@ int mdl_pars_check(mdl_pars_t *mp){
                         i, j, p);
         }
     }
-
-    // tau
-    if (prob_invalid(mp->tau))
-        return err_msg(-1, 0, "mdl_pars_check: tau = %f",
-                mp->tau);
 
     return(0);
 }
@@ -1336,6 +1352,7 @@ int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
     // Pr(B_dm | T_dm, \rho)
     size_t i, n_vars = mv_size(&mlcl->var_ixs);
     for (i = 0; i < n_vars; ++i){
+        // get base call for variant allele
         int32_t vi = mv_i(&mlcl->var_ixs, i);
         if (vi < 0)
             return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
@@ -1346,8 +1363,12 @@ int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
         uint32_t v_ix = di.rem;
         if (allele > 1) continue; // if missing
 
-        f_t pp = pr_gamma_var(mp->gamma, v_ix, allele, s_ix,
-                gamma_nrow, mp->tau);
+        // get base quality score
+        // set to default tau if missing
+        int32_t bqual = mv_i(&mlcl->bquals, i);
+        f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mp->tau;
+
+        f_t pp = pr_gamma_var(mp->gamma, v_ix, allele, s_ix, gamma_nrow, perr);
         if (prob_invalid(pp))
             return err_msg(-1, 0, "p_var: invalid base probability value '%e'", pp);
         pbm *= pp;

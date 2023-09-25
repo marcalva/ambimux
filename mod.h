@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <math.h>
 #include "htslib/khash.h"
 #include "gtf_anno.h"
 #include "array_util.h"
@@ -26,6 +27,13 @@
 #define TAU 0.01
 
 /*******************************************************************************
+ * seq bases
+ ******************************************************************************/
+
+// return 10^[-phred/10]
+f_t phred_to_perr(uint8_t phred);
+
+/*******************************************************************************
  * mdl_mlcl_t
  ******************************************************************************/
 
@@ -34,6 +42,8 @@
 typedef struct mdl_mlcl_t {
     mv_t(i32) feat_ixs;
     mv_t(i32) var_ixs;
+    mv_t(i32) bquals; // base quality scores (0-255). Corresponds to `var_ixs`.
+                      // -1 is missing
     uint32_t counts; // number of molecules with this feature-variant comb.
 } mdl_mlcl_t;
 
@@ -349,6 +359,7 @@ void pr_sd(mdl_pars_t *mp, par_ix_t *par_ix, f_t *prob);
 int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
         int t_ix, f_t *prob);
 // get gamma
+// @param tau Probability of a base call error.
 f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele, 
         uint32_t s_ix, uint32_t gamma_nrow, f_t tau);
 
