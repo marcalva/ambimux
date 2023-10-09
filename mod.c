@@ -104,11 +104,13 @@ uint32_t mdl_mlcl_tot_count(kbtree_t(kb_mdl_mlcl) *bt){
     return(counts);
 }
 
-int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg, uint32_t *counts) {
-    if (bt == NULL || var_flg == NULL)
+int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, khash_t(iset) *var_ixs, uint32_t *counts) {
+    if (bt == NULL || var_ixs == NULL)
         return err_msg(-1, 0, "mdl_mlcl_var_flg: argument is null");
 
     *counts = 0;
+    // khiter_t k;
+    int khret;
     kbitr_t itr;
     kb_itr_first(kb_mdl_mlcl, bt, &itr); 
     for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, bt, &itr)){
@@ -118,13 +120,9 @@ int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg, uint32_t *co
             int32_t var_ix = mv_i(&mlcl->var_ixs, i);
             if (var_ix < 0)
                 return err_msg(-1, 0, "mdl_mlcl_var_flg: var_ix=%i is negative", var_ix);
-            size_t mvar_ix = (size_t)var_ix;
-            if (mvar_ix >= bflg_size(var_flg)) {
-                mvar_ix *= 2;
-                if (bflg_resize(var_flg, mvar_ix) < 0)
-                    return -1;
-            }
-            bflg_set(var_flg, var_ix);
+            kh_put(iset, var_ixs, var_ix, &khret);
+            if (khret < 0)
+                return err_msg(-1, 0, "mdl_mlcl_var_flg: failed to push '%i' to set", var_ix);
         }
         if (n_var > 0)
             *counts += mlcl->counts;
@@ -138,29 +136,25 @@ int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
     if (mlcl_bc == NULL)
         return err_msg(-1, 0, "mdl_mlcl_bc_info: argument is null");
 
-    bflg_t rna_var_flg, atac_var_flg;
-    bflg_init_empty(&rna_var_flg);
-    bflg_init_empty(&atac_var_flg);
-    if (bflg_init(&rna_var_flg, n_var) < 0)
-        return -1;
-    if (bflg_init(&atac_var_flg, n_var) < 0)
-        return -1;
+    khash_t(iset) *rna_vars = kh_init(iset);
+    khash_t(iset) *atac_vars = kh_init(iset);
+    if (kh_resize(iset, rna_vars, n_var) < 0)
+        return err_msg(-1, 0, "mdl_mlcl_bc_info: failed resize");
+    if (kh_resize(iset, atac_vars, n_var) < 0)
+        return err_msg(-1, 0, "mdl_mlcl_bc_info: failed resize");
     
-    if (mdl_mlcl_info_count(mlcl_bc->rna, &rna_var_flg, rna_count) < 0)
+    if (mdl_mlcl_info_count(mlcl_bc->rna, rna_vars, rna_count) < 0)
         return -1;
-    if (mdl_mlcl_info_count(mlcl_bc->atac, &atac_var_flg, atac_count) < 0)
+    if (mdl_mlcl_info_count(mlcl_bc->atac, atac_vars, atac_count) < 0)
         return -1;
 
-    *rna_var_count = 0;
-    *atac_var_count = 0;
-    size_t i;
-    for (i = 0; i < bflg_size(&rna_var_flg); ++i)
-        *rna_var_count += bflg_get(&rna_var_flg, i);
-    for (i = 0; i < bflg_size(&atac_var_flg); ++i)
-        *atac_var_count += bflg_get(&atac_var_flg, i);
+    *rna_var_count = kh_size(rna_vars);
+    *atac_var_count = kh_size(atac_vars);
 
-    bflg_free(&rna_var_flg);
-    bflg_free(&atac_var_flg);
+    kh_destroy(iset, rna_vars);
+    rna_vars = NULL;
+    kh_destroy(iset, atac_vars);
+    atac_vars = NULL;
 
     return 0;
 }

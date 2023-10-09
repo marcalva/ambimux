@@ -26,6 +26,8 @@
 
 #define TAU 0.01
 
+KHASH_SET_INIT_INT64(iset);
+
 /*******************************************************************************
  * seq bases
  ******************************************************************************/
@@ -91,7 +93,7 @@ uint32_t mdl_mlcl_tot_count(kbtree_t(kb_mdl_mlcl) *bt);
 // Get number of reads that overlap a variant
 // sum the ->counts field when num. variants > 0 and store in counts
 // set the variants present by index in a bflg object.
-int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, bflg_t *var_flg, uint32_t *counts);
+int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, khash_t(iset) *var_ixs, uint32_t *counts);
 
 // count the number of informative reads that overlap variants, and the number
 // of variants detected that have overlapping reads in this barcode.
