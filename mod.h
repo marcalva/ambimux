@@ -21,8 +21,11 @@
 #include "bits.h"
 #include "r_count.h"
 #include "region.h"
+#include "g_list.h"
 
 #define f_t double
+
+mv_declare(fv, f_t);
 
 #define TAU 0.01
 
@@ -188,8 +191,10 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum; // used to normalize off-diagonal pi_1*pi_2 for H=2.
-    f_t *alpha_rna; // droplet contamination prob. (D x nrow_hs array)
-    f_t *alpha_atac; // droplet contamination prob. (D x nrow_hs array)
+    f_t *alpha_rna1; // droplet contamination prob. (D x nrow_hs array)
+    f_t *alpha_rna2; // droplet contamination prob. (D x nrow_hs array)
+    f_t *alpha_atac1; // droplet contamination prob. (D x nrow_hs array)
+    f_t *alpha_atac2; // droplet contamination prob. (D x nrow_hs array)
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
     f_t tau; // probability of a sequencing error (fixed at 0.01)
 
