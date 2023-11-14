@@ -683,6 +683,9 @@ int mdl_pars_set_gamma_amb(mdl_pars_t *mp){
 
     uint32_t i, M = mp->M, V = mp->V, M1 = M + 1;
 
+    // assume equal contribution for all samples
+    f_t ep = 1.0 / M;
+
     // update gamma
     for (i = 0; i < V; ++i){
         uint16_t st, n_miss = 0;
@@ -693,8 +696,8 @@ int mdl_pars_set_gamma_amb(mdl_pars_t *mp){
             if (gprob < 0) {
                 ++n_miss; // if missing, skip
             } else {
-                ap += mp->pi[st] * mp->gamma[CMI(st, i, M1)];
-                pi_tot += mp->pi[st];
+                ap += ep * gprob;
+                pi_tot += ep;
             }
         }
         if (n_miss == M) {
@@ -1618,7 +1621,8 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     par_ix_init(&par_ix);
 
     // lambda counter
-    f_t lambda_sums[3] = {psc, psc, psc};
+    f_t lambda_sums[3] = {0, 0, 0};
+    f_t *pi_sums = calloc(M, sizeof(f_t));
 
     uint32_t hs_ix;
     for (i = 0; i < ix_len; ++i){
@@ -1661,6 +1665,12 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
             // lambda
             lambda_sums[par_ix.hd] += bc_dat.n_bc * cp_hsx;
+
+            // pi
+            if (par_ix.s1 >= 0 && par_ix.s1 < M)
+                pi_sums[par_ix.s1] += bc_dat.n_bc * cp_hsx;
+            if (par_ix.s2 >= 0 && par_ix.s2 < M)
+                pi_sums[par_ix.s2] += bc_dat.n_bc * cp_hsx;
 
             // Get P(H,S,X)
             // Divide by \sum P(T,G,P,B,X)
@@ -1762,9 +1772,15 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
     // add to tmp sum variables
     pthread_mutex_lock(&mdl->mp->sum_lock);
+
     // add lambda
     for (i = 0; i < 3; ++i){
         mdl->mp->_lambda_sum[i] += lambda_sums[i];
+    }
+
+    // add pi
+    for (i = 0; i < M; ++i) {
+        mdl->mp->_pi_sum[i] += pi_sums[i];
     }
 
     pthread_mutex_unlock(&mdl->mp->sum_lock);
@@ -1790,6 +1806,29 @@ int mdl_m_lambda(mdl_t *mdl) {
     return 0;
 }
 
+int mdl_m_pi(mdl_t *mdl) {
+    f_t new_par = 0;
+    uint16_t M = mdl->mp->M;
+    f_t pi_tot = 0;
+    unsigned int i, j;
+    for (i = 0; i < M; ++i) {
+        pi_tot += mdl->mp->_pi_sum[i];
+    }
+    for (i = 0; i < M; ++i) {
+        new_par = mdl->mp->_pi_sum[i] / pi_tot;
+        mdl->mp->_par_diff += fabs(new_par - mdl->mp->pi[i]);
+        mdl->mp->pi[i] = new_par;
+    }
+    f_t pi_sum = 0;
+    for (i = 0; i < M; ++i){
+        for (j = i+1; j < M; ++j){
+            pi_sum += (mdl->mp->pi[i] * mdl->mp->pi[j]);
+        }
+    }
+    mdl->mp->pi_d_sum = pi_sum;
+    return 0;
+}
+
 int mdl_sub_est(mdl_t *mdl) {
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_sub_est: mdl is null");
@@ -1797,8 +1836,7 @@ int mdl_sub_est(mdl_t *mdl) {
     if (mdl_m_lambda(mdl) < 0)
         return -1;
 
-    // maximize pi (keep fixed uniform for now)
-    if (mdl_pars_pi_fix(mdl->mp) < 0)
+    if (mdl_m_pi(mdl) < 0)
         return -1;
 
     // update gamma
@@ -2105,6 +2143,8 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         log_msg("writing out parameters");
     if (write_lambda(mdl, objs->out_fn) < 0)
         return -1;
+    if (write_pi(mdl, objs->out_fn) < 0)
+        return -1;
     if (bam_dat->has_rna && write_alpha_rna(mdl, objs->out_fn) < 0)
         return -1;
     if (bam_dat->has_atac && write_alpha_atac(mdl, objs->out_fn) < 0)
@@ -2166,6 +2206,50 @@ int write_lambda(mdl_t *mdl, char *fn){
     free(row_names[2]);
     free(row_names);
     free(out_lambda_fn);
+
+    return(0);
+}
+
+int write_pi(mdl_t *mdl, char *fn) {
+    if (mdl == NULL || fn == NULL)
+        return err_msg(-1, 0, "write_pi: arguments are NULL");
+
+    if (mdl->mp == NULL)
+        return err_msg(-1, 0, "write_pi: model hasn't been initialized");
+
+    char nl = '\n';
+    char delim = '\t';
+    unsigned int decp = 8;
+    int ret = 0;
+    uint16_t M = mdl->mp->M;
+
+    char *pi_fn = ".pi.txt.gz";
+    char *out_pi_fn = strcat2((const char*)fn, (const char*)pi_fn);
+
+    // row names
+    char **row_names = malloc(M * sizeof(char *));
+    unsigned int i;
+    for (i = 0; i < M; ++i) {
+        row_names[i] = str_map_str(mdl->samples, i);
+    }
+
+    // col names
+    char **col_names = malloc(sizeof(char *));
+    col_names[0] = strdup("Pi");
+    if (col_names[0] == NULL)
+        return err_msg(-1, 0, "write_pi: %s", strerror(errno));
+    
+    // write matrix
+    ret = write_matrix_double(out_pi_fn, mdl->mp->pi, NULL, NULL, NULL, 
+            row_names, M, col_names, 1, 
+            delim, nl, decp);
+    if (ret < 0)
+        return err_msg(-1, 0, "write_pi: failed to write matrix to file");
+
+    free(col_names[0]);
+    free(col_names);
+    free(row_names);
+    free(out_pi_fn);
 
     return(0);
 }

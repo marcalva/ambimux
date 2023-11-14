@@ -436,6 +436,9 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
  */
 int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len);
 
+int mdl_m_lambda(mdl_t *mdl);
+int mdl_m_pi(mdl_t *mdl);
+
 int mdl_sub_est(mdl_t *mdl);
 
 int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
@@ -476,6 +479,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs);
 
 // output functions
 int write_lambda(mdl_t *mdl, char *fn);
+int write_pi(mdl_t *mdl, char *fn);
 int write_alpha_rna(mdl_t *mdl, char *fn);
 int write_alpha_atac(mdl_t *mdl, char *fn);
 
