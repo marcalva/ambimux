@@ -32,6 +32,17 @@ mv_declare(fv, f_t);
 KHASH_SET_INIT_INT64(iset);
 
 /*******************************************************************************
+ * math
+ ******************************************************************************/
+
+int f_t_lt_cmp(const void *a, const void *b);
+
+// @param x input vector of length n
+// @param y output vector (x projected onto n-simplex) of length n
+// @param n length of vectors
+int proj_splx(const f_t *x, f_t *y, size_t n);
+
+/*******************************************************************************
  * seq bases
  ******************************************************************************/
 
@@ -39,7 +50,7 @@ KHASH_SET_INIT_INT64(iset);
 f_t phred_to_perr(uint8_t phred);
 
 /*******************************************************************************
- * mdl_mlcl_t
+ * mdl_mlcl_and pi_amb t
  ******************************************************************************/
 
 // store molecule information, including gene or peak and variant.
@@ -191,6 +202,7 @@ typedef struct {
     f_t lambda[3]; // empty, singlet, doublet prop (3 x 1 array)
     f_t *pi; // sample prop (M x 1 array)
     f_t pi_d_sum; // used to normalize off-diagonal pi_1*pi_2 for H=2.
+    f_t *pi_amb; // amb sample prop (M x 1 array)
     f_t *alpha_rna1; // droplet contamination prob. (D x nrow_hs array)
     f_t *alpha_rna2; // droplet contamination prob. (D x nrow_hs array)
     f_t *alpha_atac1; // droplet contamination prob. (D x nrow_hs array)
@@ -287,6 +299,7 @@ int mdl_pars_reset_sums(mdl_pars_t *mp, f_t psc);
 /* Set pi value to uniform across samples/indices
  */
 int mdl_pars_pi_fix(mdl_pars_t *mp);
+int mdl_pars_pi_amb_fix(mdl_pars_t *mp);
 
 /* Add gamma parameters to mdl_pars_t
  * The gamma parameters are the genotypes (probabilities of alternate allele).
@@ -323,6 +336,10 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
 /* Check validity of parameters
  * @return -1 if any invalid, 0 if OK
  */
+int is_in_simplex(f_t *x, size_t len);
+int mdl_check_lambda(mdl_pars_t *mp);
+int mdl_check_pi(mdl_pars_t *mp);
+int mdl_check_pi_amb(mdl_pars_t *mp);
 int mdl_pars_check(mdl_pars_t *mp);
 
 /*******************************************************************************

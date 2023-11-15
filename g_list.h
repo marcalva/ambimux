@@ -322,5 +322,6 @@
 #define mv_resize(name, v, n) __mv_resize_##name(v, n)
 
 mv_declare(i32, int32_t);
+mv_declare(u32, uint32_t);
 
 #endif // G_LIST_H

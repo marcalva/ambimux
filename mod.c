@@ -51,6 +51,57 @@ static int psum_invalid(f_t x, f_t lb, f_t ub) {
 }
 
 /*******************************************************************************
+ * math
+ ******************************************************************************/
+
+int f_t_lt_cmp(const void *a, const void *b) {
+    f_t arg1 = *(const f_t *)a;
+    f_t arg2 = *(const f_t *)b;
+    return (arg1 > arg2) - (arg1 < arg2);
+}
+
+int proj_splx(const f_t *x, f_t *y, size_t n) {
+    if (x == NULL || y == NULL)
+        return err_msg(-1, 0, "proj_splx: argument is null");
+
+    if (n <= 1)
+        return err_msg(-1, 0, "proj_splx: n<=1 makes no sense");
+
+    f_t *xc = malloc(n * sizeof(f_t));
+    if (xc == NULL)
+        return err_msg(-1, 0, "proj_splx: %s", strerror(errno));
+    memcpy(xc, x, n * sizeof(f_t));
+    qsort(xc, n, sizeof(f_t), f_t_lt_cmp);
+
+    f_t t_cntr = xc[n];
+    f_t t_hat;
+    size_t i = n - 1;
+    while (i > 0) {
+        t_cntr += xc[i];
+        f_t t_i = (t_cntr - 1) / (n - i);
+
+        if (t_i >= xc[i]) {
+            t_hat = t_i;
+            break;
+        }
+        i -= 1;
+        if (i == 0) {
+            t_cntr += xc[i];
+            t_hat = (t_cntr - 1) / n;
+        }
+    }
+    for (i = 0; i < n; ++i) {
+        y[i] = x[i] - t_hat;
+        if (y[i] < 0)
+            y[i] = 0;
+    }
+
+    free(xc);
+
+    return 0;
+}
+
+/*******************************************************************************
  * seq bases
  ******************************************************************************/
 
@@ -473,6 +524,7 @@ int mdl_pars_init(mdl_pars_t *mp){
     mp->n_hs = 0;
     
     mp->pi = NULL;
+    mp->pi_amb = NULL;
     mp->alpha_rna1 = NULL;
     mp->alpha_rna2 = NULL;
     mp->alpha_atac1 = NULL;
@@ -513,6 +565,7 @@ void mdl_pars_free(mdl_pars_t *mp) {
 
 
     free(mp->pi);
+    free(mp->pi_amb);
     free(mp->alpha_rna1);
     free(mp->alpha_rna2);
     free(mp->alpha_atac1);
@@ -527,6 +580,7 @@ void mdl_pars_free(mdl_pars_t *mp) {
     mp->n_hs = 0;
     
     mp->pi = NULL;
+    mp->pi_amb = NULL;
     mp->alpha_rna1 = NULL;
     mp->alpha_rna1 = NULL;
     mp->alpha_atac1 = NULL;
@@ -568,6 +622,10 @@ int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
     if (mp->pi == NULL)
         return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
 
+    mp->pi_amb = calloc(mp->M, sizeof(f_t));
+    if (mp->pi_amb == NULL)
+        return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
+
     mp->alpha_rna1 = calloc(D * mp->n_hs, sizeof(f_t));
     if (mp->alpha_rna1 == NULL)
         return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
@@ -578,7 +636,6 @@ int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
     mp->alpha_atac1 = calloc(D * mp->n_hs, sizeof(f_t));
     if (mp->alpha_atac1 == NULL)
         return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
-
     mp->alpha_atac2 = calloc(D * mp->n_hs, sizeof(f_t));
     if (mp->alpha_atac2 == NULL)
         return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
@@ -615,14 +672,18 @@ int mdl_pars_reset_sums(mdl_pars_t *mp, f_t psc) {
 }
 
 int mdl_pars_pi_fix(mdl_pars_t *mp){
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_pars_pi_fix: argument is null");
+    if (mp->pi == NULL)
+        return err_msg(-1, 0, "mdl_pars_pi_fix: pi is null");
 
-    uint32_t i, j;
-    uint32_t M = mp->M;
+    uint32_t i, j, M = mp->M;
 
-    // maximize pi (keep fixed uniform for now)
+    // set pi uniform
     f_t pi_upd = 1.0 / M;
     for (i = 0; i < M; ++i)
         mp->pi[i] = pi_upd;
+
     f_t pi_sum = 0;
     for (i = 0; i < M; ++i){
         for (j = i+1; j < M; ++j){
@@ -630,6 +691,22 @@ int mdl_pars_pi_fix(mdl_pars_t *mp){
         }
     }
     mp->pi_d_sum = pi_sum;
+
+    return(0);
+}
+
+int mdl_pars_pi_amb_fix(mdl_pars_t *mp) {
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_pars_pi_amb_fix: argument is null");
+    if (mp->pi_amb == NULL)
+        return err_msg(-1, 0, "mdl_pars_pi_amb_fix: pi_amb is null");
+
+    uint32_t i, M = mp->M;
+
+    // set pi_amb uniform
+    f_t pi_upd = 1.0 / M;
+    for (i = 0; i < M; ++i)
+        mp->pi_amb[i] = pi_upd;
 
     return(0);
 }
@@ -680,11 +757,18 @@ int mdl_pars_add_gamma(mdl_pars_t *mp, float **a, int nv, int ns){
 }
 
 int mdl_pars_set_gamma_amb(mdl_pars_t *mp){
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_pars_set_gamma_amb: argument is null");
+    if (mp->pi_amb == NULL)
+        return err_msg(-1, 0, "mdl_pars_set_gamma_amb: pi_amb is null");
+    if (mp->gamma == NULL)
+        return err_msg(-1, 0, "mdl_pars_set_gamma_amb: gamma is null");
 
     uint32_t i, M = mp->M, V = mp->V, M1 = M + 1;
 
-    // assume equal contribution for all samples
-    f_t ep = 1.0 / M;
+    // ensure that pi_amb is in simplex
+    if (mdl_check_pi_amb(mp) < 0)
+        return err_msg(-1, 0, "mdl_pars_set_gamma_amb: pi_amb is invalid");
 
     // update gamma
     for (i = 0; i < V; ++i){
@@ -696,16 +780,17 @@ int mdl_pars_set_gamma_amb(mdl_pars_t *mp){
             if (gprob < 0) {
                 ++n_miss; // if missing, skip
             } else {
-                ap += ep * gprob;
-                pi_tot += ep;
+                ap += mp->pi_amb[st] * gprob;
+                pi_tot += mp->pi_amb[st];
             }
         }
-        if (n_miss == M) {
-            mp->gamma[CMI(st, i, M1)] = -1; // if all missing, set missing
+        if (n_miss == M || pi_tot <= 0) {
+            mp->gamma[CMI(st, i, M1)] = -1; // if all missing, set amb to missing
         } else {
-            if (pi_tot <= 0)
-                return err_msg(-1, 0, "mdl_pars_set_gamma_amb: pi sum <= 0");
             mp->gamma[CMI(st, i, M1)] = ap / pi_tot;
+            // ensure valid probabilities
+            if (mp->gamma[CMI(st, i, M1)] > 1)
+                mp->gamma[CMI(st, i, M1)] = 1;
         }
     }
     return(0);
@@ -732,8 +817,10 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
                 bd->V, n_samples) < 0)
         return -1;
 
-    // keep pi uniform
+    // set pi and pi_amb uniform
     if (mdl_pars_pi_fix(mp) < 0)
+        return(-1);
+    if (mdl_pars_pi_amb_fix(mp) < 0)
         return(-1);
 
     // prior of 1 for lambda
@@ -808,7 +895,6 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
     if (prob_invalid(mp->tau))
         return err_msg(-1, 0, "mdl_pars_set_dat: invalid prob tau = %f", mp->tau);
 
-
     // free
     for (i = 0; i < bd->V; ++i){
         free(gm[i]);
@@ -818,34 +904,76 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
     return(0);
 }
 
-int mdl_pars_check(mdl_pars_t *mp){
+int is_in_simplex(f_t *x, size_t len) {
+    if (x == NULL)
+        return err_msg(-1, 0, "is_in_simplex: argument is null");
 
-    f_t lt1 = 1 - 1e-8;
-    f_t ut1 = 1 + 1e-8;
+    f_t lt1 = 1 - 1e-8, ut1 = 1 + 1e-8;
+    f_t tot = 0.0;
+    unsigned int i;
+    for (i = 0; i < len; ++i) {
+        if (prob_invalid(x[i]))
+            return err_msg(-1, 0, "is_in_simplex: x[%i] = %f", i, x[i]);
+        tot += x[i];
+    }
+    if (psum_invalid(tot, lt1, ut1))
+        return err_msg(-1, 0, "is_in_simplex: x sum = %f", tot);
+
+    return 0;
+}
+
+int mdl_check_lambda(mdl_pars_t *mp) {
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_check_lambda: argument is null");
+
+    if (is_in_simplex(mp->lambda, 3) < 0)
+        return err_msg(-1, 0, "mdl_check_lambda: lambda is invalid");
+
+    return 0;
+}
+
+int mdl_check_pi(mdl_pars_t *mp) {
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_check_pi: argument is null");
+
+    if (mp->pi == NULL)
+        return err_msg(-1, 0, "mdl_check_pi: pi is null");
+
+    if (is_in_simplex(mp->pi, mp->M) < 0)
+        return err_msg(-1, 0, "mdl_check_pi: pi is invalid");
+
+    return 0;
+}
+
+int mdl_check_pi_amb(mdl_pars_t *mp) {
+    if (mp == NULL)
+        return err_msg(-1, 0, "mdl_check_pi_amb: argument is null");
+
+    if (mp->pi_amb == NULL)
+        return err_msg(-1, 0, "mdl_check_pi_amb: pi_amb is null");
+
+    // check pi amb
+    if (is_in_simplex(mp->pi_amb, mp->M) < 0)
+        return err_msg(-1, 0, "mdl_check_pi_amb: pi_amb is invalid");
+
+    return 0;
+}
+
+int mdl_pars_check(mdl_pars_t *mp){
 
     uint32_t i, j, M1 = mp->M + 1;
 
     // check lambda
-    f_t lambda_tot = 0;
-    for (i = 0; i < 3; ++i) {
-        if (prob_invalid(mp->lambda[i]))
-            return err_msg(-1, 0, "mdl_pars_check: lambda[%i] = %f",
-                    i, mp->lambda[i]);
-        lambda_tot += mp->lambda[i];
-    }
-    if (psum_invalid(lambda_tot, lt1, ut1))
-        return err_msg(-1, 0, "mdl_pars_check: lambda sum = %f", lambda_tot);
+    if (mdl_check_lambda(mp) < 0)
+        return -1;
 
     // check pi
-    f_t pi_sum = 0;
-    for (i = 0; i < mp->M; ++i) {
-        if (prob_invalid(mp->pi[i]))
-            return err_msg(-1, 0, "mdl_pars_check: pi[%i] = %f",
-                    i, mp->pi[i]);
-        pi_sum += mp->pi[i];
-    }
-    if (psum_invalid(pi_sum, lt1, ut1))
-        return err_msg(-1, 0, "mdl_pars_check: pi sum = %f", pi_sum);
+    if (mdl_check_pi(mp) < 0)
+        return -1;
+
+    // check pi_amb
+    if (mdl_check_pi_amb(mp) < 0)
+        return -1;
 
     // alpha
     for (i = 0; i < mp->D; ++i){
@@ -1366,7 +1494,6 @@ int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
     uint32_t V = mp->V;
     uint16_t M = mp->M;
     uint32_t gamma_nrow = M + 1;
-    assert(s_ix < gamma_nrow);
 
     // probability terms
     f_t pbm = 1;
@@ -1829,6 +1956,187 @@ int mdl_m_pi(mdl_t *mdl) {
     return 0;
 }
 
+int mdl_m_pi_amb(mdl_t *mdl) {
+    if (mdl == NULL)
+        return err_msg(-1, 0, "mdl_m_pi_amb: mdl is null");
+
+    printf("getting pi amb\n");
+    uint32_t i;
+    uint16_t M = mdl->mp->M;
+    uint32_t D = mdl->mp->D;
+    uint32_t V = mdl->mp->V;
+    uint32_t gamma_nrow = M + 1;
+    mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
+
+
+    f_t *d_pi_amb = calloc(M, sizeof(f_t));
+    f_t *new_pi_amb = calloc(M, sizeof(f_t));
+    f_t *new_pi_ambp = calloc(M, sizeof(f_t));
+    if (d_pi_amb == NULL || new_pi_amb == NULL || new_pi_ambp == NULL)
+        return err_msg(-1, 0, "mdl_m_pi_amb: %s", strerror(errno));
+
+    // get ambient barcodes
+    mv_t(i32) amb_bcs;
+    mv_init(&amb_bcs);
+    for (i = 0; i < D; ++i) {
+        // if fixed, set Pr(empty) = 1
+        int afl = bflg_get(&bd->amb_flag, i);
+        if (afl)
+            mv_push(i32, &amb_bcs, i);
+    }
+    uint32_t E = mv_size(&amb_bcs);
+
+
+    printf("starting loop\n");
+    f_t vareps = 1e-2;
+    f_t delta_thresh = 1e-4;
+    f_t p_delta = delta_thresh;
+    while (p_delta >= delta_thresh) {
+        for (i = 0; i < M; ++i) {
+            d_pi_amb[i] = 0;
+            new_pi_amb[i] = 0;
+            new_pi_ambp[i] = 0;
+        }
+
+        f_t n_tot = 0.0;
+        for (i = 0; i < E; ++i){
+            // get barcode and bam data
+            printf("Getting bc\n");
+            uint32_t bc_ix = mv_i(&amb_bcs, i);
+            printf("got %u", bc_ix);
+
+            // barcode count data
+            mdl_mlcl_bc_t bc_dat = mv_i(&bd->bc_mlcl, bc_ix);
+
+            // bam data
+            kbtree_t(kb_mdl_mlcl) *mols = bc_dat.rna;
+            kbtree_t(kb_mdl_mlcl) *frags = bc_dat.atac;
+
+            kbitr_t itr_rna, itr_atac;
+
+            // loop over RNA
+            kb_itr_first(kb_mdl_mlcl, mols, &itr_rna); 
+            for (; kb_itr_valid(&itr_rna); kb_itr_next(kb_mdl_mlcl, mols, &itr_rna)){
+                mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr_rna);
+                uint32_t n_vars = mv_size(&mlcl->var_ixs);
+                if (n_vars < 1)
+                    continue;
+
+                // Pr(B_dm | T_dm, \rho)
+                size_t j;
+                for (j = 0; j < n_vars; ++j){
+                    // get base call for variant allele
+                    int32_t vi = mv_i(&mlcl->var_ixs, j);
+                    if (vi < 0)
+                        return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
+                    uint32_t v = (uint32_t)vi;
+                    div_t di = div((int)v, (int)V);
+                    assert(di.quot < 3); // TODO: remove after testing
+                    uint8_t allele = di.quot;
+                    uint32_t v_ix = di.rem;
+                    if (allele > 1) continue; // if missing
+
+                    // get base quality score
+                    // set to default tau if missing
+                    int32_t bqual = mv_i(&mlcl->bquals, i);
+                    f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mdl->mp->tau;
+
+                    f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+                    uint16_t s_ix;
+                    for (s_ix = 0; s_ix < M; ++s_ix) {
+                        f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                        f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
+                        if (num_invalid(dp1)) dp1 = 0;
+                        f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
+                        if (num_invalid(dp2)) dp2 = 0;
+                        f_t dp = dp1 - dp2;
+                        d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
+                    }
+                    n_tot += (1 - perr) * mlcl->counts;
+                }
+            }
+
+            // loop over ATAC
+            kb_itr_first(kb_mdl_mlcl, frags, &itr_atac); 
+            for (; kb_itr_valid(&itr_atac); kb_itr_next(kb_mdl_mlcl, frags, &itr_atac)){
+                mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr_atac);
+                uint32_t n_vars = mv_size(&mlcl->var_ixs);
+                if (n_vars < 1)
+                    continue;
+
+                // Pr(B_dm | T_dm, \rho)
+                size_t j;
+                for (j = 0; j < n_vars; ++j){
+                    // get base call for variant allele
+                    int32_t vi = mv_i(&mlcl->var_ixs, j);
+                    if (vi < 0)
+                        return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
+                    uint32_t v = (uint32_t)vi;
+                    div_t di = div((int)v, (int)V);
+                    assert(di.quot < 3); // TODO: remove after testing
+                    uint8_t allele = di.quot;
+                    uint32_t v_ix = di.rem;
+                    if (allele > 1) continue; // if missing
+
+                    // get base quality score
+                    // set to default tau if missing
+                    int32_t bqual = mv_i(&mlcl->bquals, i);
+                    f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mdl->mp->tau;
+
+                    f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+                    uint16_t s_ix;
+                    for (s_ix = 0; s_ix < M; ++s_ix) {
+                        f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                        f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
+                        if (num_invalid(dp1)) dp1 = 0;
+                        f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
+                        if (num_invalid(dp2)) dp2 = 0;
+                        f_t dp = dp1 - dp2;
+                        d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
+                    }
+                    n_tot += (1 - perr) * mlcl->counts;
+                }
+            }
+            uint16_t s_ix;
+            p_delta = 0;
+            printf("calculating new pi amb:\n");
+            for (s_ix = 0; s_ix < M; ++s_ix) {
+                d_pi_amb[s_ix] /= n_tot;
+                new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
+            }
+            if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0)
+                return -1;
+
+            log_msg("old pi amb:");
+            for (s_ix = 0; s_ix < M; ++s_ix) {
+                if (s_ix) printf("\t");
+                printf("%f", mdl->mp->pi_amb[s_ix]);
+            }
+            printf("\n");
+            log_msg("new pi amb:");
+            for (s_ix = 0; s_ix < M; ++s_ix) {
+                if (s_ix) printf("\t");
+                printf("%f", new_pi_ambp[s_ix]);
+            }
+            printf("\n");
+
+            for (s_ix = 0; s_ix < M; ++s_ix) {
+                p_delta += fabs(new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix]);
+                mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
+            }
+            p_delta /= M;
+            if (mdl_pars_set_gamma_amb(mdl->mp) < 0) return(-1);
+        }
+    }
+
+    mv_free(&amb_bcs);
+    free(d_pi_amb);
+    free(new_pi_amb);
+    free(new_pi_ambp);
+
+    return 0;
+}
+
 int mdl_sub_est(mdl_t *mdl) {
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_sub_est: mdl is null");
@@ -2115,6 +2423,10 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
     if (mdl_pars_set_dat(mdl->mp, mdl->mdl_bc_dat, objs,
                 mdl->samples->n) < 0)
         return -1;
+
+    if (mdl_m_pi_amb(mdl) < 0)
+        return -1;
+
     if (objs->verbose)
         log_msg("running EM");
 
