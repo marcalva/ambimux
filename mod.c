@@ -181,6 +181,21 @@ int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, khash_t(iset) *var_ixs, uint3
     return 0;
 }
 
+int mdl_mlcl_pack_var(uint32_t var_ix, uint8_t allele, uint32_t *pack) {
+    uint32_t max_var = 0x1<<28;
+    if (var_ix >= max_var)
+        return err_msg(-1, 0, "mdl_mlcl_pack_var: cannot pack var_ix=%u", var_ix);
+
+    *pack = (var_ix << 4) | allele;
+
+    return 0;
+}
+
+void mdl_mlcl_unpack_var(uint32_t pack, uint32_t *var_ix, uint8_t *allele) {
+    *var_ix = pack >> 4;
+    *allele = pack & 0xf;
+}
+
 int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
                            uint32_t *rna_count, uint32_t *atac_count,
                            uint32_t *rna_var_count, uint32_t *atac_var_count) {
@@ -211,7 +226,7 @@ int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
 }
 
 int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
-        int n_genes, int n_vars) {
+        int n_genes) {
     size_t mol_n_genes = ml_size(&mol->gl);
     // add gene if only 1 is present, skip multi-gene RNAs
     if (mol_n_genes == 1){
@@ -232,8 +247,11 @@ int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
         assert(vac.vix >= 0);
         // set allele to 0:ref, 1:alt, 2:any other
         uint8_t allele = vac.allele < 2 ? vac.allele : 2;
-        int32_t v_ix = vac.vix + (n_vars * allele);
-        if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
+        uint32_t var_ix = vac.vix;
+        uint32_t v_ix = -1;
+        if (mdl_mlcl_pack_var(var_ix, allele, &v_ix) < 0)
+            return -1;
+        if (mv_push(u32, &mlcl->var_ixs, v_ix) < 0)
             return(-1);
         int32_t bqual = (int32_t)vac.qual;
         if (mv_push(i32, &mlcl->bquals, bqual) < 0)
@@ -242,7 +260,7 @@ int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
     return 0;
 }
 
-int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars) {
+int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag) {
     // add peak
     // index 0 is outside peak
     // index 1+ is peak.
@@ -258,8 +276,11 @@ int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars) {
         assert(vac.vix >= 0);
         // set allele to 0:ref, 1:alt, 2:any other
         uint8_t allele = vac.allele < 2 ? vac.allele : 2;
-        int32_t v_ix = vac.vix + (n_vars * allele);
-        if (mv_push(i32, &mlcl->var_ixs, v_ix) < 0)
+        uint32_t var_ix = vac.vix;
+        uint32_t v_ix = -1;
+        if (mdl_mlcl_pack_var(var_ix, allele, &v_ix) < 0)
+            return -1;
+        if (mv_push(u32, &mlcl->var_ixs, v_ix) < 0)
             return(-1);
         int32_t bqual = (int32_t)vac.qual;
         if (mv_push(i32, &mlcl->bquals, bqual) < 0)
@@ -1205,7 +1226,7 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             mdl_mlcl_init(&mlcl);
             mlcl.counts = 1;
 
-            if (mdl_mlcl_add_rna(&mlcl, mol, n_genes, n_vars) < 0)
+            if (mdl_mlcl_add_rna(&mlcl, mol, n_genes) < 0)
                 return -1;
 
             mdl_mlcl_t *p; // pointer for btree add
@@ -1244,7 +1265,7 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             mdl_mlcl_init(&mlcl);
             mlcl.counts = 1;
 
-            if (mdl_mlcl_add_atac(&mlcl, frag, n_vars) < 0)
+            if (mdl_mlcl_add_atac(&mlcl, frag) < 0)
                 return -1;
 
             mdl_mlcl_t *p;
@@ -1491,7 +1512,6 @@ f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele,
 }
 
 int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
-    uint32_t V = mp->V;
     uint16_t M = mp->M;
     uint32_t gamma_nrow = M + 1;
 
@@ -1502,14 +1522,10 @@ int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
     size_t i, n_vars = mv_size(&mlcl->var_ixs);
     for (i = 0; i < n_vars; ++i){
         // get base call for variant allele
-        int32_t vi = mv_i(&mlcl->var_ixs, i);
-        if (vi < 0)
-            return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
-        uint32_t v = (uint32_t)vi;
-        div_t di = div((int)v, (int)V);
-        assert(di.quot < 3); // TODO: remove after testing
-        uint8_t allele = di.quot;
-        uint32_t v_ix = di.rem;
+        uint32_t pack = mv_i(&mlcl->var_ixs, i);
+        uint32_t v_ix;
+        uint8_t allele;
+        mdl_mlcl_unpack_var(pack, &v_ix, &allele);
         if (allele > 1) continue; // if missing
 
         // get base quality score
