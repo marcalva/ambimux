@@ -46,7 +46,7 @@ f_t phred_to_perr(uint8_t phred);
 // counts stores the number of times this molecule is present.
 typedef struct mdl_mlcl_t {
     mv_t(i32) feat_ixs;
-    mv_t(i32) var_ixs;
+    mv_t(u32) var_ixs;
     mv_t(i32) bquals; // base quality scores (0-255). Corresponds to `var_ixs`.
                       // -1 is missing
     uint32_t counts; // number of molecules with this feature-variant comb.
@@ -70,6 +70,15 @@ static inline int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2){
         if (mv_i(&m1.var_ixs, i) != mv_i(&m2.var_ixs, i))
             return( mv_i(&m1.var_ixs, i) - mv_i(&m2.var_ixs, i) );
     }
+
+    if (mv_size(&m1.bquals) != mv_size(&m2.bquals))
+        return( mv_size(&m1.bquals) - mv_size(&m2.bquals));
+
+    for (i = 0; i < mv_size(&m1.bquals); ++i){
+        if (mv_i(&m1.bquals, i) != mv_i(&m2.bquals, i))
+            return( mv_i(&m1.bquals, i) - mv_i(&m2.bquals, i) );
+    }
+
     return(0);
 }
 
@@ -98,6 +107,9 @@ uint32_t mdl_mlcl_tot_count(kbtree_t(kb_mdl_mlcl) *bt);
 // set the variants present by index in a bflg object.
 int mdl_mlcl_info_count(kbtree_t(kb_mdl_mlcl) *bt, khash_t(iset) *var_ixs, uint32_t *counts);
 
+int mdl_mlcl_pack_var(uint32_t var_ix, uint8_t allele, uint32_t *pack);
+void mdl_mlcl_unpack_var(uint32_t pack, uint32_t *var_ix, uint8_t *allele);
+
 // count the number of informative reads that overlap variants, and the number
 // of variants detected that have overlapping reads in this barcode.
 // returns -1 on error, 0 on success.
@@ -105,9 +117,8 @@ int mdl_mlcl_bc_info_count(mdl_mlcl_bc_t *mlcl_bc, size_t n_var,
                            uint32_t *rna_count, uint32_t *atac_count,
                            uint32_t *rna_var_count, uint32_t *atac_var_count);
 
-int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
-        int n_genes, int n_vars);
-int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag, int n_vars);
+int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol, int n_genes);
+int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag);
 f_t mdl_bc_frip(mdl_mlcl_bc_t *mdl_bc);
 void mdl_bc_counts(mdl_mlcl_bc_t *mdl_bc, uint32_t *rna, uint32_t *atac);
 void mdl_bc_print(FILE *f, mdl_mlcl_bc_t *mdl_bc);
