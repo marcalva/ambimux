@@ -84,10 +84,10 @@ int proj_splx(const f_t *x, f_t *y, size_t n) {
             t_hat = t_i;
             break;
         }
-        i -= 1;
-        if (i == 0) {
+        if (--i == 0) {
             t_cntr += xc[i];
             t_hat = (t_cntr - 1) / n;
+            break;
         }
     }
     for (i = 0; i < n; ++i) {
@@ -106,14 +106,41 @@ int proj_splx(const f_t *x, f_t *y, size_t n) {
  ******************************************************************************/
 
 f_t phred_to_perr(uint8_t phred) {
-    f_t nfphred = -(f_t)phred / 10.0;
-    f_t perr = pow(10.0, nfphred);
-    return perr;
+    return pow(10.0, -(f_t)phred / 10.0);
 }
 
 /*******************************************************************************
  * mdl_mlcl_t
  ******************************************************************************/
+
+int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2){
+    size_t i;
+    if (mv_size(&m1.feat_ixs) != mv_size(&m2.feat_ixs))
+        return( mv_size(&m1.feat_ixs) - mv_size(&m2.feat_ixs));
+
+    for (i = 0; i < mv_size(&m1.feat_ixs); ++i){
+        if (mv_i(&m1.feat_ixs, i) != mv_i(&m2.feat_ixs, i))
+            return( mv_i(&m1.feat_ixs, i) - mv_i(&m2.feat_ixs, i) );
+    }
+
+    if (mv_size(&m1.var_ixs) != mv_size(&m2.var_ixs))
+        return( mv_size(&m1.var_ixs) - mv_size(&m2.var_ixs));
+
+    for (i = 0; i < mv_size(&m1.var_ixs); ++i){
+        if (mv_i(&m1.var_ixs, i) != mv_i(&m2.var_ixs, i))
+            return( mv_i(&m1.var_ixs, i) - mv_i(&m2.var_ixs, i) );
+    }
+
+    if (mv_size(&m1.bquals) != mv_size(&m2.bquals))
+        return( mv_size(&m1.bquals) - mv_size(&m2.bquals));
+
+    for (i = 0; i < mv_size(&m1.bquals); ++i){
+        if (mv_i(&m1.bquals, i) != mv_i(&m2.bquals, i))
+            return( mv_i(&m1.bquals, i) - mv_i(&m2.bquals, i) );
+    }
+
+    return(0);
+}
 
 void mdl_mlcl_init(mdl_mlcl_t *mlcl){
     mv_init(&mlcl->feat_ixs);

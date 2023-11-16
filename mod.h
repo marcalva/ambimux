@@ -65,34 +65,7 @@ typedef struct mdl_mlcl_t {
 } mdl_mlcl_t;
 
 // comparison function for mdl_mlcl_t for sorting
-static inline int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2){
-    size_t i;
-    if (mv_size(&m1.feat_ixs) != mv_size(&m2.feat_ixs))
-        return( mv_size(&m1.feat_ixs) - mv_size(&m2.feat_ixs));
-
-    for (i = 0; i < mv_size(&m1.feat_ixs); ++i){
-        if (mv_i(&m1.feat_ixs, i) != mv_i(&m2.feat_ixs, i))
-            return( mv_i(&m1.feat_ixs, i) - mv_i(&m2.feat_ixs, i) );
-    }
-
-    if (mv_size(&m1.var_ixs) != mv_size(&m2.var_ixs))
-        return( mv_size(&m1.var_ixs) - mv_size(&m2.var_ixs));
-
-    for (i = 0; i < mv_size(&m1.var_ixs); ++i){
-        if (mv_i(&m1.var_ixs, i) != mv_i(&m2.var_ixs, i))
-            return( mv_i(&m1.var_ixs, i) - mv_i(&m2.var_ixs, i) );
-    }
-
-    if (mv_size(&m1.bquals) != mv_size(&m2.bquals))
-        return( mv_size(&m1.bquals) - mv_size(&m2.bquals));
-
-    for (i = 0; i < mv_size(&m1.bquals); ++i){
-        if (mv_i(&m1.bquals, i) != mv_i(&m2.bquals, i))
-            return( mv_i(&m1.bquals, i) - mv_i(&m2.bquals, i) );
-    }
-
-    return(0);
-}
+int mdl_mlcl_cmp(mdl_mlcl_t m1, mdl_mlcl_t m2);
 
 // btree to hold molecules per barcode
 KBTREE_INIT(kb_mdl_mlcl, mdl_mlcl_t, mdl_mlcl_cmp);
