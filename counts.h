@@ -26,7 +26,7 @@
  *  This uses 4 bit encoding A:1, C:2, G:4, T:8, N:15.
  *  To go from 4-bit encoding to the 3-bit here, use seq_nt16_int function.
  *  To go from 4-bit encoding to char encoded nucleotide, use seq_nt16_str function.
- * @field qual The quality score of the observed base.
+ * @field qual The quality score of the observed base [0-93], missing=0xFF.
  * @field next Pointer to next pbc_t in a list
  */
 typedef struct seq_base_t {

@@ -103,7 +103,11 @@ int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp){
     while (n2 != NULL){
         if (seq_base_cmp(ml_node_val(n1), ml_node_val(n2), 0) != 0)
             return err_msg(-1, 0, "seq_base_l_match_qual: bases don't match");
-        if ( ml_node_val(n2).qual > ml_node_val(n1).qual )
+
+        if (ml_node_val(n1).qual == 0xff && ml_node_val(n2).qual != 0xff)
+            ml_node_val(n1).qual = ml_node_val(n2).qual;
+
+        if ( ml_node_val(n2).qual != 0xff && ml_node_val(n2).qual > ml_node_val(n1).qual )
             ml_node_val(n1).qual = ml_node_val(n2).qual;
 
         n1 = ml_node_next(n1);
@@ -160,7 +164,11 @@ int seq_base_v_match_qual(mv_t(seq_base_v) *bv, const mv_t(seq_base_v) *cmp) {
         seq_base_t b2 = mv_i(cmp, i);
         if (seq_base_cmp(b1, b2, 0) != 0)
             return err_msg(-1, 0, "seq_base_v_match_qual: bases don't match");
-        if ( mv_i(bv, i).qual > mv_i(cmp, i).qual )
+
+        if ( mv_i(bv, i).qual == 0xff && mv_i(cmp, i).qual != 0xff)
+            mv_i(bv, i).qual = mv_i(cmp, i).qual;
+
+        if ( mv_i(cmp, i).qual != 0xff && mv_i(cmp, i).qual > mv_i(bv, i).qual )
             mv_i(bv, i).qual = mv_i(cmp, i).qual;
     }
 
@@ -218,6 +226,7 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
     if (b_base == 0xf)
         return(0);
 
+    // TODO: exclude missing qual?
     if (b_qual < min_qual)
         return(0);
 

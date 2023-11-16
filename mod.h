@@ -26,6 +26,7 @@
 #define f_t double
 
 mv_declare(fv, f_t);
+mv_declare(u8, uint8_t);
 
 #define TAU 0.01
 
@@ -58,8 +59,8 @@ f_t phred_to_perr(uint8_t phred);
 typedef struct mdl_mlcl_t {
     mv_t(i32) feat_ixs;
     mv_t(u32) var_ixs; // first 28 bits are variant index, last 4 bits are allele
-    mv_t(i32) bquals; // base quality scores (0-255). Corresponds to `var_ixs`.
-                      // -1 is missing
+    mv_t(u8) bquals; // base quality scores [0-93]. Corresponds to `var_ixs`.
+                      // 0xFF is missing
     uint32_t counts; // number of molecules with this feature-variant comb.
 } mdl_mlcl_t;
 

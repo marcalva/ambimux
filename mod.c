@@ -138,7 +138,7 @@ void mdl_mlcl_print(FILE *f, mdl_mlcl_t *mlcl){
     }
     fprintf(f, " variants:");
     for (i = 0; i < mv_size(&mlcl->var_ixs); ++i){
-        fprintf(f, ", %i (%i)", mv_i(&mlcl->var_ixs, i), mv_i(&mlcl->bquals, i));
+        fprintf(f, ", %i (%u)", mv_i(&mlcl->var_ixs, i), mv_i(&mlcl->bquals, i));
     }
     fprintf(f, ", count=%u", mlcl->counts);
     fprintf(f, "\n");
@@ -253,8 +253,10 @@ int mdl_mlcl_add_rna(mdl_mlcl_t *mlcl, rna_mol_t *mol,
             return -1;
         if (mv_push(u32, &mlcl->var_ixs, v_ix) < 0)
             return(-1);
-        int32_t bqual = (int32_t)vac.qual;
-        if (mv_push(i32, &mlcl->bquals, bqual) < 0)
+        uint8_t bqual = vac.qual;
+        if (bqual > 93 && bqual < 0xff)
+            bqual = 93;
+        if (mv_push(u8, &mlcl->bquals, bqual) < 0)
             return(-1);
     }
     return 0;
@@ -282,8 +284,10 @@ int mdl_mlcl_add_atac(mdl_mlcl_t *mlcl, atac_frag_t *frag) {
             return -1;
         if (mv_push(u32, &mlcl->var_ixs, v_ix) < 0)
             return(-1);
-        int32_t bqual = (int32_t)vac.qual;
-        if (mv_push(i32, &mlcl->bquals, bqual) < 0)
+        uint8_t bqual = vac.qual;
+        if (bqual > 93 && bqual < 0xff)
+            bqual = 93;
+        if (mv_push(u8, &mlcl->bquals, bqual) < 0)
             return(-1);
     }
     return 0;
@@ -1530,8 +1534,8 @@ int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob){
 
         // get base quality score
         // set to default tau if missing
-        int32_t bqual = mv_i(&mlcl->bquals, i);
-        f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mp->tau;
+        uint8_t bqual = mv_i(&mlcl->bquals, i);
+        f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mp->tau;
 
         f_t pp = pr_gamma_var(mp->gamma, v_ix, allele, s_ix, gamma_nrow, perr);
         if (prob_invalid(pp))
@@ -2043,8 +2047,8 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
                     // get base quality score
                     // set to default tau if missing
-                    int32_t bqual = mv_i(&mlcl->bquals, i);
-                    f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mdl->mp->tau;
+                    uint8_t bqual = mv_i(&mlcl->bquals, i);
+                    f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
 
                     f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
                     uint16_t s_ix;
@@ -2080,8 +2084,8 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
                     // get base quality score
                     // set to default tau if missing
-                    int32_t bqual = mv_i(&mlcl->bquals, i);
-                    f_t perr = bqual >= 0 ? phred_to_perr((uint8_t)bqual) : mdl->mp->tau;
+                    uint8_t bqual = mv_i(&mlcl->bquals, i);
+                    f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
 
                     f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
                     uint16_t s_ix;
