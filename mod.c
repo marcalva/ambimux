@@ -1976,11 +1976,9 @@ int mdl_m_pi_amb(mdl_t *mdl) {
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_m_pi_amb: mdl is null");
 
-    printf("getting pi amb\n");
     uint32_t i;
     uint16_t M = mdl->mp->M;
     uint32_t D = mdl->mp->D;
-    uint32_t V = mdl->mp->V;
     uint32_t gamma_nrow = M + 1;
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
 
@@ -2003,11 +2001,9 @@ int mdl_m_pi_amb(mdl_t *mdl) {
     uint32_t E = mv_size(&amb_bcs);
 
 
-    printf("starting loop\n");
-    f_t vareps = 1e-2;
-    f_t delta_thresh = 1e-4;
-    f_t p_delta = delta_thresh;
-    while (p_delta >= delta_thresh) {
+    int max_iter = 1000, iter = 0;
+    f_t vareps = 1e-1, delta_thresh = 1e-6, p_delta = delta_thresh + 1;
+    while (p_delta >= delta_thresh && iter < max_iter) {
         for (i = 0; i < M; ++i) {
             d_pi_amb[i] = 0;
             new_pi_amb[i] = 0;
@@ -2017,9 +2013,7 @@ int mdl_m_pi_amb(mdl_t *mdl) {
         f_t n_tot = 0.0;
         for (i = 0; i < E; ++i){
             // get barcode and bam data
-            printf("Getting bc\n");
             uint32_t bc_ix = mv_i(&amb_bcs, i);
-            printf("got %u", bc_ix);
 
             // barcode count data
             mdl_mlcl_bc_t bc_dat = mv_i(&bd->bc_mlcl, bc_ix);
@@ -2038,18 +2032,13 @@ int mdl_m_pi_amb(mdl_t *mdl) {
                 if (n_vars < 1)
                     continue;
 
-                // Pr(B_dm | T_dm, \rho)
                 size_t j;
                 for (j = 0; j < n_vars; ++j){
                     // get base call for variant allele
-                    int32_t vi = mv_i(&mlcl->var_ixs, j);
-                    if (vi < 0)
-                        return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
-                    uint32_t v = (uint32_t)vi;
-                    div_t di = div((int)v, (int)V);
-                    assert(di.quot < 3); // TODO: remove after testing
-                    uint8_t allele = di.quot;
-                    uint32_t v_ix = di.rem;
+                    uint32_t pack = mv_i(&mlcl->var_ixs, j);
+                    uint32_t v_ix;
+                    uint8_t allele;
+                    mdl_mlcl_unpack_var(pack, &v_ix, &allele);
                     if (allele > 1) continue; // if missing
 
                     // get base quality score
@@ -2080,18 +2069,13 @@ int mdl_m_pi_amb(mdl_t *mdl) {
                 if (n_vars < 1)
                     continue;
 
-                // Pr(B_dm | T_dm, \rho)
                 size_t j;
                 for (j = 0; j < n_vars; ++j){
                     // get base call for variant allele
-                    int32_t vi = mv_i(&mlcl->var_ixs, j);
-                    if (vi < 0)
-                        return err_msg(-1, 0, "p_var: variant index=%i is negative", vi);
-                    uint32_t v = (uint32_t)vi;
-                    div_t di = div((int)v, (int)V);
-                    assert(di.quot < 3); // TODO: remove after testing
-                    uint8_t allele = di.quot;
-                    uint32_t v_ix = di.rem;
+                    uint32_t pack = mv_i(&mlcl->var_ixs, j);
+                    uint32_t v_ix;
+                    uint8_t allele;
+                    mdl_mlcl_unpack_var(pack, &v_ix, &allele);
                     if (allele > 1) continue; // if missing
 
                     // get base quality score
@@ -2113,37 +2097,29 @@ int mdl_m_pi_amb(mdl_t *mdl) {
                     n_tot += (1 - perr) * mlcl->counts;
                 }
             }
-            uint16_t s_ix;
-            p_delta = 0;
-            printf("calculating new pi amb:\n");
-            for (s_ix = 0; s_ix < M; ++s_ix) {
-                d_pi_amb[s_ix] /= n_tot;
-                new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
-            }
-            if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0)
-                return -1;
-
-            log_msg("old pi amb:");
-            for (s_ix = 0; s_ix < M; ++s_ix) {
-                if (s_ix) printf("\t");
-                printf("%f", mdl->mp->pi_amb[s_ix]);
-            }
-            printf("\n");
-            log_msg("new pi amb:");
-            for (s_ix = 0; s_ix < M; ++s_ix) {
-                if (s_ix) printf("\t");
-                printf("%f", new_pi_ambp[s_ix]);
-            }
-            printf("\n");
-
-            for (s_ix = 0; s_ix < M; ++s_ix) {
-                p_delta += fabs(new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix]);
-                mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
-            }
-            p_delta /= M;
-            if (mdl_pars_set_gamma_amb(mdl->mp) < 0) return(-1);
         }
+
+        uint16_t s_ix;
+        for (s_ix = 0; s_ix < M; ++s_ix) {
+            d_pi_amb[s_ix] /= n_tot;
+            new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
+        }
+
+        if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0)
+            return -1;
+
+        p_delta = 0;
+        for (s_ix = 0; s_ix < M; ++s_ix) {
+            p_delta += pow(new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix], 2.0);
+            mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
+        }
+        p_delta = sqrt(p_delta);
+
+        if (mdl_pars_set_gamma_amb(mdl->mp) < 0) return(-1);
+        ++iter;
     }
+
+    log_msg("calculated ambient sample fractions in %i iterations", iter);
 
     mv_free(&amb_bcs);
     free(d_pi_amb);
@@ -2562,22 +2538,30 @@ int write_pi(mdl_t *mdl, char *fn) {
     }
 
     // col names
-    char **col_names = malloc(sizeof(char *));
+    char **col_names = malloc(2 * sizeof(char *));
     col_names[0] = strdup("Pi");
-    if (col_names[0] == NULL)
+    col_names[1] = strdup("Pi_amb");
+    if (col_names[0] == NULL || col_names[1] == NULL)
         return err_msg(-1, 0, "write_pi: %s", strerror(errno));
+
+    // pi array
+    f_t *pi_all = malloc(sizeof(f_t) * M * 2);
+    memcpy(pi_all, mdl->mp->pi, sizeof(f_t) * M);
+    memcpy(pi_all + M, mdl->mp->pi_amb, sizeof(f_t) * M);
     
     // write matrix
-    ret = write_matrix_double(out_pi_fn, mdl->mp->pi, NULL, NULL, NULL, 
-            row_names, M, col_names, 1, 
+    ret = write_matrix_double(out_pi_fn, pi_all, NULL, NULL, NULL, 
+            row_names, M, col_names, 2, 
             delim, nl, decp);
     if (ret < 0)
         return err_msg(-1, 0, "write_pi: failed to write matrix to file");
 
     free(col_names[0]);
+    free(col_names[1]);
     free(col_names);
     free(row_names);
     free(out_pi_fn);
+    free(pi_all);
 
     return(0);
 }

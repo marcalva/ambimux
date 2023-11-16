@@ -57,7 +57,7 @@ f_t phred_to_perr(uint8_t phred);
 // counts stores the number of times this molecule is present.
 typedef struct mdl_mlcl_t {
     mv_t(i32) feat_ixs;
-    mv_t(u32) var_ixs;
+    mv_t(u32) var_ixs; // first 28 bits are variant index, last 4 bits are allele
     mv_t(i32) bquals; // base quality scores (0-255). Corresponds to `var_ixs`.
                       // -1 is missing
     uint32_t counts; // number of molecules with this feature-variant comb.
