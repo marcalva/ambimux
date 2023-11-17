@@ -21,7 +21,7 @@
 static void usage(FILE *fp, int exit_status){
     fprintf(fp, 
             "\n"
-            "ambimux v0.1.0: single-cell demultiplexing\n"
+            "ambimux v0.2.0: single-cell demultiplexing\n"
             "\n"
             "Options:\n"
             "\n"
@@ -32,17 +32,19 @@ static void usage(FILE *fp, int exit_status){
             "  -v, --vcf           Indexed VCF file.\n" 
             "  -g, --gtf           GTF file.\n"
             "  -p, --peaks         BED file containing peaks.\n"
-            "  -e, --exclude       BED file containing regions to exclude.\n"
+            "  -e, --exclude       BED file containing ATAC regions to exclude.\n"
             "  -s, --samples       File listing sample IDs in VCF file to de-multiplex.\n"
             "\n"
             "Output options\n"
             "\n"
             "  -o, --out           Output file prefix. File names are appended with '.' delimiter [ambimux].\n"
             "  -C, --counts-only   Flag argument to produce counts only and not fit a demultiplexing model.\n"
+            "  -n, --no-counts-o   Do not output variant allele, gene, and peak counts. by default, ambimux\n"
+            "                      output UMI/fragment counts.\n"
             "\n"
             "Alignment options\n"
             "\n"
-            "  -w, --bc-wl         Optional file containing a whitelist of barcodes.\n"
+            "  -w, --bc-wl         Optional file containing a whitelist of barcodes. One barcode per line.\n"
             "  -u, --rna-umi-tag   RNA BAM tag for UMI [UB].\n"
             "  -b, --rna-bc-tag    RNA BAM tag for cell barcode [CB].\n"
             "  -c, --atac-bc-tag   ATAC BAM tag for cell barcode [CB].\n"
@@ -71,7 +73,6 @@ static void usage(FILE *fp, int exit_status){
             "                      'inter' specifies to use only inter-peak or inter-gene reads that\n"
             "                      fall outside peaks or genes. 'all' specifies to use all reads including\n"
             "                      inter- and intra- gene and peak reads [intra].\n"
-            "  -d, --seed          Optional random seed to initialize parameters for EM.\n"
             "  -T, --threads       Optional number of threads to use [1].\n"
             "\n"
             "GTF options\n"
@@ -99,6 +100,7 @@ int main(int argc, char *argv[]){
         {"samples", required_argument, NULL, 's'}, 
         {"out", required_argument, NULL, 'o'},
         {"counts-only", no_argument, NULL, 'C'}, 
+        {"no-counts-o", no_argument, NULL, 'n'}, 
         {"out-min", required_argument, NULL, 'x'}, 
         {"bc-wl", required_argument, NULL, 'w'}, 
         {"rna-umi-tag", required_argument, NULL, 'u'}, 
@@ -113,7 +115,6 @@ int main(int argc, char *argv[]){
         {"eps", required_argument, NULL, 'h'},
         {"max-iter", required_argument, NULL, 'q'},
         {"mdl-reads", required_argument, NULL, 'i'},
-        {"seed", required_argument, NULL, 'd'},
         {"threads", required_argument, NULL, 'T'},
         {"tx-basic", no_argument, NULL, 't'}, 
         {"verbose", no_argument, NULL, 'V'},
@@ -134,7 +135,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:oC:x::w:u:b:c:H:m:P:z:Z:R:h:q:i:d:T:tV", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cx:w:u:b:c:H:m:P:z:Z:R:h:q:i:T:tV", loptions, &option_index)) != -1){
         switch(cm){
             case 'a': opts->atac_bam_fn = strdup(optarg);
                       if (opts->atac_bam_fn == NULL){
@@ -186,6 +187,8 @@ int main(int argc, char *argv[]){
                       }
                       break; 
             case 'C': opts->counts_only = 1;
+                      break;
+            case 'n': opts->no_counts_o = 1;
                       break;
             case 'x': errno = 0;
                       opts->out_min = (int)strtol(optarg, &p_end, 10);
@@ -328,21 +331,6 @@ int main(int argc, char *argv[]){
                     goto cleanup;
                 }
                 break;
-            case 'd':
-                      errno = 0;
-                      int seed = (int)strtol(optarg, &p_end, 10);
-                      if (seed == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --seed %s to int: %s", 
-                                  optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (seed < 0){
-                          ret = err_msg(EXIT_FAILURE, 0, "--seed must be >= 0"); 
-                          goto cleanup;
-                      }
-                      opts->seed = (uint32_t)seed;
-                      break;
             case 'T': errno = 0;
                       opts->threads = (uint16_t)strtoul(optarg, &p_end, 10);
                       eno = errno;
@@ -428,8 +416,10 @@ int main(int argc, char *argv[]){
     ER(ret);
 
     // generate gene counts
-    ret = bam_count(bam_dat, objs, objs->out_fn);
-    ER(ret);
+    if (!opts->no_counts_o) {
+        ret = bam_count(bam_dat, objs, objs->out_fn);
+        ER(ret);
+    }
 
     if (opts->counts_only)
         goto cleanup;
