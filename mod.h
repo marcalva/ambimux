@@ -22,6 +22,7 @@
 #include "r_count.h"
 #include "region.h"
 #include "g_list.h"
+#include "kbtree.h"
 
 #define f_t double
 
@@ -421,6 +422,23 @@ int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 int p_bd(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix, par_ix_t *par_ix,
         f_t *p_b, f_t *psum);
 
+/* Calculate the first and second derivatives w.r.t. alpha.
+ * Store first derivative in d1, second derivative in d2.
+ * Return 0 on success, -1 on error.
+ */
+int d_p_bd_d_alpha(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix,
+                   par_ix_t *par_ix, f_t *d1, f_t *d2);
+
+/*******************************************************************************
+ * Initialize alpha
+ ******************************************************************************/
+
+int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len);
+
+/* Calculate conditional probabilities for sub (H,S) model.
+ */
+int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
+
 /*******************************************************************************
  * Expectation
  ******************************************************************************/
@@ -452,7 +470,9 @@ int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
  ******************************************************************************/
 
 void *mdl_sub_thrd_fx(void *arg);
+void *mdl_alpha_init_thrd_fx(void *arg);
 int mdl_thrd_call(mdl_t *mdl, int *ixs, uint32_t ix_len);
+int mdl_thrd_alpha_init(mdl_t *mdl, int *ixs, uint32_t ix_len);
 int mdl_em(mdl_t *mdl, obj_pars *objs);
 
 int mdl_sub_llk(mdl_t *mdl, f_t *llk);
