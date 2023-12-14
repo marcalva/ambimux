@@ -224,21 +224,30 @@ This file contains the following columns
 4. **n_features** Number of genes detected in the RNA modality.
 5. **n_peaks** Number of peaks detected in the ATAC modality.
 6. **n_rna_info** Number of informative RNA UMIs overlapping variants.
-7. **n_atac_info** Number of informative ATAC UMIs overlapping variants.
-8. **n_rna_variants** Number of variants used in the RNA modality.
-9. **n_atac_variants** Number of variants used in the ATAC modality.
+  This is the number of UMIs that are used in the model for demultiplexing
+  and ambient fraction estimation.
+7. **n_atac_info** Number of informative ATAC fragments overlapping variants.
+  This is the number of fragments that are used in the model for demultiplexing
+  and ambient fraction estimation.
+8. **n_rna_variants** Number of unique variants detected in the RNA modality.
+9. **n_atac_variants** Number of unique variants detected in the ATAC modality.
 10. **rna_pct_mt** Percent of RNA UMIs aligned to the mitochondrial genome.
 11. **atac_pct_mt** Percent of ATAC fragments aligned to the mitochondrial genome.
 12. **FRIG** Fraction of RNA UMIs inside genes.
 13. **FRIP** Fraction of ATAC fragments inside peaks.
-14. **best_type** Droplet type (empty, singlet, or doublet) with the maximum likelihood.
+14. **best_type** Droplet type (`Empty`, `Singlet`, or `Doublet`) with the maximum likelihood.
   This does not assign ambiguous droplets and further filtering is recommended.
-15. **best_sample** The sample ID assignment with the highest likelihood. The sample
-  IDs come from the VCF file. If a doublet, the samples are delimited with a ":" character.
-16. **n_rna_amb** The "number" of ambient reads in the RNA.
-17. **n_rna_cell** The "number" of cell reads in the RNA.
-18. **n_atac_amb** The "number" of ambient reads in the ATAC.
-19. **n_atac_cell** The "number" of cell reads in the ATAC.
+15. **best_sample** The sample ID assignment with the highest likelihood of the best type.
+  If the `best_type` is `Singlet`, then this will give the singlet assignment with
+  the best likelihood. If a doublet, the samples are delimited with a ":"
+  character. Ambiguous samples are not given and further filtering is recommended.
+16. **best_rna_ambient** The RNA ambient fraction estimated for `best_sample`. This
+  will be NA if there are no RNA reads. A fraction of 0 means no contamination.
+17. **best_atac_ambient** The ATAC ambient fraction estimated for `best_sample`. This
+  will be NA if there are no ATAC reads. A fraction of 0 means no contamination.
+18. **best_singlet** The best singlet sample with the highest likelihood.
+19. **best_doublet** The best doublet samples with the highest likelihood. The
+  samples are delimited with a ":" character.
 20. **PP0** Posterior probability of being empty.
 21. **PP1** Posterior probability of being singlet.
 22. **PP2** Posterior probability of being doublet.
@@ -252,19 +261,26 @@ level of confidence in the call. You can also filter by log likelihood differenc
 
 ### Ambient fraction estimation
 
-The contamination estimates per droplet can be calculated from the
-**n_rna_amb**, **n_rna_cell**, **n_atac_amb**, and **n_atac_cell** columns
-in the `summary.txt` output file.
-These give the sum of posterior probabilities across (variant-overlapping)
-reads for the RNA and ATAC modalities separately. This is effectively the
-number of reads that support ambient or cell origin weighted by a prior. Low
-counts in these columns indicate low confidence estimates. The ambient
-parameter estimates are calculated as:
-```
-n_rna_amb / (n_rna_amb + n_rna_cell)
-n_atac_amb / (n_atac_amb + n_atac_cell)
-```
+The contamination estimates per droplet are found in the
+**best_rna_ambient** and **best_atac_ambient** columns of the `summary.txt`
+output file. These give the fraction (from 0 to 1) of ambient contamination
+estimated from the data.
 These can be used for downstream analyses as covariates for filtering criteria.
+
+The ambient estimates in these columns are specific
+to the **best_sample** sample and can't be used for other sample assignments.
+Each ambient estimate is specific to each assignment. For example,
+a singlet assignment to the wrong donor will seem to have higher contamination
+than an assignment to the correct donor. The estimates for every assignment
+are can be obtained from the `alpha_rna.txt.gz` and `alpha_atac.txt.gz`
+files, with the `samples.txt` file giving which columns correspond to which
+assignment. An `Empty` droplet will always have a contamination of `1`.
+
+The level of confidence in these ambient fraction estimates can be
+inferred from the **n_rna_info** and **n_atac_info** fields. These
+give the number of reads used in determining the ambient estimates. Estimates
+with low numbers of UMIs/fragments, such as below 10, will likely be
+noisy.
 
 ### Sample proportions
 
@@ -333,7 +349,7 @@ by including the `--counts-only` argument.
 
 ```
 
-ambimux v0.1.0: single-cell demultiplexing
+ambimux v0.3.0: single-cell demultiplexing
 
 Options:
 

@@ -590,8 +590,6 @@ int mdl_pars_init(mdl_pars_t *mp){
         mp->_lambda_sum[i] = 0;
     }
 
-    mp->_par_diff = 0;
-
     int err;
     if ((err = pthread_mutex_init(&mp->sum_lock, NULL)) != 0)
         return err_msg(-1, 0, "mdl_pars_init: failed to initialize mutex: %i", err);
@@ -646,8 +644,6 @@ void mdl_pars_free(mdl_pars_t *mp) {
         mp->_lambda_sum[i] = 0;
     }
 
-    mp->_par_diff = 0;
-
     pthread_mutex_destroy(&mp->sum_lock);
 }
 
@@ -700,8 +696,6 @@ int mld_pars_set_num_alloc(mdl_pars_t *mp, uint32_t D, uint32_t T,
     mp->_pi_sum = calloc(mp->M, sizeof(f_t));
     if (mp->_pi_sum == NULL)
         return err_msg(-1, 0, "mld_pars_set_num_alloc: %s", strerror(errno));
-
-    mp->_par_diff = 0;
 
     return 0;
 }
@@ -1349,6 +1343,8 @@ mdl_t *mdl_alloc(){
     mdl->sub_lp_hs = NULL;
     mdl->sub_lp_h = NULL;
     mdl->sub_best_hs = NULL;
+    mdl->sub_best_h1 = NULL;
+    mdl->sub_best_h2 = NULL;
     mdl->sub_pp_h = NULL;
 
     mdl->eps = 1e-5;
@@ -1387,6 +1383,8 @@ void mdl_dstry(mdl_t *m){
     free(m->sub_lp_h);
     free(m->sub_lp_x);
     free(m->sub_best_hs);
+    free(m->sub_best_h1);
+    free(m->sub_best_h2);
     free(m->sub_pp_h);
 
     mdl_bc_dat_dstry(m->mdl_bc_dat);
@@ -1452,6 +1450,8 @@ int mdl_alloc_probs(mdl_t *mdl) {
     mdl->sub_lp_h = calloc(D * 3, sizeof(f_t));
     mdl->sub_lp_x = calloc(D, sizeof(f_t));
     mdl->sub_best_hs = calloc(D, sizeof(int32_t));
+    mdl->sub_best_h1 = calloc(D, sizeof(int32_t));
+    mdl->sub_best_h2 = calloc(D, sizeof(int32_t));
     mdl->sub_pp_h = calloc(D * 3, sizeof(f_t));
 
     if (mdl->sub_pp_h == NULL)
@@ -1668,7 +1668,7 @@ int d_p_bd_d_alpha(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix,
         }
     }
     *d1 = x / psum;
-    *d2 = -1.0 * (x * x) / (psum * psum);
+    *d2 = (-1.0 * x * x) / (psum * psum);
 
     assert(*d2 <= 0);
 
@@ -1693,6 +1693,9 @@ int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
     uint32_t n_hs = mdl->hs_ix->n_hs;
     uint32_t hs_ix;
+
+    // upper and lower bounds for initial alpha
+    f_t ubnd = 0.99, lbnd = 1.0 - ubnd;
 
     par_ix_t par_ix;
     par_ix_init(&par_ix);
@@ -1725,18 +1728,19 @@ int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
             if (par_ix.hd == 0)
                 continue;
 
-            f_t best_rna_alpha = 0.5, best_rna_llk = -INFINITY;
-            f_t best_atac_alpha = 0.5, best_atac_llk = -INFINITY;
-            f_t alpha;
+            uint32_t aix = CMI(bc_ix, hs_ix, mdl->mp->D);
+            f_t best_rna_alpha = 0.5;
+            f_t best_atac_alpha = 0.5;
 
-            for (alpha = 0.0; alpha < 1.0; alpha += 0.1) {
-                uint32_t aix = CMI(bc_ix, hs_ix, mdl->mp->D);
-                mdl->mp->alpha_rna1[aix] = alpha * 10;
-                mdl->mp->alpha_rna2[aix] = (1.0 - alpha) * 10;
+            f_t delta, delta_thresh = 1e-4;
+            int alpha_iter, iter_max = 100;
+            for (alpha_iter = 0; alpha_iter < iter_max; ++alpha_iter) {
+                mdl->mp->alpha_rna1[aix] = best_rna_alpha * 10;
+                mdl->mp->alpha_rna2[aix] = (1.0 - best_rna_alpha) * 10;
 
                 kbitr_t itr;
 
-                f_t lp_htd = 0.0;
+                f_t d1_sum = 0, d2_sum = 0;
 
                 kb_itr_first(kb_mdl_mlcl, mols, &itr); 
                 for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols, &itr)){
@@ -1745,26 +1749,39 @@ int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     if (n_vars < 1)
                         continue;
 
-                    f_t psum = 0, p_tgpb[3] = {1,1,1};
-                    int pret = p_bd(mdl->mp, mlcl, RNA_IX, bc_ix, &par_ix, p_tgpb, &psum);
+                    f_t d1 = 0, d2 = 0;
+                    int pret = d_p_bd_d_alpha(mdl->mp, mlcl, RNA_IX, bc_ix, &par_ix, &d1, &d2);
                     if (pret < 0)
                         return -1;
-                    lp_htd += mlcl->counts * log(psum);
+                    d1_sum += mlcl->counts * d1;
+                    d2_sum += mlcl->counts * d2;
                 }
-                if (lp_htd > best_rna_llk) {
-                    best_rna_llk = lp_htd;
-                    best_rna_alpha = alpha;
-                }
+                f_t alpha_t1 = best_rna_alpha;
+                if (d2_sum < 0 || d2_sum > 0)
+                    alpha_t1 -= d1_sum / d2_sum;
+                if (alpha_t1 > ubnd)
+                    alpha_t1 = ubnd;
+                if (alpha_t1 < lbnd)
+                    alpha_t1 = lbnd;
+                delta = fabs(alpha_t1 - best_rna_alpha);
+                best_rna_alpha = alpha_t1;
+                if (delta < delta_thresh)
+                    break;
             }
+            if (alpha_iter == iter_max)
+                err_msg(0, 1, "failed to converge for RNA alpha of BC %i", bc_ix);
 
-            for (alpha = 0.0; alpha < 1.0; alpha += 0.1) {
-                uint32_t aix = CMI(bc_ix, hs_ix, mdl->mp->D);
-                mdl->mp->alpha_atac1[aix] = alpha * 10;
-                mdl->mp->alpha_atac2[aix] = (1.0 - alpha) * 10;
+            // set alpha
+            mdl->mp->alpha_rna1[aix] = best_rna_alpha * 10;
+            mdl->mp->alpha_rna2[aix] = (1.0 - best_rna_alpha) * 10;
+
+            for (alpha_iter = 0; alpha_iter < iter_max; ++alpha_iter) {
+                mdl->mp->alpha_atac1[aix] = best_atac_alpha * 10;
+                mdl->mp->alpha_atac2[aix] = (1.0 - best_atac_alpha) * 10;
 
                 kbitr_t itr;
 
-                f_t lp_htd = 0.0;
+                f_t d1_sum = 0, d2_sum = 0;
 
                 kb_itr_first(kb_mdl_mlcl, frags, &itr); 
                 for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, frags, &itr)){
@@ -1773,22 +1790,29 @@ int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     if (n_vars < 1)
                         continue;
 
-                    f_t psum = 0, p_tgpb[3] = {1,1,1};
-                    int pret = p_bd(mdl->mp, mlcl, ATAC_IX, bc_ix, &par_ix, p_tgpb, &psum);
+                    f_t d1 = 0, d2 = 0;
+                    int pret = d_p_bd_d_alpha(mdl->mp, mlcl, ATAC_IX, bc_ix, &par_ix, &d1, &d2);
                     if (pret < 0)
                         return -1;
-                    lp_htd += mlcl->counts * log(psum);
+                    d1_sum += mlcl->counts * d1;
+                    d2_sum += mlcl->counts * d2;
                 }
-                if (lp_htd > best_atac_llk) {
-                    best_atac_llk = lp_htd;
-                    best_atac_alpha = alpha;
-                }
+                f_t alpha_t1 = best_atac_alpha;
+                if (d2_sum < 0 || d2_sum > 0)
+                    alpha_t1 -= d1_sum / d2_sum;
+                if (alpha_t1 > ubnd)
+                    alpha_t1 = ubnd;
+                if (alpha_t1 < lbnd)
+                    alpha_t1 = lbnd;
+                delta = fabs(alpha_t1 - best_atac_alpha);
+                best_atac_alpha = alpha_t1;
+                if (delta < delta_thresh)
+                    break;
             }
+            if (alpha_iter == iter_max)
+                err_msg(0, 1, "failed to converge for ATAC alpha of BC %i", bc_ix);
 
             // set alpha
-            uint32_t aix = CMI(bc_ix, hs_ix, mdl->mp->D);
-            mdl->mp->alpha_rna1[aix] = best_rna_alpha * 10;
-            mdl->mp->alpha_rna2[aix] = (1.0 - best_rna_alpha) * 10;
             mdl->mp->alpha_atac1[aix] = best_atac_alpha * 10;
             mdl->mp->alpha_atac2[aix] = (1.0 - best_atac_alpha) * 10;
         }
@@ -1812,6 +1836,7 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     int lsret = 0;
 
     uint32_t D = mdl->mp->D;
+    uint32_t M = mdl->mp->M;
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
     uint32_t n_hs = mdl->hs_ix->n_hs;
     uint32_t hs_ix;
@@ -1836,6 +1861,10 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     f_t *lp_htd = calloc(n_hs, sizeof(f_t));
     if (lp_htd == NULL)
         return err_msg(-1, 0, "mdl_sub_e: %s", strerror(errno));
+
+    // lambda counter
+    f_t lambda_sums[3] = {0, 0, 0};
+    f_t *pi_sums = calloc(M, sizeof(f_t));
 
     uint32_t i;
     for (i = 0; i < ix_len; ++i){
@@ -1897,7 +1926,7 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     if (prob_invalid(pt)) {
                         printf("BC RNA with fix=%i has psum=%f, "
                                 "pt=%f, hs=%i\n", afl, psum, pt, hs_ix);
-                        return err_msg(-1, 0, "mdl_sub_m: pt=%f is invalid prob", pt);
+                        return err_msg(-1, 0, "mdl_sub_e: pt=%f is invalid prob", pt);
                     }
 
                     // alpha
@@ -1931,7 +1960,7 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     if (prob_invalid(pt)) {
                         printf("BC ATAC has psum=%f, "
                                 "pt=%f, hs=%i\n", psum, pt, hs_ix);
-                        return err_msg(-1, 0, "mdl_sub_m: pt=%f is invalid prob", pt);
+                        return err_msg(-1, 0, "mdl_sub_e: pt=%f is invalid prob", pt);
                     }
 
                     // alpha
@@ -1954,21 +1983,59 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len) {
         for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
             if (hs_ix_get_pars(mdl->hs_ix, hs_ix, &par_ix) < 0)
                 return -1;
-            mdl->sub_lp_h[CMI(par_ix.hd, bc_ix, 3)] = 
-                logsum2expd(mdl->sub_lp_h[CMI(par_ix.hd, bc_ix, 3)],
-                        lp_htd[hs_ix]);
+            f_t prev_lp_h = mdl->sub_lp_h[CMI(par_ix.hd, bc_ix, 3)];
+            mdl->sub_lp_h[CMI(par_ix.hd, bc_ix, 3)] = logsum2expd(prev_lp_h, lp_htd[hs_ix]);
         }
 
         // Pr(X_d | \Theta)
-        mdl->sub_lp_x[bc_ix] = logsumexpd(lp_htd, bc_n_ix, &lsret);
+        mdl->sub_lp_x[bc_ix] = logsumexpd(mdl->sub_lp_h + (3 * bc_ix), 3, &lsret);
         if (lsret < 0)
             return err_msg(-1, 0, "mdl_sub_e: could not logsumexp");
         if (num_invalid(mdl->sub_lp_x[bc_ix]))
             return err_msg(-1, 0, "mdl_sub_e: sub_lp_x[%i]=%.6e is invalid\n",
                     bc_ix, mdl->sub_lp_x[bc_ix]);
+
+        // add lambda and pi parameters
+        for (hs_ix = 0; hs_ix < bc_n_ix; ++hs_ix){
+            // get (h,s,t) from index
+            if (hs_ix_get_pars(mdl->hs_ix, hs_ix, &par_ix) < 0)
+                return(-1);
+
+            // get P(H,S|X)
+            uint32_t mix = CMI(hs_ix, bc_ix, n_hs);
+            f_t cp_hsx = exp(mdl->sub_lp_hs[mix] - mdl->sub_lp_x[bc_ix]);
+            if (prob_invalid(cp_hsx))
+                return err_msg(-1, 0, "mdl_sub_e: "
+                        "P(Z|X)=%.6e is an invalid probability", cp_hsx);
+
+            // lambda
+            lambda_sums[par_ix.hd] += bc_dat.n_bc * cp_hsx;
+
+            // pi
+            if (par_ix.s1 >= 0)
+                pi_sums[par_ix.s1] += bc_dat.n_bc * cp_hsx;
+            if (par_ix.s2 >= 0)
+                pi_sums[par_ix.s2] += bc_dat.n_bc * cp_hsx;
+
+        }
     }
     free(lp_htd);
     free(lp_hs_v);
+
+    // add to tmp sum variables
+    pthread_mutex_lock(&mdl->mp->sum_lock);
+
+    // add lambda
+    for (i = 0; i < 3; ++i){
+        mdl->mp->_lambda_sum[i] += lambda_sums[i];
+    }
+
+    // add pi
+    for (i = 0; i < M; ++i) {
+        mdl->mp->_pi_sum[i] += pi_sums[i];
+    }
+
+    pthread_mutex_unlock(&mdl->mp->sum_lock);
 
     return 0;
 }
@@ -1992,8 +2059,6 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     // lambda counter
     f_t lambda_sums[3] = {0, 0, 0};
     f_t *pi_sums = calloc(M, sizeof(f_t));
-
-    f_t pdiff_tot = 0.0;
 
     uint32_t hs_ix;
     for (i = 0; i < ix_len; ++i){
@@ -2029,9 +2094,9 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
             lambda_sums[par_ix.hd] += bc_dat.n_bc * cp_hsx;
 
             // pi
-            if (par_ix.s1 >= 0 && par_ix.s1 < M)
+            if (par_ix.s1 >= 0)
                 pi_sums[par_ix.s1] += bc_dat.n_bc * cp_hsx;
-            if (par_ix.s2 >= 0 && par_ix.s2 < M)
+            if (par_ix.s2 >= 0)
                 pi_sums[par_ix.s2] += bc_dat.n_bc * cp_hsx;
 
         }
@@ -2050,8 +2115,6 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
         mdl->mp->_pi_sum[i] += pi_sums[i];
     }
 
-    mdl->mp->_par_diff += pdiff_tot;
-
     pthread_mutex_unlock(&mdl->mp->sum_lock);
 
     return(0);
@@ -2059,7 +2122,6 @@ int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
 int mdl_m_lambda(mdl_t *mdl) {
     f_t new_par = 0;
-    // mdl->mp->_par_diff = 0;
     uint32_t i;
 
     // maximize lambda
@@ -2068,7 +2130,6 @@ int mdl_m_lambda(mdl_t *mdl) {
         lambda_tot += mdl->mp->_lambda_sum[i];
     for (i = 0; i < 3; ++i){
         new_par = mdl->mp->_lambda_sum[i] / lambda_tot;
-        mdl->mp->_par_diff += fabs(new_par - mdl->mp->lambda[i]);
         mdl->mp->lambda[i] = new_par;
     }
 
@@ -2085,7 +2146,6 @@ int mdl_m_pi(mdl_t *mdl) {
     }
     for (i = 0; i < M; ++i) {
         new_par = mdl->mp->_pi_sum[i] / pi_tot;
-        mdl->mp->_par_diff += fabs(new_par - mdl->mp->pi[i]);
         mdl->mp->pi[i] = new_par;
     }
     f_t pi_sum = 0;
@@ -2271,8 +2331,6 @@ int mdl_sub_est(mdl_t *mdl) {
     // update gamma
     if (mdl_pars_set_gamma_amb(mdl->mp) < 0) return(-1);
 
-    // alpha estimated in m_sum
-
     return 0;
 }
 
@@ -2294,7 +2352,7 @@ typedef struct thrd_args {
 void *mdl_sub_thrd_fx(void *arg){
     thrd_args *t = (thrd_args *)arg;
     if (mdl_sub_e(t->mdl, t->ixs, t->ix_len) < 0) return((void *)-1);
-    if (mdl_sub_m(t->mdl, t->ixs, t->ix_len) < 0) return((void *)-1);
+    // if (mdl_sub_m(t->mdl, t->ixs, t->ix_len) < 0) return((void *)-1);
     return((void *)0);
 }
 
@@ -2403,6 +2461,7 @@ int mdl_em(mdl_t *mdl, obj_pars *objs){
     f_t q_delta;
     f_t prior = 1e-8;
     uint32_t i;
+    uint32_t T = mdl->mp->T;
     uint32_t D = mdl->mp->D;
     int *ixs = malloc(D * sizeof(int));
     for (i = 0; i < D; ++i)
@@ -2411,19 +2470,15 @@ int mdl_em(mdl_t *mdl, obj_pars *objs){
 
     int fret; // store function return
 
-    /*
-    if (objs->verbose) {
+    if (objs->verbose)
         log_msg("initializing alpha values");
-    }
     fret = mdl_thrd_alpha_init(mdl, ixs, D);
     if (fret < 0)
         return -1;
-    */
 
-    if (objs->verbose) {
-        log_msg("%u test droplets", mdl->mp->T);
-        log_msg("running EM with %u droplets", D);
-    }
+    if (objs->verbose)
+        log_msg("running EM with %u test droplets", T);
+
     for (i = 0; i < mdl->max_iter; ++i){
         if (mdl_pars_check(mdl->mp) < 0)
             return -1;
@@ -2495,12 +2550,14 @@ int mdl_sub_best_hs(mdl_t *mdl) {
     if (bd == NULL)
         return err_msg(-1, 0, "mdl_sub_best_hs: barcode data is not initialized");
 
+    par_ix_t par_ix;
+    par_ix_init(&par_ix);
+
     uint32_t n_hs = mdl->n_hs;
     uint32_t D = mdl->mp->D;
-    free(mdl->sub_best_hs);
-    mdl->sub_best_hs = malloc(D * sizeof(uint32_t));
+    uint32_t M = mdl->mp->M;
     if (mdl->sub_best_hs == NULL)
-        return err_msg(-1, 0, "mdl_sub_best_hs: %s", strerror(errno));
+        return err_msg(-1, 0, "mdl_sub_best_hs: model not initialized");
 
     uint32_t bc_i;
     for (bc_i = 0; bc_i < D; ++bc_i){
@@ -2509,13 +2566,28 @@ int mdl_sub_best_hs(mdl_t *mdl) {
         // get best (H,S) index
         uint32_t b_hs_ix = 0;
         uint32_t t_hs_ix = 0;
+        uint32_t b_h1_ix = 1;
+        uint32_t b_h2_ix = M + 1;
         for (t_hs_ix = 1; t_hs_ix < n_hs; ++t_hs_ix) {
+            if (hs_ix_get_pars(mdl->hs_ix, t_hs_ix, &par_ix) < 0)
+                return(-1);
+
             uint32_t b_mix = CMI(b_hs_ix, bc_i, n_hs);
             uint32_t t_mix = CMI(t_hs_ix, bc_i, n_hs);
+            uint32_t b1_mix = CMI(b_h1_ix, bc_i, n_hs);
+            uint32_t b2_mix = CMI(b_h2_ix, bc_i, n_hs);
             if (mdl->sub_lp_hs[t_mix] > mdl->sub_lp_hs[b_mix])
                 b_hs_ix = t_hs_ix;
+            if (par_ix.hd == 1 &&
+                mdl->sub_lp_hs[t_mix] > mdl->sub_lp_hs[b1_mix])
+                b_h1_ix = t_hs_ix;
+            if (par_ix.hd == 2 &&
+                mdl->sub_lp_hs[t_mix] > mdl->sub_lp_hs[b2_mix])
+                b_h2_ix = t_hs_ix;
         }
         mdl->sub_best_hs[bc_i] = b_hs_ix;
+        mdl->sub_best_h1[bc_i] = b_h1_ix;
+        mdl->sub_best_h2[bc_i] = b_h2_ix;
     }
 
     return 0;
@@ -2575,11 +2647,9 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         return -1;
 
     if (objs->verbose)
-        log_msg("initializing data", mv_size(&mdl->mdl_bc_dat->bc_mlcl));
+        log_msg("initializing data");
     if (mdl_bc_dat_bam_data(mdl->mdl_bc_dat, bam_dat, objs) < 0)
         return -1;
-    if (objs->verbose)
-        log_msg("initialized %zu barcodes", mv_size(&mdl->mdl_bc_dat->bc_mlcl));
 
     if (mdl_set_samples(mdl, objs->vcf_hdr) < 0)
         return -1;
@@ -2587,8 +2657,6 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
     if (mdl_set_hs_ix(mdl) < 0)
         return -1;
 
-    if (objs->verbose)
-        log_msg("allocating arrays");
     if (mdl_alloc_probs(mdl) < 0)
         return -1;
 
@@ -2604,11 +2672,6 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         log_msg("calculating ambient sample fractions");
     if ((pi_amb_iter = mdl_m_pi_amb(mdl)) < 0)
         return -1;
-    if (objs->verbose)
-        log_msg("calculated ambient sample fractions in %i iterations", pi_amb_iter);
-
-    if (objs->verbose)
-        log_msg("running EM");
 
     // run sub model
     if (mdl_em(mdl, objs) < 0)
@@ -3018,8 +3081,8 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         "\tn_rna_info\tn_atac_info"
         "\tn_rna_variants\tn_atac_variants\trna_pct_mt\tatac_pct_mt\tFRIG\tFRIP"
         "\tbest_type\tbest_sample"
-        "\tn_rna_amb\tn_rna_cell"
-        "\tn_atac_amb\tn_atac_cell"
+        "\tbest_rna_ambient\tbest_atac_ambient"
+        "\tbest_singlet\tbest_doublet"
         "\tPP0\tPP1\tPP2"
         "\tLLK0\tLLK1\tLLK2\n";
 
@@ -3103,16 +3166,21 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         double2str_in((double)bcc->frip, &pstr, &buf_size, 4);
         fputs(pstr, fp);
 
-        // get best (H,S) assignment
-        uint32_t best_hs = mdl->sub_best_hs[all_bc_ix];
-        if (hs_ix_get_pars(mdl->hs_ix, best_hs, &par_ix) < 0)
-            return -1;
+        // get best sample
+        f_t *pp_h = mdl->sub_pp_h + (3 * all_bc_ix);
+        uint8_t best_h = 0;
+        if (pp_h[1] > pp_h[2] && pp_h[1] > pp_h[0])
+            best_h = 1;
+        if (pp_h[2] > pp_h[1] && pp_h[2] > pp_h[0])
+            best_h = 2;
+        int32_t best_h1s = mdl->sub_best_h1[all_bc_ix];
+        int32_t best_h2s = mdl->sub_best_h2[all_bc_ix];
 
         // write best H_d string
         fret = fputc(delim, fp);
-        if (par_ix.hd == 0) {
+        if (best_h == 0) {
             fret = fputs("Empty", fp);
-        } else if (par_ix.hd == 1) {
+        } else if (best_h == 1) {
             fret = fputs("Singlet", fp);
         } else {
             fret = fputs("Doublet", fp);
@@ -3120,29 +3188,45 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
 
         // get best S_d strings
         fret = fputc(delim, fp);
-        if (best_hs == 0) {
+        if (best_h == 0) {
             fputs("Empty", fp);
-        } else {
+        } else if (best_h == 1) {
+            if (hs_ix_get_pars(mdl->hs_ix, best_h1s, &par_ix) < 0)
+                return -1;
             fputs(str_map_str(samples, par_ix.s1), fp);
-            if (par_ix.s2 >= 0) {
-                fputs(":", fp);
-                fputs(str_map_str(samples, par_ix.s2), fp);
-            }
+        } else {
+            if (hs_ix_get_pars(mdl->hs_ix, best_h2s, &par_ix) < 0)
+                return -1;
+            fputs(str_map_str(samples, par_ix.s1), fp);
+            fputs(":", fp);
+            fputs(str_map_str(samples, par_ix.s2), fp);
         }
 
         // write best singlet alpha RNA
         if (mdl->has_rna) {
-            par = mdl->mp->alpha_rna1[CMI(all_bc_ix, best_hs, n_all_bc)];
-            if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
-            fret = fputc(delim, fp);
-            fret = fputs(pstr, fp);
+            f_t rna1, rna2;
+            if (best_h == 0) {
+                rna1 = mdl->mp->alpha_rna1[CMI(all_bc_ix, 0, n_all_bc)];
+                rna2 = mdl->mp->alpha_rna2[CMI(all_bc_ix, 0, n_all_bc)];
+            } else if (best_h == 1) {
+                rna1 = mdl->mp->alpha_rna1[CMI(all_bc_ix, best_h1s, n_all_bc)];
+                rna2 = mdl->mp->alpha_rna2[CMI(all_bc_ix, best_h1s, n_all_bc)];
+            } else {
+                rna1 = mdl->mp->alpha_rna1[CMI(all_bc_ix, best_h2s, n_all_bc)];
+                rna2 = mdl->mp->alpha_rna2[CMI(all_bc_ix, best_h2s, n_all_bc)];
+            }
 
-            par = mdl->mp->alpha_rna2[CMI(all_bc_ix, best_hs, n_all_bc)];
-            if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
-            fret = fputc(delim, fp);
-            fret = fputs(pstr, fp);
+            f_t rna_sum = rna1 + rna2;
+            if (rna_sum <= 0) {
+                fret = fputc(delim, fp);
+                fret = fputs(nastr, fp);
+            } else {
+                par = rna1 / rna_sum;
+                if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
+                    return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                fret = fputc(delim, fp);
+                fret = fputs(pstr, fp);
+            }
         } else {
             fret = fputc(delim, fp);
             fret = fputs(nastr, fp);
@@ -3150,21 +3234,47 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
 
         // write best singlet alpha ATAC
         if (mdl->has_atac) {
-            par = mdl->mp->alpha_atac1[CMI(all_bc_ix, best_hs, n_all_bc)];;
-            if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
-            fret = fputc(delim, fp);
-            fret = fputs(pstr, fp);
+            f_t atac1, atac2;
+            if (best_h == 0) {
+                atac1 = mdl->mp->alpha_atac1[CMI(all_bc_ix, 0, n_all_bc)];
+                atac2 = mdl->mp->alpha_atac2[CMI(all_bc_ix, 0, n_all_bc)];
+            } else if (best_h == 1) {
+                atac1 = mdl->mp->alpha_atac1[CMI(all_bc_ix, best_h1s, n_all_bc)];
+                atac2 = mdl->mp->alpha_atac2[CMI(all_bc_ix, best_h1s, n_all_bc)];
+            } else {
+                atac1 = mdl->mp->alpha_atac1[CMI(all_bc_ix, best_h2s, n_all_bc)];
+                atac2 = mdl->mp->alpha_atac2[CMI(all_bc_ix, best_h2s, n_all_bc)];
+            }
 
-            par = mdl->mp->alpha_atac2[CMI(all_bc_ix, best_hs, n_all_bc)];;
-            if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
-            fret = fputc(delim, fp);
-            fret = fputs(pstr, fp);
+            f_t atac_sum = atac1 + atac2;
+            if (atac_sum <= 0) {
+                fret = fputc(delim, fp);
+                fret = fputs(nastr, fp);
+            } else {
+                par = atac1 / atac_sum;
+                if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
+                    return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                fret = fputc(delim, fp);
+                fret = fputs(pstr, fp);
+            }
         } else {
             fret = fputc(delim, fp);
             fret = fputs(nastr, fp);
         }
+
+        // write best singlet
+        if (hs_ix_get_pars(mdl->hs_ix, best_h1s, &par_ix) < 0)
+            return -1;
+        fret = fputc(delim, fp);
+        fret = fputs(str_map_str(samples, par_ix.s1), fp);
+
+        // write best doublet
+        if (hs_ix_get_pars(mdl->hs_ix, best_h2s, &par_ix) < 0)
+            return -1;
+        fret = fputc(delim, fp);
+        fret = fputs(str_map_str(samples, par_ix.s1), fp);
+        fret = fputs(":", fp);
+        fret = fputs(str_map_str(samples, par_ix.s2), fp);
 
         // write posterior probs of H_d
         for (i = 0; i < 3; ++i){

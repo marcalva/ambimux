@@ -200,8 +200,6 @@ typedef struct {
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
-
-    f_t _par_diff;
 } mdl_pars_t;
 
 /*******************************************************************************
@@ -244,6 +242,8 @@ typedef struct {
     f_t *sub_lp_x; // log Pr(X_d | \Theta) D x 1 (column major)
     int32_t *sub_best_hs; // D x 1 array. Best (H,S) index for each droplet d under 
                            // the sub model.
+    int32_t *sub_best_h1; // D x 1 array. Best (H,S) index for H=1 sngs each droplet
+    int32_t *sub_best_h2; // D x 1 array. Best (H,S) index for H=2 dbls each droplet
     f_t *sub_pp_h; // 3 x BC array; posterior probabilities `H_d` for each droplet.
 
     f_t eps;

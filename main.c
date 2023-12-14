@@ -18,10 +18,12 @@
         goto cleanup; \
     } \
 
+char am_version_str[] = "v0.3.0";
+
 static void usage(FILE *fp, int exit_status){
     fprintf(fp, 
             "\n"
-            "ambimux v0.2.0: single-cell demultiplexing\n"
+            "ambimux %s: single-cell demultiplexing\n"
             "\n"
             "Options:\n"
             "\n"
@@ -81,7 +83,8 @@ static void usage(FILE *fp, int exit_status){
             "\n"
             "  -V, --verbose       Write status on output.\n"
             "      --help          Print this help screen.\n"
-            "\n");
+            "\n",
+            am_version_str);
     exit(exit_status);
 }
 
@@ -357,6 +360,8 @@ int main(int argc, char *argv[]){
     }
 
     copy_options(opts, objs);
+
+    if (objs->verbose) log_msg("running ambimux %s", am_version_str);
 
     /* Load in BAM files */
     ret = load_atac_bam(opts, objs);
