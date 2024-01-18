@@ -141,4 +141,3 @@ void permute(int *array, uint32_t n){
         array[j] = tmp;
     }
 }
-

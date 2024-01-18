@@ -62,6 +62,7 @@ typedef struct {
     int region_set;
     float eps;
     uint16_t max_iter;
+    double alpha_prior_w;
     uint16_t threads;
 
     // by default, only intra-peak, intra-gene reads are used
@@ -128,6 +129,8 @@ typedef struct {
     // int alpha_vars;
     float eps;
     uint16_t max_iter;
+
+    double alpha_prior_w;
 
     uint16_t threads;
 

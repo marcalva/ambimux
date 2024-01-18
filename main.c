@@ -18,7 +18,7 @@
         goto cleanup; \
     } \
 
-char am_version_str[] = "v0.3.0";
+char am_version_str[] = "v0.4.0";
 
 static void usage(FILE *fp, int exit_status){
     fprintf(fp, 
@@ -67,8 +67,10 @@ static void usage(FILE *fp, int exit_status){
             "  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many \n"
             "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip [100].\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
-            "                      must be less than this value [1e-5].\n"
+            "                      must be less than this value [1e-6].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [100].\n"
+            "  -d, --amb-prior-w   Weight of the ambient fraction prior. Effectively gives the number\n"
+            "                      of reads added to the likelihood as a prior. Must be > 0 [1].\n"
             "  -i, --mdl-reads     The type of reads to use for demultiplexing and ambient estimation.\n"
             "                      One of 'intra', 'inter', or 'all'. 'intra' (default) specifies the model\n"
             "                      should use only reads contained in peaks or genes.\n"
@@ -117,6 +119,7 @@ int main(int argc, char *argv[]){
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
         {"max-iter", required_argument, NULL, 'q'},
+        {"amb-prior-w", required_argument, NULL, 'd'},
         {"mdl-reads", required_argument, NULL, 'i'},
         {"threads", required_argument, NULL, 'T'},
         {"tx-basic", no_argument, NULL, 't'}, 
@@ -138,186 +141,218 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cx:w:u:b:c:H:m:P:z:Z:R:h:q:i:T:tV", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cx:w:u:b:c:H:m:P:z:Z:R:h:q:d:i:T:tV", loptions, &option_index)) != -1){
         switch(cm){
-            case 'a': opts->atac_bam_fn = strdup(optarg);
-                      if (opts->atac_bam_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'r': opts->rna_bam_fn = strdup(optarg);
-                      if (opts->rna_bam_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'v': opts->vcf_fn = strdup(optarg); 
-                      if (opts->vcf_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'g': opts->gtf_fn = strdup(optarg); 
-                      if (opts->vcf_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'p': opts->peaks_fn = strdup(optarg); 
-                      if (opts->peaks_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'e': opts->exclude_fn = strdup(optarg); 
-                      if (opts->exclude_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 's': opts->sample_fn = strdup(optarg);
-                      if (opts->sample_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'o': free(opts->out_fn);
-                      opts->out_fn = strdup(optarg); 
-                      if (opts->out_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'C': opts->counts_only = 1;
-                      break;
-            case 'n': opts->no_counts_o = 1;
-                      break;
-            case 'x': errno = 0;
-                      opts->out_min = (int)strtol(optarg, &p_end, 10);
-                      if (opts->out_min == 0 && errno > 0){
-                          ret =  err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --out-min %s to int: %s", 
-                                  optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (opts->out_min <= 0){
-                          ret = err_msg(EXIT_FAILURE, 0, "--out-min must be greater than 0"); 
-                          goto cleanup;
-                      }
-                      break;
-            case 'w': opts->wl_bc_fn = strdup(optarg);
-                      if (opts->wl_bc_fn == NULL){
-                          ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
-                          goto cleanup;
-                      }
-                      break; 
-            case 'u': if (strlen(optarg) != 2){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+            case 'a':
+                opts->atac_bam_fn = strdup(optarg);
+                if (opts->atac_bam_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'r':
+                opts->rna_bam_fn = strdup(optarg);
+                if (opts->rna_bam_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'v':
+                opts->vcf_fn = strdup(optarg); 
+                if (opts->vcf_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'g':
+                opts->gtf_fn = strdup(optarg); 
+                if (opts->vcf_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'p':
+                opts->peaks_fn = strdup(optarg); 
+                if (opts->peaks_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'e':
+                opts->exclude_fn = strdup(optarg); 
+                if (opts->exclude_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 's':
+                opts->sample_fn = strdup(optarg);
+                if (opts->sample_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'o':
+                free(opts->out_fn);
+                opts->out_fn = strdup(optarg); 
+                if (opts->out_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'C':
+                opts->counts_only = 1;
+                break;
+            case 'n':
+                opts->no_counts_o = 1;
+                break;
+            case 'x':
+                errno = 0;
+                opts->out_min = (int)strtol(optarg, &p_end, 10);
+                if (opts->out_min == 0 && errno > 0){
+                    ret =  err_msg(EXIT_FAILURE, 0, 
+                                   "could not convert --out-min %s to int: %s", 
+                                   optarg, strerror(errno));
+                    goto cleanup;
+                }
+                if (opts->out_min <= 0){
+                    ret = err_msg(EXIT_FAILURE, 0, "--out-min must be greater than 0"); 
+                    goto cleanup;
+                }
+                break;
+            case 'w':
+                opts->wl_bc_fn = strdup(optarg);
+                if (opts->wl_bc_fn == NULL){
+                    ret = err_msg(EXIT_FAILURE, 0, "%s", strerror(errno));
+                    goto cleanup;
+                }
+                break; 
+            case 'u':
+                if (strlen(optarg) != 2){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "rna-umi-tag must be a 2 character string: %s given", optarg);
-                          goto cleanup;
-                      }
-                      strcpy(opts->rna_umi_tag, optarg);
-                      break;
-            case 'b': if (strlen(optarg) != 2){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                    goto cleanup;
+                }
+                strcpy(opts->rna_umi_tag, optarg);
+                break;
+            case 'b':
+                if (strlen(optarg) != 2){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "rna-bc-tag must be a 2 character string: %s given", optarg);
-                          goto cleanup;
-                      }
-                      strcpy(opts->rna_bc_tag, optarg);
-                      break;
-            case 'c': if (strlen(optarg) != 2){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                    goto cleanup;
+                }
+                strcpy(opts->rna_bc_tag, optarg);
+                break;
+            case 'c':
+                if (strlen(optarg) != 2){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "atac-bc-tag must be a 2 character string: %s given", optarg);
-                          goto cleanup;
-                      }
-                      strcpy(opts->atac_bc_tag, optarg);
-                      break;
+                    goto cleanup;
+                }
+                strcpy(opts->atac_bc_tag, optarg);
+                break;
             case 'H': 
-                      if (strlen(optarg) != 2){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                if (strlen(optarg) != 2){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "nh-tag must be a 2 character string: %s given", optarg);
-                          goto cleanup;
-                      }
-                      strcpy(opts->rna_nh_tag, optarg);
-                      break;
-            case 'm': errno = 0;
-                      opts->max_nh = (int)strtol(optarg, &p_end, 10);
-                      if (opts->max_nh == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                    goto cleanup;
+                }
+                strcpy(opts->rna_nh_tag, optarg);
+                break;
+            case 'm':
+                errno = 0;
+                opts->max_nh = (int)strtol(optarg, &p_end, 10);
+                if (opts->max_nh == 0 && errno > 0){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --max-nh %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      break;
+                    goto cleanup;
+                }
+                break;
             case 'P':
-                      errno = 0;
-                      opts->min_phred = (int)strtol(optarg, &p_end, 10);
-                      if (opts->min_phred == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                errno = 0;
+                opts->min_phred = (int)strtol(optarg, &p_end, 10);
+                if (opts->min_phred == 0 && errno > 0){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --min-phred %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      break;
+                    goto cleanup;
+                }
+                break;
             case 'z':
-                      errno = 0;
-                      opts->rna_mapq = (int)strtol(optarg, &p_end, 10);
-                      if (opts->rna_mapq == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                errno = 0;
+                opts->rna_mapq = (int)strtol(optarg, &p_end, 10);
+                if (opts->rna_mapq == 0 && errno > 0){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --rna-mapq %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (opts->rna_mapq < 0 || opts->rna_mapq > 255){
-                          ret = err_msg(EXIT_FAILURE, 0, "--rna-mapq must be between 0 and 255"); 
-                          goto cleanup;
-                      }
-                      break;
+                    goto cleanup;
+                }
+                if (opts->rna_mapq < 0 || opts->rna_mapq > 255){
+                    ret = err_msg(EXIT_FAILURE, 0, "--rna-mapq must be between 0 and 255"); 
+                    goto cleanup;
+                }
+                break;
             case 'Z':
-                      errno = 0;
-                      opts->atac_mapq = (int)strtol(optarg, &p_end, 10);
-                      if (opts->atac_mapq == 0 && errno > 0){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                errno = 0;
+                opts->atac_mapq = (int)strtol(optarg, &p_end, 10);
+                if (opts->atac_mapq == 0 && errno > 0){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --atac-mapq %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (opts->atac_mapq < 0 || opts->atac_mapq > 255){
-                          ret = err_msg(EXIT_FAILURE, 0, "--atac-mapq must be between 0 and 255"); 
-                          goto cleanup;
-                      }
-                      break;
+                    goto cleanup;
+                }
+                if (opts->atac_mapq < 0 || opts->atac_mapq > 255){
+                    ret = err_msg(EXIT_FAILURE, 0, "--atac-mapq must be between 0 and 255"); 
+                    goto cleanup;
+                }
+                break;
             case 'R': free(opts->region);
-                      opts->region = strdup(optarg);
-                      opts->region_set = 1;
-                      break;
+                opts->region = strdup(optarg);
+                opts->region_set = 1;
+                break;
             case 'h':
-                      errno = 0;
-                      float eps = strtof(optarg, &p_end);
-                      if (errno == ERANGE){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                errno = 0;
+                float eps = strtof(optarg, &p_end);
+                if (errno == ERANGE){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --eps %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      if (eps <= 0 || eps >= 1){
-                          ret = err_msg(EXIT_FAILURE, 0, "--eps must be between 0 and 1"); 
-                          goto cleanup;
-                      }
-                      opts->eps = eps;
-                      break;
-            case 'q': errno = 0;
-                      opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);
-                      eno = errno;
-                      if (eno == EINVAL || eno == ERANGE){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+                    goto cleanup;
+                }
+                if (eps <= 0 || eps >= 1){
+                    ret = err_msg(EXIT_FAILURE, 0, "--eps must be between 0 and 1"); 
+                    goto cleanup;
+                }
+                opts->eps = eps;
+                break;
+            case 'q':
+                errno = 0;
+                opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);
+                eno = errno;
+                if (eno == EINVAL || eno == ERANGE){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --max-iter %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      break;
-            case 'i': errno = 0;
+                    goto cleanup;
+                }
+                break;
+            case 'd':
+                errno = 0;
+                opts->alpha_prior_w = strtof(optarg, &p_end);
+                if (errno == ERANGE){
+                    ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --amb-prior '%s' to float: %s", 
+                                  optarg, strerror(errno));
+                    goto cleanup;
+                }
+                if (opts->alpha_prior_w <= 0) {
+                    ret = err_msg(EXIT_FAILURE, 0, "--amb-prior '%s' must > 0", optarg);
+                    goto cleanup;
+                }
+                break;
+            case 'i':
+                errno = 0;
                 if ( strcmp(optarg, "intra") == 0 ) {
                     opts->mdl_intra_reads = 1;
                     opts->mdl_inter_reads = 0;
@@ -334,28 +369,30 @@ int main(int argc, char *argv[]){
                     goto cleanup;
                 }
                 break;
-            case 'T': errno = 0;
-                      opts->threads = (uint16_t)strtoul(optarg, &p_end, 10);
-                      eno = errno;
-                      if (eno == EINVAL || eno == ERANGE){
-                          ret = err_msg(EXIT_FAILURE, 0, 
+            case 'T':
+                errno = 0;
+                opts->threads = (uint16_t)strtoul(optarg, &p_end, 10);
+                eno = errno;
+                if (eno == EINVAL || eno == ERANGE){
+                    ret = err_msg(EXIT_FAILURE, 0, 
                                   "could not convert --threads %s to int: %s", 
                                   optarg, strerror(errno));
-                          goto cleanup;
-                      }
-                      break;
+                    goto cleanup;
+                }
+                break;
             case 't':
-                      opts->tx_basic = 1;
-                      break;
-            case 'V': opts->verbose = 1;
-                      break;
+                opts->tx_basic = 1;
+                break;
+            case 'V':
+                opts->verbose = 1;
+                break;
             case HOPT:
-                      usage(stdout, EXIT_SUCCESS);
-                      break;
+                usage(stdout, EXIT_SUCCESS);
+                break;
             default: 
-                      // err_msg(EXIT_FAILURE, 0, "unrecognized option: %s", loptions[option_index].name);
-                      usage(stdout, EXIT_FAILURE);
-                      break;
+                // err_msg(EXIT_FAILURE, 0, "unrecognized option: %s", loptions[option_index].name);
+                usage(stdout, EXIT_FAILURE);
+                break;
         }
     }
 

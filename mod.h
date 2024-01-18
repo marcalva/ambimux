@@ -142,8 +142,9 @@ void par_ix_init(par_ix_t *par_ix);
  * S values are 2 values specifying sources in droplet (0, ..., M-1, M)
  * source values are 0, ..., M-1 for samples, and M for ambient. -1 for invalid
  *
- * @field hs_ix a (1 + M + M(M-1)/2) by 3 array. Columns correspond to
- *  H, S1 (sample 1), and S2 (sample2)
+ * ix2pars stores a 3 x n_hs array. Each column gives the index of (H,S).
+ * Row 1 stores H (num nuclei), row 2 stores sample 1, and row 3 stores sample 2.
+ *
  */
 typedef struct {
     uint16_t n_sam;
@@ -190,16 +191,24 @@ typedef struct {
     f_t pi_d_sum; // used to normalize off-diagonal pi_1*pi_2 for H=2.
     f_t *pi_amb; // amb sample prop (M x 1 array)
     f_t *alpha_rna1; // droplet ambient count. (D x nrow_hs array)
-    f_t *alpha_rna2; // droplet cell count. (D x nrow_hs array)
     f_t *alpha_atac1; // droplet ambient count. (D x nrow_hs array)
-    f_t *alpha_atac2; // droplet cell count. (D x nrow_hs array)
+    f_t *alpha_rna_se; // droplet ambient rna standard error. (D x nrow_hs array)
+    f_t *alpha_atac_se; // droplet ambient atac standard error. (D x nrow_hs array)
+    f_t *alpha_rna_info; // droplet ambient rna info metric. (D x nrow_hs array)
+    f_t *alpha_atac_info; // droplet ambient atac info metric. (D x nrow_hs array)
     f_t *gamma; // CM fixed genotypes prob. {0,1} (M+1 x V array).
     f_t tau; // probability of a sequencing error (fixed at 0.01)
+
+    // alpha prior values and weight
+    f_t alpha_prior_rna;
+    f_t alpha_prior_atac;
+    f_t alpha_prior_w;
 
     // temporary counts for the maximization step (log values)
     pthread_mutex_t sum_lock; // lock for the sum variables
     f_t _lambda_sum[3];
     f_t *_pi_sum; // sample prop (M x 1 array)
+    f_t max_par_delta;
 } mdl_pars_t;
 
 /*******************************************************************************
@@ -373,6 +382,22 @@ int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
 f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele, 
         uint32_t s_ix, uint32_t gamma_nrow, f_t tau);
 
+/* Return information content of molecule, defined as the
+ * sum of the allele frequency difference between a sample
+ * and the ambient for the variants present.
+ * @return float-type information value.
+ */
+f_t mol_info(mdl_pars_t *mp, mdl_mlcl_t *mlcl, par_ix_t *par_ix);
+
+/* Return the information content of a set of molecules, which
+ * is the sum of the information of its molecules.
+ * Updates the info argument to hold the effective number of
+ * molecules.
+ * @return 0 on success, -1 on error.
+ */
+int bc_info(mdl_pars_t *mp, kbtree_t(kb_mdl_mlcl) *mols, par_ix_t *par_ix,
+            f_t *info);
+
 /* Get probability of observed base calls in a molecule.
  * mp gives the model parameters and should have gamma and tau set.
  * mlcl gives the observed base calls at overlapping variants.
@@ -384,26 +409,6 @@ f_t pr_gamma_var(f_t *gamma, uint32_t v_ix, uint8_t allele,
  * Returns 0 on success, -1 on error.
  */
 int p_var(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
-
-/* Get Pr(G_dm, B_dm, X_d | \Theta) for an RNA molecule.
- * Calculate probability of observed bases.
- * `s_ix` gives the sample index, must be within range [0, M+1). Last index
- * is the ambient cluster.
- * Stores the probability in `prob`.
- * Returns 0 on success, -1 on error.
- */
-int p_rna(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
-
-/* Get Pr(P_dm, B_dm, X_d | \Theta) for an ATAC molecule.
- * Calculate probability of observed bases and probability of observed peak.
- * `s_ix` gives the sample index, must be within range [0, M+1). Last index
- * is the ambient cluster.
- * `k` gives the cluster index, must be within range [0, K+1). The first index
- * is the ambient cluster, the rest are cell types.
- * Stores the probability in `prob`.
- * Returns 0 on success, -1 on error.
- */
-int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 
 /* Get Pr(B_dm) = \sum_t=1^tn Pr(T_dm = t, B_dm).
  * This calculates the probability of observing a base call B_dm = b after
@@ -422,28 +427,50 @@ int p_atac(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int s_ix, f_t *prob);
 int p_bd(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix, par_ix_t *par_ix,
         f_t *p_b, f_t *psum);
 
-/* Calculate the first and second derivatives w.r.t. alpha.
+/* Calculate the first and second derivatives w.r.t. alpha of a molecule.
  * Store first derivative in d1, second derivative in d2.
+ * Store P(B | ambient) in p_ba, P(B | sample) in p_bs.
  * Return 0 on success, -1 on error.
  */
 int d_p_bd_d_alpha(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix,
-                   par_ix_t *par_ix, f_t *d1, f_t *d2);
+                   par_ix_t *par_ix, f_t *d1, f_t *d2, f_t *p_ba, f_t *p_bs);
+
+/* calculate first and second derivate of log(P(B)) w.r.t. alpha transformed
+ * with logit.
+ */
+int d_lpd_dlogita(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix,
+                  par_ix_t *par_ix, f_t *d1, f_t *d2);
 
 /*******************************************************************************
- * Initialize alpha
+ * Estimate alpha
  ******************************************************************************/
 
-int mdl_init_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len);
-
-/* Calculate conditional probabilities for sub (H,S) model.
+/* Initialize and set values of alpha.
+ * Set alpha values of ambient droplets to 1.
+ * Set alpha values of empty (H,S) to 1.
+ * Set alpha values of singlet and doublet (H,S) to `val`.
+ *
+ * @param mdl mdl_t object to set.
+ * @param val a float/double within the range (0, 1).
+ * @return 0 on success, -1 on error
  */
-int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
+int mdl_init_alpha(mdl_t *mdl, f_t val);
+
+/* Maximize the log marginal likelihood with respect to alpha for each
+ * barcode
+ *
+ * Return 0 on success, -1 on error.
+ */
+int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len);
 
 /*******************************************************************************
  * Expectation
  ******************************************************************************/
 
+int mdl_set_lp(mdl_t *mdl, f_t *lp_htd, uint32_t bc_ix);
+
 /* Calculate conditional probabilities for sub (H,S) model.
+ * Add P(Z|X) values for lambda and pi
  */
 int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
 
@@ -451,17 +478,17 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
  * Maximization
  ******************************************************************************/
 
-/* Maximization step for sub model.
- * Maximizes parameters lambda, alpha, pi.
- */
-int mdl_sub_m(mdl_t *mdl, int *ixs, uint32_t ix_len);
-
 int mdl_m_lambda(mdl_t *mdl);
 int mdl_m_pi(mdl_t *mdl);
 // return num. of iterations, or -1 on error
 int mdl_m_pi_amb(mdl_t *mdl);
 
-int mdl_sub_est(mdl_t *mdl);
+int mdl_sub_m(mdl_t *mdl);
+
+/*
+ * @return the max delta change in avg alpha, or -1 on error
+ */
+f_t mdl_get_avg_sng_alpha(mdl_t *mdl);
 
 int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
 
@@ -470,9 +497,9 @@ int mdl_delta_q(f_t q1, f_t q2, f_t *q_delta);
  ******************************************************************************/
 
 void *mdl_sub_thrd_fx(void *arg);
-void *mdl_alpha_init_thrd_fx(void *arg);
+void *mdl_est_alpha_thrd_fx(void *arg);
 int mdl_thrd_call(mdl_t *mdl, int *ixs, uint32_t ix_len);
-int mdl_thrd_alpha_init(mdl_t *mdl, int *ixs, uint32_t ix_len);
+int mdl_thrd_est_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len);
 int mdl_em(mdl_t *mdl, obj_pars *objs);
 
 int mdl_sub_llk(mdl_t *mdl, f_t *llk);
@@ -506,6 +533,7 @@ int write_lambda(mdl_t *mdl, char *fn);
 int write_pi(mdl_t *mdl, char *fn);
 int write_alpha_rna(mdl_t *mdl, char *fn);
 int write_alpha_atac(mdl_t *mdl, char *fn);
+int write_alpha_prior(mdl_t *mdl, char *fn);
 
 /* Write the log likelihoods `log Pr(H_d, S_d, X_d | \Theta)` for test
  * droplets under the sub model. Write to file `fn.sample_llk.txt.gz`.

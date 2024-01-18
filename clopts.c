@@ -44,12 +44,14 @@ cl_opts *init_cl_opts(){
     opts->region = strdup(".");
     opts->region_set = 0;
 
-    opts->eps = 1e-5;
+    opts->eps = 1e-6;
     opts->max_iter = 100;
     // opts->alpha_max = 1;
 
     opts->mdl_intra_reads = 1;
     opts->mdl_inter_reads = 0;
+
+    opts->alpha_prior_w = 1.0;
 
     opts->threads = 1;
 
@@ -123,11 +125,13 @@ obj_pars *init_obj_pars(){
     p->atac_mapq = 30;
     // p->alpha_vars = 1;
 
-    p->eps = 1e-5;
+    p->eps = 1e-6;
     p->max_iter = 100;
 
     p->mdl_intra_reads = 1;
     p->mdl_inter_reads = 0;
+
+    p->alpha_prior_w = 1.0;
 
     p->threads = 1;
 
@@ -336,6 +340,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->eps = opts->eps;
     objs->k = opts->k;
     objs->max_iter = opts->max_iter;
+    objs->alpha_prior_w = opts->alpha_prior_w;
     objs->threads = opts->threads;
     objs->mdl_intra_reads = opts->mdl_intra_reads;
     objs->mdl_inter_reads = opts->mdl_inter_reads;

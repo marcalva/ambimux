@@ -46,4 +46,9 @@ uint32_t psr(uint32_t x, uint32_t mod);
 // deterministic output using psr
 void permute(int *array, uint32_t n);
 
+// log( (x)/(1-x) )
+#define logit(x) log( (x) / (1 - (x)) )
+
+#define logis(x) (1 / (1 + exp(-(x))))
+
 #endif // MATH_UTIL_H

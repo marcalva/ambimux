@@ -43,7 +43,7 @@ ambimux \
     --rna-mapq 30 \
     --atac-mapq 30 \
     --tx-basic \
-    --eps 1-e6 \
+    --eps 1-e5 \
     --max-iter 100 \
     --threads 8 \
     --verbose \
@@ -206,7 +206,7 @@ candidate droplet.
 
 ## EM parameters
 
-The parameters for convergence include `--eps`, which is set to `1e-5` by
+The parameters for convergence include `--eps`, which is set to `1e-6` by
 default, and `--max-iter`, which is set to `100` by default. The `eps` parameter
 specifies when to stop the EM based on the percent change in the log likelihood.
 The `max-iter` option specifies the maximum number of iterations to run, regardless of
@@ -349,7 +349,7 @@ by including the `--counts-only` argument.
 
 ```
 
-ambimux v0.3.0: single-cell demultiplexing
+ambimux v0.4.0: single-cell demultiplexing
 
 Options:
 
@@ -357,7 +357,7 @@ Input options
 
   -a, --atac-bam      Indexed ATAC BAM file.
   -r, --rna-bam       Indexed RNA BAM file.
-  -v, --vcf           Indexed VCF file. 
+  -v, --vcf           Indexed VCF file.
   -g, --gtf           GTF file.
   -p, --peaks         BED file containing peaks.
   -e, --exclude       BED file containing ATAC regions to exclude.
@@ -393,8 +393,10 @@ Model options
   -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many 
                       RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip [100].
   -h, --eps           Convergence threshold, where the percent change in parameters
-                      must be less than this value [1e-5].
+                      must be less than this value [1e-6].
   -q, --max-iter      Maximum number of iterations to perform for EM [100].
+  -d, --amb-prior-w   Weight of the ambient fraction prior. Effectively gives the number
+                      of reads added to the likelihood as a prior. Must be > 0 [1].
   -i, --mdl-reads     The type of reads to use for demultiplexing and ambient estimation.
                       One of 'intra', 'inter', or 'all'. 'intra' (default) specifies the model
                       should use only reads contained in peaks or genes.
