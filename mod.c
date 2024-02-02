@@ -1394,6 +1394,7 @@ mdl_t *mdl_alloc(){
     mdl->sub_best_h2 = NULL;
     mdl->sub_pp_h = NULL;
 
+    mdl->alpha_eps = 1e-6;
     mdl->eps = 1e-6;
     mdl->max_iter = 100;
 
@@ -1895,24 +1896,6 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
     par_ix_init(&par_ix);
 
 
-    f_t *lp_htd = calloc(n_hs, sizeof(f_t));
-    if (lp_htd == NULL)
-        return err_msg(-1, 0, "mdl_sub_e: %s", strerror(errno));
-
-    // pre-calculate P(H_d, S_d). Same for all droplets
-    f_t *lp_hs_v = calloc(n_hs, sizeof(f_t));
-    if (lp_hs_v == NULL)
-        return err_msg(-1, 0, "mdl_sub_e: %s", strerror(errno));
-    for (hs_ix = 0; hs_ix < n_hs; ++hs_ix){
-        if (hs_ix_get_pars(mdl->hs_ix, hs_ix, &par_ix) < 0)
-            return -1;
-        f_t p_hd = -1, p_sd = -1;
-        pr_hd(mdl->mp, &par_ix, &p_hd);
-        pr_sd(mdl->mp, &par_ix, &p_sd);
-        if (prob_invalid(p_hd) || prob_invalid(p_sd))
-            return err_msg(-1, 0, "mdl_sub_e: failed to get pr_hd or pr_sd");
-        lp_hs_v[hs_ix] = log(p_hd) + log(p_sd);
-    }
     // store data
     uint8_t n_mod = 2;
     f_t *alpha1[2] = {NULL, NULL};
@@ -1964,21 +1947,12 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
         int afl = bflg_get(&bd->amb_flag, bc_ix);
         if (afl == 1)
             continue;
-        uint32_t bc_n_ix = afl ? 1 : n_hs;
 
         // barcode count data
         mdl_mlcl_bc_t bc_dat = mv_i(&bd->bc_mlcl, bc_ix);
         kbtree_t(kb_mdl_mlcl) *mols[2] = {NULL, NULL};
         mols[RNA_IX] = bc_dat.rna;
         mols[ATAC_IX] = bc_dat.atac;
-
-        // initialize log Pr(H_d, S_d, X_d)
-        for (hs_ix = 0; hs_ix < n_hs; ++hs_ix) {
-            if (hs_ix < bc_n_ix)
-                lp_htd[hs_ix] = bc_dat.n_bc * lp_hs_v[hs_ix];
-            else
-                lp_htd[hs_ix] = -INFINITY;
-        }
 
         // loop over RNA and ATAC
         uint8_t mod_ix;
@@ -2002,12 +1976,11 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     continue;
                 }
 
-                f_t delta = 0.0, delta_thresh = 1e-12;
+                f_t delta = 0.0, delta_thresh = mdl->eps;
                 int alpha_iter, iter_max = 500;
 
                 //if (kb_size(mols_rna) > 100)
                 //    printf("BC hs=%i\n", hs_ix);
-                f_t lp = 0.0;
 
                 f_t best_alpha = alpha1[mod_ix][aix];
                 for (alpha_iter = 0; alpha_iter < iter_max; ++alpha_iter) {
@@ -2019,10 +1992,6 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                     d1_sum += ((1 - alpha_prior[mod_ix]) * al_prior_w) * (-1 / (1 - best_alpha));
                     d2_sum -= (alpha_prior[mod_ix] * al_prior_w) * (1 / (best_alpha*best_alpha));
                     d2_sum -= ((1 - alpha_prior[mod_ix]) * al_prior_w) * (1 / ((1 - best_alpha)*(1 - best_alpha)));
-
-                    lp = 0.0;
-                    lp += (alpha_prior[mod_ix] * al_prior_w) * log(best_alpha);
-                    lp += ((1 - alpha_prior[mod_ix]) * al_prior_w) * log(1 - best_alpha);
 
                     if (kb_size(mols[mod_ix]) == 0) {
                         alpha1[mod_ix][aix] = alpha_prior[mod_ix];
@@ -2039,7 +2008,7 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                         if (n_vars < 1)
                             continue;
 
-                        // calulcate derivative at current alpha
+                        // calculate derivative at current alpha
                         f_t d1, d2, p_ba, p_bs;
                         int pret = d_p_bd_d_alpha(mdl->mp, mlcl, mod_ix, bc_ix,
                                                   &par_ix, &d1, &d2, &p_ba, &p_bs);
@@ -2050,15 +2019,6 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                                            "There may be a bug.", d2);
                         if (isnan(d2))
                             return err_msg(-1, 0, "mdl_get_mmle_alpha: d2/da2='nan'. There may be a bug.");
-
-                        // get log marginal likelihood to check
-                        f_t psum = 0, p_tgpb[3] = {1,1,1};
-                        pret = p_bd(mdl->mp, mlcl, mod_ix, bc_ix, &par_ix, p_tgpb, &psum);
-                        if (pret < 0)
-                            return -1;
-                        if (psum < 0 || num_invalid(psum))
-                            return err_msg(-1, 1, "mdl_get_mmle_alpha: invalid read likelihood '%f'", psum);
-                        lp += mlcl->counts * log(psum);
 
                         d1_sum += mlcl->counts * d1;
                         d2_sum += mlcl->counts * d2;
@@ -2089,7 +2049,7 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                         alpha_t1 = ubnd_eps;
 
                     // get delta and store new alpha
-                    delta = alpha_t1 - best_alpha;
+                    delta = fabs(alpha_t1 - best_alpha) / fabs(best_alpha);
                     best_alpha = alpha_t1;
                     alpha1[mod_ix][aix] = best_alpha;
 
@@ -2098,7 +2058,7 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                         alpha_se[mod_ix][aix] = NAN;
                     else
                         alpha_se[mod_ix][aix] = 1.0 / sqrt(-d2_sum);
-                    if (fabs(delta) < delta_thresh)
+                    if (delta < delta_thresh)
                         break;
                     //if (isnan(delta) || isinf(delta) || fabs(delta) < delta_thresh)
                     //    break;
@@ -2116,16 +2076,9 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                 // effective number of reads
                 if (bc_info(mdl->mp, mols[mod_ix], &par_ix, alpha_info[mod_ix] + aix) < 0)
                     return -1;
-
-                lp_htd[hs_ix] += lp;
             }
         }
-        //if (mdl_set_lp(mdl, lp_htd, bc_ix) < 0)
-            //return -1;
     }
-
-    free(lp_htd);
-    free(lp_hs_v);
 
     return 0;
 }
@@ -2511,17 +2464,26 @@ int mdl_m_lambda(mdl_t *mdl) {
     f_t new_par = 0;
     uint32_t i;
 
+    f_t lambda0_norm = 0, lambdad_norm = 0;
     // maximize lambda
     f_t lambda_tot = 0;
     for (i = 0; i < 3; ++i)
         lambda_tot += mdl->mp->_lambda_sum[i];
     for (i = 0; i < 3; ++i){
+        lambda0_norm += mdl->mp->lambda[i] * mdl->mp->lambda[i];
         new_par = mdl->mp->_lambda_sum[i] / lambda_tot;
-        f_t delta = fabs(mdl->mp->lambda[i] - new_par);
-        if (delta > mdl->mp->max_par_delta)
-            mdl->mp->max_par_delta = delta;
+        f_t ldiff = mdl->mp->lambda[i] - new_par;
+        lambdad_norm += ldiff * ldiff;
+        // f_t delta = fabs(mdl->mp->lambda[i] - new_par) / fabs(mdl->mp->lambda[i]);
+        // if (delta > mdl->mp->max_par_delta)
+        //     mdl->mp->max_par_delta = delta;
         mdl->mp->lambda[i] = new_par;
     }
+    lambda0_norm = sqrt(lambda0_norm);
+    lambdad_norm = sqrt(lambdad_norm);
+    f_t delta = lambdad_norm / lambda0_norm;
+    if (delta > mdl->mp->max_par_delta)
+        mdl->mp->max_par_delta = delta;
 
     return 0;
 }
@@ -2529,18 +2491,28 @@ int mdl_m_lambda(mdl_t *mdl) {
 int mdl_m_pi(mdl_t *mdl) {
     f_t new_par = 0;
     uint16_t M = mdl->mp->M;
+    f_t pi0_norm = 0, pid_norm = 0;
     f_t pi_tot = 0;
     unsigned int i, j;
     for (i = 0; i < M; ++i) {
         pi_tot += mdl->mp->_pi_sum[i];
     }
     for (i = 0; i < M; ++i) {
+        pi0_norm = mdl->mp->pi[i] * mdl->mp->pi[i];
         new_par = mdl->mp->_pi_sum[i] / pi_tot;
-        f_t delta = fabs(mdl->mp->pi[i] - new_par);
-        if (delta > mdl->mp->max_par_delta)
-            mdl->mp->max_par_delta = delta;
+        f_t ldiff = mdl->mp->pi[i] - new_par;
+        pid_norm += ldiff * ldiff;
+        // f_t delta = fabs(mdl->mp->pi[i] - new_par) / fabs(mdl->mp->pi[i]);
+        // if (delta > mdl->mp->max_par_delta)
+        //     mdl->mp->max_par_delta = delta;
         mdl->mp->pi[i] = new_par;
     }
+    pi0_norm = sqrt(pi0_norm);
+    pid_norm = sqrt(pid_norm);
+    f_t delta = pid_norm / pi0_norm;
+    if (delta > mdl->mp->max_par_delta)
+        mdl->mp->max_par_delta = delta;
+
     f_t pi_sum = 0;
     for (i = 0; i < M; ++i){
         for (j = i+1; j < M; ++j){
@@ -2561,6 +2533,10 @@ int mdl_m_pi_amb(mdl_t *mdl) {
     uint32_t gamma_nrow = M + 1;
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
 
+    uint8_t n_mod = 2;
+    int has_mod[2] = {0, 0};
+    has_mod[ATAC_IX] = mdl->has_atac;
+    has_mod[RNA_IX] = mdl->has_rna;
 
     f_t *d_pi_amb = calloc(M, sizeof(f_t));
     f_t *new_pi_amb = calloc(M, sizeof(f_t));
@@ -2581,7 +2557,7 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
 
     int max_iter = 10000, iter = 0;
-    f_t vareps = 1e-1, delta_thresh = 1e-6, p_delta = delta_thresh + 1;
+    f_t vareps = 1e-1, delta_thresh = mdl->eps, p_delta = delta_thresh + 1;
     while (p_delta >= delta_thresh && iter < max_iter) {
         for (i = 0; i < M; ++i) {
             d_pi_amb[i] = 0;
@@ -2596,84 +2572,52 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
             // barcode count data
             mdl_mlcl_bc_t bc_dat = mv_i(&bd->bc_mlcl, bc_ix);
+            kbtree_t(kb_mdl_mlcl) *mols[2] = {NULL, NULL};
+            mols[RNA_IX] = bc_dat.rna;
+            mols[ATAC_IX] = bc_dat.atac;
 
-            // bam data
-            kbtree_t(kb_mdl_mlcl) *mols = bc_dat.rna;
-            kbtree_t(kb_mdl_mlcl) *frags = bc_dat.atac;
-
-            kbitr_t itr_rna, itr_atac;
-
-            // loop over RNA
-            kb_itr_first(kb_mdl_mlcl, mols, &itr_rna); 
-            for (; kb_itr_valid(&itr_rna); kb_itr_next(kb_mdl_mlcl, mols, &itr_rna)){
-                mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr_rna);
-                uint32_t n_vars = mv_size(&mlcl->var_ixs);
-                if (n_vars < 1)
+            // loop over RNA and ATAC
+            uint8_t mod_ix;
+            for (mod_ix = 0; mod_ix < n_mod; ++mod_ix) {
+                if (!has_mod[mod_ix])
                     continue;
 
-                size_t j;
-                for (j = 0; j < n_vars; ++j){
-                    // get base call for variant allele
-                    uint32_t pack = mv_i(&mlcl->var_ixs, j);
-                    uint32_t v_ix;
-                    uint8_t allele;
-                    mdl_mlcl_unpack_var(pack, &v_ix, &allele);
-                    if (allele > 1) continue; // if missing
+                kbitr_t itr;
+                kb_itr_first(kb_mdl_mlcl, mols[mod_ix], &itr); 
 
-                    // get base quality score
-                    // set to default tau if missing
-                    uint8_t bqual = mv_i(&mlcl->bquals, i);
-                    f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
+                for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols[mod_ix], &itr)){
+                    mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+                    uint32_t n_vars = mv_size(&mlcl->var_ixs);
+                    if (n_vars < 1)
+                        continue;
 
-                    f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
-                    uint16_t s_ix;
-                    for (s_ix = 0; s_ix < M; ++s_ix) {
-                        f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
-                        f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
-                        if (num_invalid(dp1)) dp1 = 0;
-                        f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
-                        if (num_invalid(dp2)) dp2 = 0;
-                        f_t dp = dp1 - dp2;
-                        d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
+                    size_t j;
+                    for (j = 0; j < n_vars; ++j){
+                        // get base call for variant allele
+                        uint32_t pack = mv_i(&mlcl->var_ixs, j);
+                        uint32_t v_ix;
+                        uint8_t allele;
+                        mdl_mlcl_unpack_var(pack, &v_ix, &allele);
+                        if (allele > 1) continue; // if missing
+
+                        // get base quality score
+                        // set to default tau if missing
+                        uint8_t bqual = mv_i(&mlcl->bquals, i);
+                        f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
+
+                        f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+                        uint16_t s_ix;
+                        for (s_ix = 0; s_ix < M; ++s_ix) {
+                            f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                            f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
+                            if (num_invalid(dp1)) dp1 = 0;
+                            f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
+                            if (num_invalid(dp2)) dp2 = 0;
+                            f_t dp = dp1 - dp2;
+                            d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
+                        }
+                        n_tot += (1 - perr) * mlcl->counts;
                     }
-                    n_tot += (1 - perr) * mlcl->counts;
-                }
-            }
-
-            // loop over ATAC
-            kb_itr_first(kb_mdl_mlcl, frags, &itr_atac); 
-            for (; kb_itr_valid(&itr_atac); kb_itr_next(kb_mdl_mlcl, frags, &itr_atac)){
-                mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr_atac);
-                uint32_t n_vars = mv_size(&mlcl->var_ixs);
-                if (n_vars < 1)
-                    continue;
-
-                size_t j;
-                for (j = 0; j < n_vars; ++j){
-                    // get base call for variant allele
-                    uint32_t pack = mv_i(&mlcl->var_ixs, j);
-                    uint32_t v_ix;
-                    uint8_t allele;
-                    mdl_mlcl_unpack_var(pack, &v_ix, &allele);
-                    if (allele > 1) continue; // if missing
-
-                    // get base quality score
-                    // set to default tau if missing
-                    uint8_t bqual = mv_i(&mlcl->bquals, i);
-                    f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
-
-                    f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
-                    uint16_t s_ix;
-                    for (s_ix = 0; s_ix < M; ++s_ix) {
-                        f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
-                        f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
-                        if (num_invalid(dp1)) dp1 = 0;
-                        f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
-                        if (num_invalid(dp2)) dp2 = 0;
-                        f_t dp = dp1 - dp2;
-                        d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
-                    }
-                    n_tot += (1 - perr) * mlcl->counts;
                 }
             }
         }
@@ -2687,12 +2631,20 @@ int mdl_m_pi_amb(mdl_t *mdl) {
         if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0)
             return -1;
 
+        // calculate delta
+        f_t pi0_norm = 0.0, pid_norm = 0.0;
         p_delta = 0;
         for (s_ix = 0; s_ix < M; ++s_ix) {
-            p_delta += pow(new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix], 2.0);
+            pi0_norm += mdl->mp->pi_amb[s_ix] * mdl->mp->pi_amb[s_ix];
+            f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
+            pid_norm += ldiff * ldiff;
+            p_delta += pow(ldiff, 2.0);
             mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
         }
-        p_delta = sqrt(p_delta);
+        pi0_norm = sqrt(pi0_norm);
+        pid_norm = sqrt(pid_norm);
+        p_delta = pid_norm / pi0_norm;
+        // p_delta = sqrt(p_delta);
 
         if (mdl_pars_set_gamma_amb(mdl->mp) < 0)
             return(-1);
@@ -2788,7 +2740,7 @@ f_t mdl_get_avg_sng_alpha(mdl_t *mdl) {
             alpha_avg = 1e-4;
         if (alpha_avg > 1 - 1e-4)
             alpha_avg = 1 - 1e-4;
-        f_t t_delta = fabs(*alpha_prior[mod_ix] - alpha_avg);
+        f_t t_delta = fabs(*alpha_prior[mod_ix] - alpha_avg) / *alpha_prior[mod_ix];
         if (t_delta > max_delta)
             max_delta = t_delta;
         *alpha_prior[mod_ix] = alpha_avg;
@@ -3006,7 +2958,7 @@ int mdl_em(mdl_t *mdl, obj_pars *objs){
             return -1;
 
         if (objs->verbose)
-            log_msg("iteration %u: delta='%.6e'", i+1, max_alpha_avg_delta);
+            log_msg("iteration %u: delta=%.6e", i+1, max_alpha_avg_delta);
 
         if (max_alpha_avg_delta < mdl->eps)
             break;
@@ -3140,6 +3092,7 @@ int mdl_fit(bam_data_t *bam_dat, obj_pars *objs){
         return -1;
 
     mdl->eps = objs->eps;
+    mdl->alpha_eps = objs->alpha_eps;
     mdl->max_iter = objs->max_iter;
     mdl->threads = objs->threads;
 

@@ -60,6 +60,7 @@ typedef struct {
     // int alpha_vars;
     char *region;
     int region_set;
+    float alpha_eps;
     float eps;
     uint16_t max_iter;
     double alpha_prior_w;
@@ -127,6 +128,7 @@ typedef struct {
     int rna_mapq;
     int atac_mapq;
     // int alpha_vars;
+    float alpha_eps;
     float eps;
     uint16_t max_iter;
 

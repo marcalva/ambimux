@@ -68,6 +68,8 @@ static void usage(FILE *fp, int exit_status){
             "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip [100].\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-6].\n"
+            "  -j, --amb-eps       Convergence threshold for droplet ambient contamination parameter alpha,\n"
+            "                      the percent change in value must be less than this argument [1e-6].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [100].\n"
             "  -d, --amb-prior-w   Weight of the ambient fraction prior. Effectively gives the number\n"
             "                      of reads added to the likelihood as a prior. Must be > 0 [1].\n"
@@ -118,6 +120,7 @@ int main(int argc, char *argv[]){
         {"atac-mapq", required_argument, NULL, 'Z'},
         {"region", required_argument, NULL, 'R'},
         {"eps", required_argument, NULL, 'h'},
+        {"amb-eps", required_argument, NULL, 'j'},
         {"max-iter", required_argument, NULL, 'q'},
         {"amb-prior-w", required_argument, NULL, 'd'},
         {"mdl-reads", required_argument, NULL, 'i'},
@@ -141,7 +144,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cx:w:u:b:c:H:m:P:z:Z:R:h:q:d:i:T:tV", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cnx:w:u:b:c:H:m:P:z:Z:R:h:j:q:d:i:T:tV", loptions, &option_index)) != -1){
         switch(cm){
             case 'a':
                 opts->atac_bam_fn = strdup(optarg);
@@ -326,6 +329,21 @@ int main(int argc, char *argv[]){
                 }
                 opts->eps = eps;
                 break;
+            case 'j':
+                errno = 0;
+                float alpha_eps = strtof(optarg, &p_end);
+                if (errno == ERANGE){
+                    ret = err_msg(EXIT_FAILURE, 0, 
+                                  "could not convert --amb-eps %s to int: %s", 
+                                  optarg, strerror(errno));
+                    goto cleanup;
+                }
+                if (alpha_eps <= 0 || alpha_eps >= 1){
+                    ret = err_msg(EXIT_FAILURE, 0, "--amb-eps must be between 0 and 1"); 
+                    goto cleanup;
+                }
+                opts->alpha_eps = alpha_eps;
+                break;
             case 'q':
                 errno = 0;
                 opts->max_iter = (uint16_t)strtoul(optarg, &p_end, 10);
@@ -342,12 +360,12 @@ int main(int argc, char *argv[]){
                 opts->alpha_prior_w = strtof(optarg, &p_end);
                 if (errno == ERANGE){
                     ret = err_msg(EXIT_FAILURE, 0, 
-                                  "could not convert --amb-prior '%s' to float: %s", 
+                                  "could not convert --amb-prior-w '%s' to float: %s", 
                                   optarg, strerror(errno));
                     goto cleanup;
                 }
                 if (opts->alpha_prior_w <= 0) {
-                    ret = err_msg(EXIT_FAILURE, 0, "--amb-prior '%s' must > 0", optarg);
+                    ret = err_msg(EXIT_FAILURE, 0, "--amb-prior-w '%s' must > 0", optarg);
                     goto cleanup;
                 }
                 break;

@@ -44,6 +44,7 @@ cl_opts *init_cl_opts(){
     opts->region = strdup(".");
     opts->region_set = 0;
 
+    opts->alpha_eps = 1e-6;
     opts->eps = 1e-6;
     opts->max_iter = 100;
     // opts->alpha_max = 1;
@@ -125,6 +126,7 @@ obj_pars *init_obj_pars(){
     p->atac_mapq = 30;
     // p->alpha_vars = 1;
 
+    p->alpha_eps = 1e-6;
     p->eps = 1e-6;
     p->max_iter = 100;
 
@@ -337,6 +339,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     objs->rna_mapq = opts->rna_mapq;
     objs->atac_mapq = opts->atac_mapq;
     // objs->alpha_vars = opts->alpha_vars;
+    objs->alpha_eps = opts->alpha_eps;
     objs->eps = opts->eps;
     objs->k = opts->k;
     objs->max_iter = opts->max_iter;

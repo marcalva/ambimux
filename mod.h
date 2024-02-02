@@ -255,6 +255,7 @@ typedef struct {
     int32_t *sub_best_h2; // D x 1 array. Best (H,S) index for H=2 dbls each droplet
     f_t *sub_pp_h; // 3 x BC array; posterior probabilities `H_d` for each droplet.
 
+    f_t alpha_eps;
     f_t eps;
     uint16_t max_iter;
     uint8_t has_rna, has_atac;
