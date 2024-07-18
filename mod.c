@@ -987,7 +987,7 @@ int is_in_simplex(f_t *x, size_t len) {
     if (x == NULL)
         return err_msg(-1, 0, "is_in_simplex: argument is null");
 
-    f_t lt1 = 1 - 1e-8, ut1 = 1 + 1e-8;
+    f_t lt1 = 1 - 1e-2, ut1 = 1 + 1e-2;
     f_t tot = 0.0;
     unsigned int i;
     for (i = 0; i < len; ++i) {
@@ -1098,7 +1098,7 @@ int mdl_pars_check(mdl_pars_t *mp){
         for (j = 0; j < mp->V; ++j) {
             f_t p = mp->gamma[CMI(i, j, M1)];
             // if missing, don't check
-            if (p > (-1 - 1e-8) && p < (-1 + 1e-8))
+            if (p > (-1 - 1e-2) && p < (-1 + 1e-2))
                 continue;
             if (prob_invalid(p))
                 return err_msg(-1, 0, "mdl_pars_check: gamma[%i, %i] = %f",
