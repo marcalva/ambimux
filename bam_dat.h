@@ -24,10 +24,15 @@
  */
 typedef struct {
     // RNA
+    mt_tree_t(rna_dups) rna_dupls;
+    mt_tree_t(rna_mols) rna_mlcls;
     rna_dups_bag_t rna_dups; // indexed by UMI
     rna_mlc_bag_t rna_mlcs; // indexed by UMI
 
     // ATAC
+    mt_tree_t(atac_pair) atac_pairs;
+    mt_tree_t(atac_dups) atac_dupls;
+    mt_tree_t(atac_frags) atac_frags;
     atac_pair_bag_t atac_prs; // query name hash
     atac_dup_bag_t atac_dups; // query by region pair
     atac_frag_bag_t atac_frgs; // query by region pair

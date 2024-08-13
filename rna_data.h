@@ -58,6 +58,9 @@ typedef struct rna_dups_t {
     uint32_t size, m;
 } rna_dups_t;
 
+#define key_cmp(key1, key2) (((key2) < (key1) - ((key1) < (key2))))
+mt_declare(rna_dups, umishort, rna_dups_t, key_cmp);
+
 // (internal) node for rna_dups_t object
 typedef struct rna_dup_node {
     umishort key; // UMI hash
@@ -113,6 +116,8 @@ typedef struct rna_mol_t {
     ml_t(seq_gene_l) gl;
     uint32_t n_reads;
 } rna_mol_t;
+
+mt_declare(rna_mols, umishort, rna_mol_t, key_cmp);
 
 // (internal) node to store rna_mol_t
 typedef struct rna_mlc_node {

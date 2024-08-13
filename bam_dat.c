@@ -1,5 +1,6 @@
 
 #include "bam_dat.h"
+#include "atac_data.h"
 #include "sam_read.h"
 #include "counts.h"
 
@@ -9,6 +10,14 @@ bc_data_t *bc_data_init(){
         err_msg(-1, 0, "bc_data_init: %s", strerror(errno));
         return(NULL);
     }
+    if (mt_init(rna_dups, &bcdat->rna_dupls) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    if (mt_init(rna_mols, &bcdat->rna_mlcls) < 0) {
+        free(bcdat);
+        return NULL;
+    }
     if (rna_dups_bag_init(&bcdat->rna_dups) < 0) {
         free(bcdat);
         return NULL;
@@ -17,11 +26,23 @@ bc_data_t *bc_data_init(){
         free(bcdat);
         return NULL;
     }
+    if (mt_init(atac_pair, &bcdat->atac_pairs) < 0) {
+        free(bcdat);
+        return NULL;
+    }
     if (atac_pair_bag_init(&bcdat->atac_prs) < 0) {
         free(bcdat);
         return NULL;
     }
+    if (mt_init(atac_dups, &bcdat->atac_dupls) < 0) {
+        free(bcdat);
+        return NULL;
+    }
     if (atac_dup_bag_init(&bcdat->atac_dups) < 0) {
+        free(bcdat);
+        return NULL;
+    }
+    if (mt_init(atac_frags, &bcdat->atac_frags) < 0) {
         free(bcdat);
         return NULL;
     }
@@ -43,8 +64,13 @@ bc_data_t *bc_data_init(){
 void bc_data_free_reads(bc_data_t *bcdat){
     if (bcdat == NULL) return;
 
+    mt_free(rna_dups, &bcdat->rna_dupls);
+    mt_free(rna_mols, &bcdat->rna_mlcls);
     rna_dups_bag_free(&bcdat->rna_dups);
     rna_mlc_bag_free(&bcdat->rna_mlcs);
+    mt_free(atac_pair, &bcdat->atac_pairs);
+    mt_free(atac_dups, &bcdat->atac_dupls);
+    mt_free(atac_frags, &bcdat->atac_frags);
     atac_pair_bag_free(&bcdat->atac_prs);
     atac_dup_bag_free(&bcdat->atac_dups);
     atac_frag_bag_free(&bcdat->atac_frgs);
@@ -62,8 +88,10 @@ void bc_data_dstry(bc_data_t *bcdat){
     free(bcdat);
 }
 
+// TODO: check that everything is freed appropriately
 void bc_data_free_atac_pairs(bc_data_t *bcdat){
     if (bcdat == NULL) return;
+    mt_free(atac_pair, &bcdat->atac_pairs);
     atac_pair_bag_free(&bcdat->atac_prs);
 }
 
@@ -76,6 +104,17 @@ int bc_data_rna_add_read(bc_data_t *bcdat, const rna_read1_t *r, umishort umih){
     if (bcdat == NULL || r == NULL)
         return err_msg(-1, 0, "bc_data_rna_add_read: argument is null");
 
+    rna_dups_t rna_dup;
+    if (rna_dups_init(&rna_dup) < 0)
+        return err_msg(-1, 0, "bc_data_rna_add_read: failed to initialize rna_dups");
+    mt_node_t(rna_dups) *node = NULL;
+    node = mt_add(rna_dups, &bcdat->rna_dupls, umih, rna_dup);
+    if (node == NULL)
+        return err_msg(-1, 0, "bc_data_rna_add_read: failed to add rna_dups to bcdat");
+    rna_dups_t *p = &node->value;
+    if (rna_dups_add_read(p, r) < 0)
+        return err_msg(-1, 0, "bc_data_rna_add_read: failed to add read to rna_dups");
+
     if (rna_dups_bag_add_read(&bcdat->rna_dups, r, umih) < 0)
         return -1;
 
@@ -86,6 +125,31 @@ int bc_data_rna_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
         return err_msg(-1, 0, "bc_data_rna_dedup: bcdat is null");
 
+    mt_itr_t(rna_dups) itrt;
+    if (mt_itr_first(rna_dups, &bcdat->rna_dupls, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_rna_dedup: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(rna_dups, &itrt)) {
+        umishort *umih = mt_itr_key(rna_dups, &itrt);
+        rna_dups_t *dupls = mt_itr_val(rna_dups, &itrt);
+        int ret;
+
+        rna_mol_t *mol = rna_dups_dedup(dupls, &ret);
+        if (ret < 0)
+            return err_msg(-1, 0, "bc_data_rna_dedup: failed to deduplicate reads");
+        if (mol == NULL) // if no reads, do nothing
+            return 0;
+
+        rna_dups_free(dupls);
+
+        mt_node_t(rna_mols) *node = NULL;
+        node = mt_add(rna_mols, &bcdat->rna_mlcls, *umih, *mol);
+        if (node == NULL)
+            return err_msg(-1, 0, "bc_data_rna_dedup: failed to add rna_mol to bcdat");
+
+        free(mol);
+    }
+    
     rna_dups_bag_itr itr, *itrp = &itr;
     rna_dups_bag_itr_first(itrp, &bcdat->rna_dups);
     while (rna_dups_bag_itr_alive(itrp)) {
@@ -113,6 +177,20 @@ int bc_data_rna_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap,
         return err_msg(-1, 0, "bc_data_rna_var_call: argument is null");
 
     int n_add = 0;
+    mt_itr_t(rna_mols) itrt;
+    if (mt_itr_first(rna_mols, &bcdat->rna_mlcls, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_rna_var_call: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(rna_mols, &itrt)) {
+        rna_mol_t *mol = mt_itr_val(rna_mols, &itrt);
+        umishort *umih = mt_itr_key(rna_mols, &itrt);
+        int ret = rna_mol_var_call(mol, gv, cmap, min_qual);
+        if (ret < 0)
+            return err_msg(-1, 0, "bc_data_rna_var_call: failed to call variant");
+        n_add += ret;
+    }
+
+    n_add = 0;
     rna_mlc_bag_itr itr, *itrp = &itr;
     rna_mlc_bag_itr_first(itrp, &bcdat->rna_mlcs);
     while (rna_mlc_bag_itr_alive(itrp)) {
@@ -136,8 +214,16 @@ int bc_data_atac_add_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
     if (bcdat == NULL || ar == NULL)
         return err_msg(-1, 0, "bc_data_atac_add_read: argument is null");
 
+    atac_rd_pair_t atac_pair;
+    atac_rd_pair_set0(&atac_pair);
+    mt_node_t(atac_pair) *node = NULL;
+    node = mt_add(atac_pair, &bcdat->atac_pairs, qname, atac_pair);
+    int ret = atac_rd_pair_add_read(&node->value, ar);
+    if (ret < 0)
+        return err_msg(-1, 0, "bc_data_atac_add_read: failed to add read to atac pair");
+
     if (atac_pair_bag_add_read(&bcdat->atac_prs, ar, qname) < 0)
-        return -1;
+        return err_msg(-1, 0, "bc_data_atac_add_read: failed to add read to atac pair");
 
     return(0);
 }
@@ -145,6 +231,23 @@ int bc_data_atac_add_read(bc_data_t *bcdat, const atac_read1_t *ar, qshort qname
 int bc_data_atac_get_dups(bc_data_t *bcdat) {
     if (bcdat == NULL)
         return err_msg(-1, 0, "bc_data_atac_get_dups: argument is null");
+
+    mt_itr_t(atac_pair) itrt;
+    if (mt_itr_first(atac_pair, &bcdat->atac_pairs, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_atac_get_dups: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(atac_pair, &itrt)) {
+        atac_rd_pair_t *ap = mt_itr_val(atac_pair, &itrt);
+        g_reg_pair reg_pair = get_reg_pair(ap->r1.loc, ap->r2.loc); // new key for dups
+        mt_node_t(atac_dups) *node = mt_find(atac_dups, &bcdat->atac_dupls, reg_pair);
+        if (node == NULL) {
+            atac_dups_t dupls;
+            atac_dups_init(&dupls);
+            node = mt_add(atac_dups, &bcdat->atac_dupls, reg_pair, dupls);
+        }
+        if (atac_dups_add_pair(&node->value, ap) < 0)
+            return err_msg(-1, 0, "bc_data_atac_get_dups: failed to add read to dups");
+    }
     
     atac_pair_bag_itr itr, *itrp = &itr;
     atac_pair_bag_itr_first(itrp, &bcdat->atac_prs);
@@ -162,6 +265,28 @@ int bc_data_atac_get_dups(bc_data_t *bcdat) {
 int bc_data_atac_dedup(bc_data_t *bcdat){
     if (bcdat == NULL)
         return err_msg(-1, 0, "bc_data_atac_dedup: bcdat is null");
+
+    mt_itr_t(atac_dups) itrt;
+    if (mt_itr_first(atac_dups, &bcdat->atac_dupls, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_atac_get_dups: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(atac_dups, &itrt)) {
+        g_reg_pair *reg_pair = mt_itr_key(atac_dups, &itrt);
+        atac_dups_t *dups = mt_itr_val(atac_dups, &itrt);
+        int ret;
+
+        atac_frag_t *frag = atac_dups_dedup(dups, &ret);
+        if (ret < 0)
+            return -1;
+
+        // free space after deduplication
+        atac_dups_free(dups);
+
+        // add to frags
+        mt_node_t(atac_frags) *node;
+        node = mt_add(atac_frags, &bcdat->atac_frags, *reg_pair, *frag);
+        free(frag); // free since we copied to new node
+    }
 
     atac_dup_bag_itr itr, *itrp = &itr;
     atac_dup_bag_itr_first(itrp, &bcdat->atac_dups);
@@ -195,6 +320,23 @@ int bc_data_atac_var_call(bc_data_t *bcdat, g_var_t *gv, str_map *cmap,
         return err_msg(-1, 0, "bc_data_atac_var_call: argument is null");
 
     int n_add = 0;
+    mt_itr_t(atac_frags) itrt;
+    if (mt_itr_first(atac_frags, &bcdat->atac_frags, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_atac_var_call: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(atac_frags, &itrt)) {
+        atac_frag_t *frag = mt_itr_val(atac_frags, &itrt);
+        g_reg_pair *reg = mt_itr_key(atac_frags, &itrt);
+        int ret = atac_frag_var_call(frag, gv, cmap, min_qual);
+        if (ret < 0) {
+            print_g_region(stderr, reg->r1);
+            print_g_region(stderr, reg->r2);
+            return err_msg(-1, 0, "bc_data_atac_var_call: failed to call variant");
+        }
+        n_add += ret;
+    }
+
+    n_add = 0;
     atac_frag_bag_itr itr, *itrp = &itr;
     atac_frag_bag_itr_first(itrp, &bcdat->atac_frgs);
     for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
@@ -218,6 +360,21 @@ int bc_data_atac_peak_call(bc_data_t *bcdat, iregs_t *pks, str_map *cmap){
         return err_msg(-1, 0, "bc_data_atac_peak_call: argument is null");
 
     int n_add = 0;
+
+    mt_itr_t(atac_frags) itrt;
+    if (mt_itr_first(atac_frags, &bcdat->atac_frags, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_atac_var_call: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(atac_frags, &itrt)) {
+        atac_frag_t *frag = mt_itr_val(atac_frags, &itrt);
+        g_reg_pair *reg = mt_itr_key(atac_frags, &itrt);
+        int np;
+        if ((np = atac_frag_peak_call(frag, *reg, pks, cmap)) < 0)
+            return err_msg(-1, 0, "bc_data_atac_peak_call: failed to call peaks");
+        n_add += np;
+    }
+
+    n_add = 0;
     atac_frag_bag_itr itr, *itrp = &itr;
     atac_frag_bag_itr_first(itrp, &bcdat->atac_frgs);
     for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
@@ -426,6 +583,7 @@ int bam_data_rna_dedup(bam_data_t *bam_data){
             return -1;
 
         // free dups struct to save space
+        mt_free(rna_dups, &bc_dat->rna_dupls);
         rna_dups_bag_free(&bc_dat->rna_dups);
     }
     return 0;
@@ -596,21 +754,24 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
 
     float n_mt = 0;
     uint32_t in_gene = 0;
-    rna_mlc_bag_itr itr, *itrp = &itr;
-    rna_mlc_bag_itr_first(itrp, &bc_dat->rna_mlcs);
-    while (rna_mlc_bag_itr_alive(itrp)) {
-        rna_mol_t *mol = rna_mlc_bag_itr_val(itrp);
+
+    mt_itr_t(rna_mols) itrt;
+    if (mt_itr_first(rna_mols, &bc_dat->rna_mlcls, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_rna_fill_stats: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(rna_mols, &itrt)) {
+        umishort *umih = mt_itr_key(rna_mols, &itrt);
+        rna_mol_t *mol = mt_itr_val(rna_mols, &itrt);
 
         // count genes
         ml_node_t(seq_gene_l) *gn;
-        for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
+        for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)) {
             seq_gene_t gene = ml_node_val(gn);
             int ret;
             kh_put(kh_cnt, bcc->genes, gene.gene_id, &ret);
             if (ret < 0)
                 return err_msg(-1, 0, "bc_data_rna_fill_stats: failed to add to gene ID");
         }
-        if (ml_size(&mol->gl)) ++in_gene;
 
         // count variant calls
         ml_node_t(seq_vac_l) *vn;
@@ -628,12 +789,13 @@ int bc_data_rna_fill_stats(bc_stats_t *bcc, const sam_hdr_t *rna_hdr, bc_data_t 
         // count MT
         const char *chr = sam_hdr_tid2name(rna_hdr, mol->loc.rid);
         if (chr == NULL)
-            return err_msg(-1, 0, "bc_data_rna_fill_stats: could not get rna chromosome name for %i", mol->loc.rid);
+            return err_msg(-1, 0, "bc_data_rna_fill_stats: could not get rna chromosome "
+                           "name for %i", mol->loc.rid);
         int is_mt = 0;
         if ( (is_mt = chr_is_mt(chr)) < 0 ) return(-1);
         if (is_mt) n_mt = n_mt + 1.0;
-        rna_mlc_bag_itr_next(itrp);
     }
+
     if (bcc->rna_counts) bcc->rna_mt = n_mt / (float)bcc->rna_counts;
     else bcc->rna_mt = 0;
 
@@ -654,11 +816,14 @@ int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_
 
     float n_mt = 0;
     uint32_t in_pk = 0;
-    atac_frag_bag_itr itr, *itrp = &itr;
-    atac_frag_bag_itr_first(itrp, &bc_dat->atac_frgs);
-    for (; atac_frag_bag_itr_alive(itrp); atac_frag_bag_itr_next(itrp)) {
-        g_reg_pair reg = *atac_frag_bag_itr_key(itrp);
-        atac_frag_t *frag = atac_frag_bag_itr_val(itrp);
+
+    mt_itr_t(atac_frags) itrt;
+    if (mt_itr_first(atac_frags, &bc_dat->atac_frags, &itrt) < 0)
+        return err_msg(-1, 0, "bc_data_atac_fill_stats: failed to initialize iterator");
+
+    for (; mt_itr_valid(&itrt); mt_itr_next(atac_frags, &itrt)) {
+        atac_frag_t *frag = mt_itr_val(atac_frags, &itrt);
+        g_reg_pair reg = *mt_itr_key(atac_frags, &itrt);
 
         // peaks present
         size_t p_i;
@@ -691,7 +856,9 @@ int bc_data_atac_fill_stats(bc_stats_t *bcc, const sam_hdr_t *atac_hdr, bc_data_
         int is_mt = 0;
         if ( (is_mt = chr_is_mt(chr)) < 0 ) return(-1);
         if (is_mt) n_mt = n_mt + 1.0;
+
     }
+
     if (bcc->atac_counts) bcc->atac_mt = n_mt / (float)bcc->atac_counts;
     else bcc->atac_mt = 0;
 

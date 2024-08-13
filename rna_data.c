@@ -521,9 +521,12 @@ rna_mol_t *rna_mlc_bag_itr_val(rna_mlc_bag_itr *itr) {
 
 int rna_mol_init(rna_mol_t *rmol){
     if (rmol == NULL) return(-1);
-    seq_base_l_init(&rmol->bl);
-    seq_vac_l_init(&rmol->vl);
-    seq_gene_l_init(&rmol->gl);
+    if (seq_base_l_init(&rmol->bl) < 0)
+        return err_msg(-1, 0, "rna_mol_init: failed to initialize");
+    if (seq_vac_l_init(&rmol->vl) < 0)
+        return err_msg(-1, 0, "rna_mol_init: failed to initialize");
+    if (seq_gene_l_init(&rmol->gl) < 0)
+        return err_msg(-1, 0, "rna_mol_init: failed to initialize");
     rmol->n_reads = 0;
     return(0);
 }

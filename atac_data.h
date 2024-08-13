@@ -10,6 +10,7 @@
 #include "str_util.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
+#include "g_list.h"
 #include "kavl.h"
 #include "variants.h"
 #include "counts.h"
@@ -39,22 +40,32 @@ typedef struct atac_read1_t {
     ml_t(seq_base_l) bl;
 } atac_read1_t;
 
-/*@ @typedef
- * @abstract Read pair
+/* @brief Store a pair of ATAC reads belonging to the same fragment.
  *
- * @field r1 Pointer to first atac read in pair.
- * @field r2 Pointer to second atac read in pair.
- * @field s Number of reads (0, 1, or 2).
+ * ATAC reads belong to the same fragment if they have the same read name
+ * and are paired.
  */
 typedef struct atac_rd_pair_t {
+    /* First atac read in pair. */
     atac_read1_t r1;
+
+    /* Second atac read in pair. */
     atac_read1_t r2;
+
+    /* @brief Number of reads in pair.
+     *
+     * Keeps track of how many reads were added to the struct.
+     * Can be 0, 1, or 2.
+     */
     uint8_t s;
 } atac_rd_pair_t;
 
 /*******************************************************************************
  * atac pairs bag
  ******************************************************************************/
+
+#define key1_cmp(key1, key2) (((key2) < (key1) - ((key1) < (key2))))
+mt_declare(atac_pair, qshort, atac_rd_pair_t, key1_cmp);
 
 // (internal) node for rna_dups_t object
 typedef struct atac_pair_node {
@@ -124,6 +135,8 @@ typedef struct atac_dups_t {
  * atac dups bag
  ******************************************************************************/
 
+mt_declare(atac_dups, g_reg_pair, atac_dups_t, reg_pair_cmp);
+
 // (internal) node for rna_dups_t object
 typedef struct atac_dup_node {
     g_reg_pair key;
@@ -177,6 +190,8 @@ typedef struct atac_frag_t {
 /*******************************************************************************
  * atac frags bag
  ******************************************************************************/
+
+mt_declare(atac_frags, g_reg_pair, atac_frag_t, reg_pair_cmp);
 
 // (internal) node for rna_frags_t object
 typedef struct atac_frag_node {
@@ -296,26 +311,63 @@ void atac_rd_pair_free(atac_rd_pair_t *rp);
 /* Free underlying memory and the object. */
 void atac_rd_pair_dstry(atac_rd_pair_t *rp);
 
-/* Copy an atac_rd_pair_t object.
+/* @brief Duplicate an atac_rd_pair_t object.
  *
- * If rp is NULL, return NULL.
- * Create a deep copy of the atac_rd_pair_t object pointed to by rp.
- * The object must be freed by the caller.
+ * Create a deep copy of the atac_rd_pair_t object pointed to by rp
+* and return a pointer to the new object.
  *
- * @return NULL or newly allocated object.
+ * @param rp Pointer to atac_rd_pair_t object to copy.
+ * @param ret Pointer to int to store return status.
+ * 
+ * @return - NULL if rp is NULL or if an error occurred. ret is set to -1.
+ *         - Otherwise, !NULL pointer to a dynamically allocated atac_rd_pair_t object.
+ *           ret is set to 0.
+ *         
+ * @note The return value must be freed by the caller.
  */
 atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret);
 
-/* Add an atac_read1_t to read pair.
+/**
+ * @brief Copy the contents of an atac_rd_pair_t object to another.
  *
- * If no reads are present in the pair, add to @f r1. If r1 is 
- * present add the read such that r1 <= r2 relative to genomic region.
+ * This function creates a deep copy of the contents of the `src` atac_rd_pair_t
+ * object and stores it in the `dest` atac_rd_pair_t object. The `dest` object
+ * must be properly initialized before calling this function.
  *
- * Expects non-null arguments.
- * Expects the query name of @p rp is set and equal to that of @p ar.
+ * @param dest Pointer to the destination atac_rd_pair_t object where the copy
+ *             will be stored.
+ * @param src Pointer to the source atac_rd_pair_t object to be copied.
  *
- * @param rp Pointer to atac_rd_pair_t object to add to.
- * @param ar Pointer to atac_read1_t object to add.
+ * @return 0 on success, -1 on error.
+ *
+ * @retval 0 The copy operation was successful.
+ * @retval -1 An error occurred during the copy operation. This can happen if
+ *            either `dest` or `src` is NULL, or if an error occurred while
+ *            copying the individual atac_read1_t objects.
+ *
+ * @note This function assumes that `dest` has been properly initialized before
+ *       calling it. If `dest` contains any existing data, it will be overwritten
+ *       by the copy operation.
+ *
+ * @see atac_read1_cpy
+ */
+int atac_rd_pair_cpy(atac_rd_pair_t *dest, const atac_rd_pair_t *src);
+
+/*
+ * @brief Add an ATAC read to an atac_rd_pair_t struct.
+ *
+ * This function adds the given ATAC read to the atac_rd_pair_t struct. If the
+ * struct is empty, the read is added to r1. If the struct contains one read,
+ * the read is added to r2, and the order of r1 and r2 is adjusted so that r1
+ * comes before r2 based on their locations. If the struct already contains two
+ * reads, an error is returned.
+ *
+ * The function makes a copy of the input read using atac_read1_dup before
+ * adding it to the struct.
+ *
+ * @param rp Pointer to the atac_rd_pair_t struct to add the read to.
+ * @param ar Pointer to the atac_read1_t struct to add.
+ *
  * @return 0 on success, -1 on error.
  */
 int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar);
@@ -333,14 +385,17 @@ int atac_rd_pair_equal(const atac_rd_pair_t *rp1, const atac_rd_pair_t *rp2);
 
 /* Set the highest base quality in a read of the two reads 
  *
- * Expects @p rp and @p cmp have the same bases, it is an error otherwise.
+ * Expects `rp` and `cmp` have the same bases, it is an error otherwise.
  * Compares the quality score at each base between the two reads. If the 
- * base quality is higher in @p cmp, then set the quality in @p rp 
- * to that of @p cmp.
+ * base quality is higher in `cmp`, then set the quality in `rp` 
+ * to that of `cmp`. Calls the function `seq_base_l_match_qual` to match
+ * the qualities of bases for each read pair.
  *
  * @param rp Pointer to atac_rd_pair_t to modify the qualities of.
  * @param cmp Pointer to atac_rd_pair_t to compare the qualities.
  * @return 0 on success, -1 on error.
+ *
+ * @see seq_base_l_match_qual
  */
 int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp);
 
@@ -390,6 +445,9 @@ atac_frag_t *atac_frag_alloc();
 void atac_frag_free(atac_frag_t *f);
 void atac_frag_dstry(atac_frag_t *f);
 
+/*
+ * @note returned object must be freed by caller.
+ */
 atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret);
 
 /* call variants from atac fragments

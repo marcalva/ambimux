@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <errno.h>
+#include "kavl.h"
 
 #define ml_declare_i(SCOPE, name, ntype, n_cmp) \
     /* struct node */ \
@@ -323,5 +324,442 @@
 
 mv_declare(i32, int32_t);
 mv_declare(u32, uint32_t);
+
+/*******************************************************************************
+ * binary tree
+ ******************************************************************************/
+
+/* key_cmp_fn is a function of type `int cmp(key_type key1, key_type key2)` that returns
+* -1 if key1 < key2, 0 if key1 == key2, 1 if key1 > key2.
+*  Values should be passed, not pointers to `key_type`
+*/
+
+#define mt_declare_i(SCOPE, name, key_type, value_type, key_cmp_fn) \
+/* node struct*/ \
+typedef struct __mt_node_##name { \
+    key_type key; \
+    value_type value; \
+    KAVL_HEAD(struct __mt_node_##name) head; \
+} __mt_node_##name; \
+typedef struct __mt_node_##name mt_node_##name##_t; \
+\
+/* tree struct */ \
+typedef struct __mt_tree_##name { \
+    mt_node_##name##_t *root; \
+} __mt_tree_##name; \
+typedef struct __mt_tree_##name mt_tree_##name##_t; \
+\
+/* cmp function */ \
+SCOPE int __key_cmp_##name(const mt_node_##name##_t *n1, const mt_node_##name##_t *n2){ \
+    return key_cmp_fn((n1)->key, (n2)->key); \
+} \
+\
+KAVL_INIT2(__bt_##name, SCOPE, struct __mt_node_##name, head, __key_cmp_##name) \
+\
+/* tree iterator */ \
+typedef struct __mt_itr_##name { \
+    kavl_itr_t(__bt_##name) itr; \
+    uint8_t has_data; \
+} __mt_itr_##name; \
+typedef struct __mt_itr_##name mt_itr_##name##_t; \
+\
+/* initialize tree */ \
+SCOPE int __mt_tree_init_##name(__mt_tree_##name *b){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_tree_init_%s: tree is null\n", #name); \
+        return(-1); \
+    } \
+    b->root = NULL; \
+    return(0); \
+} \
+\
+/* free tree */ \
+SCOPE void __mt_tree_free_##name(__mt_tree_##name *b){ \
+    if (b == NULL) \
+        return; \
+\
+    if (b->root == NULL) \
+        return; \
+    kavl_itr_t(__bt_##name) itr; \
+    kavl_itr_first(__bt_##name, b->root, &itr);  /* place at first */ \
+    if (kavl_at(&itr) == NULL) \
+        return; \
+    do {                             /* traverse */ \
+        mt_node_##name##_t *p = (mt_node_##name##_t *)kavl_at(&itr); \
+        free((void*)p); \
+    } while (kavl_itr_next(__bt_##name, &itr)); \
+    b->root = NULL; \
+\
+}\
+\
+/* add to tree */\
+SCOPE mt_node_##name##_t *__mt_tree_add_##name(__mt_tree_##name *b, \
+    key_type key, value_type val){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_tree_add_%s: tree is null\n", #name); \
+        return(NULL); \
+    } \
+\
+    /* allocate node */ \
+    mt_node_##name##_t *p = (mt_node_##name##_t *)calloc(1, sizeof(mt_node_##name##_t)); \
+    if (p == NULL){ \
+        fprintf(stderr, "error: __mt_tree_add_%s: %s\n", #name, strerror(errno)); \
+        return(NULL); \
+    } \
+\
+    /* initialize node */ \
+    p->key = key; \
+    p->value = val; \
+\
+    /* add node */ \
+    mt_node_##name##_t *q; \
+    q = kavl_insert(__bt_##name, &b->root, p, 0); \
+    if (q != p) { \
+        free(p); \
+    } \
+    return(q); \
+}\
+/* get node by key */ \
+SCOPE mt_node_##name##_t *__mt_tree_find_##name(mt_tree_##name##_t *b, key_type key){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_tree_find_%s: tree is null\n", #name); \
+        return(NULL); \
+    } \
+    mt_node_##name##_t p, *q; \
+    p.key = key; \
+    q = kavl_find(__bt_##name, b->root, &p, 0); \
+    return q; \
+} \
+\
+/* remove node */ \
+SCOPE mt_node_##name##_t *__mt_tree_rm_##name(mt_tree_##name##_t *b, key_type key){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_tree_rm_%s: tree is null\n", #name); \
+        return(NULL); \
+    } \
+    if (b->root == NULL) \
+        return NULL; \
+    mt_node_##name##_t p, *q; \
+    p.key = key; \
+    q = kavl_erase(__bt_##name, &b->root, &p, 0); \
+    return q; \
+} \
+/* initialize iterator to first */ \
+SCOPE int __mt_itr_first_##name(mt_tree_##name##_t *b, mt_itr_##name##_t *itr){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_itr_first_%s: tree is null\n", #name); \
+        return(-1); \
+    } \
+    if (itr == NULL) {\
+        fprintf(stderr, "error: __mt_itr_first_%s: iterator is null\n", #name); \
+        return(-1); \
+    } \
+\
+    if (b->root == NULL) {\
+        itr->has_data = 0; \
+        return 0; \
+    } \
+    kavl_itr_first(__bt_##name, b->root, &itr->itr); \
+    itr->has_data = 1; \
+    return(0); \
+} \
+\
+/* get next node in tree */ \
+SCOPE int __mt_itr_next_##name(mt_itr_##name##_t *itr){ \
+    if (itr == NULL) {\
+        fprintf(stderr, "error: __mt_itr_next_%s: iterator is null\n", #name); \
+        return(-1); \
+    } \
+    if (itr->has_data == 0) \
+        return 0; \
+    /* calling kavl_itr_next places the iterator to point to the next node in the tree \
+     * if this next node is valid and contains data, 1 is returned and kavl_at(itr) returns the data. \
+     * if this next node is empty, 0 is returned and kavl_at(itr) returns NULL. \
+     */ \
+    itr->has_data = kavl_itr_next(__bt_##name, &itr->itr); \
+    return(itr->has_data); \
+} \
+\
+/* check whether iterator contains data */ \
+SCOPE int __mt_itr_valid_##name(mt_itr_##name##_t *itr){ \
+    if (itr == NULL) \
+        return 0; \
+    return itr->has_data; \
+} \
+\
+/* place iterator at key value */ \
+SCOPE int __mt_itr_find_##name(mt_tree_##name##_t *b, key_type key, mt_itr_##name##_t *itr){ \
+    if (b == NULL) {\
+        fprintf(stderr, "error: __mt_itr_find_%s: tree is null\n", #name); \
+        return(-1); \
+    } \
+    if (itr == NULL) {\
+        fprintf(stderr, "error: __mt_itr_find_%s: iterator is null\n", #name); \
+        return(-1); \
+    } \
+    if (b->root == NULL) {\
+        return 0; \
+    } \
+\
+    mt_node_##name##_t p; \
+    p.key = key; \
+    int ret = kavl_itr_find(__bt_##name, b->root, &p, &itr->itr); \
+\
+    if (kavl_at(&itr->itr) == NULL) { \
+        itr->has_data = 0; \
+    } else { \
+        itr->has_data = 1; \
+    } \
+\
+    return(ret); \
+} \
+\
+/* iterator key */ \
+SCOPE key_type *__mt_itr_key_##name(mt_itr_##name##_t *itr){ \
+    if (itr == NULL) { \
+        fprintf(stderr, "error: __mt_itr_key_%s: iterator is null\n", #name); \
+        return(NULL); \
+    } \
+    mt_node_##name##_t *p = (mt_node_##name##_t *)kavl_at(&itr->itr); \
+    if (p == NULL) \
+        return NULL; \
+    return(&p->key); \
+} \
+\
+/* iterator value */ \
+SCOPE value_type *__mt_itr_val_##name(mt_itr_##name##_t *itr){ \
+    if (itr == NULL) {\
+        fprintf(stderr, "error: __mt_itr_val_%s: iterator is null\n", #name); \
+        return(NULL); \
+    } \
+    mt_node_##name##_t *p = (mt_node_##name##_t *)kavl_at(&itr->itr); \
+    if (p == NULL) \
+        return NULL; \
+    return &p->value; \
+}
+
+/* declare type and functions with static scope */
+#define mt_declare(name, key_type, value_type, key_cmp_fn) \
+    mt_declare_i(static, name, key_type, value_type, key_cmp_fn)
+
+/* types
+ * @param name The name specifier of the tree type
+ */
+#define mt_node_t(name) mt_node_##name##_t
+#define mt_tree_t(name) mt_tree_##name##_t
+#define mt_itr_t(name) mt_itr_##name##_t
+
+/* functions */
+
+/* initialize tree
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ *
+ * @retval `int`
+ * @return 0 on success, -1 on error
+ */
+#define mt_init(name, tree) __mt_tree_init_##name((tree))
+
+/* free nodes in tree
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ *
+ * @return void
+ */
+#define mt_free(name, tree) __mt_tree_free_##name((tree))
+
+/* add node to tree
+ *
+ * Dynamically allocates a node with key_type and value_type, and assigns
+ * `key` and `val`by simple copy assignment.
+ *
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ * @param key key of type `key_type`
+ * @param val value of type `value_type`
+ *
+ * @retval `mt_node_t(name) *`
+ * @return Pointer to mt_node_t(name) with key-value data.
+ *         If key already exists, returns pointer to existing node.
+ *         Otherwise, returns pointer to newly allocated node.
+ *         Will return NULL on error.
+ * @note Unclear exactly how kavl_insert will return on error.
+ */
+#define mt_add(name, tree, key, val) __mt_tree_add_##name((tree), (key), (val))
+
+/* find node by key value
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ * @param key key of type `key_type`
+ *
+ * @retval `mt_node_t(name) *`
+ * @return Pointer to node of type mt_node_t(name) with key-value data.
+ *         If key is not found, returns NULL.
+ */
+#define mt_find(name, tree, key) __mt_tree_find_##name((tree), (key))
+
+/* remove node by key value
+ * After last element is removed, `tree.root` is set to NULL.
+ *
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ * @param key key of type `key_type`
+ *
+ * @retval `mt_node_t(name) *`
+ * @return Pointer to removed node of type mt_node_t(name) with key-value data.
+ *         If key is not found, returns NULL.
+ */
+#define mt_remove(name, tree, key) __mt_tree_rm_##name((tree), (key))
+
+/* initialize iterator to first node in tree
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `int`
+ * @return 0 on success, -1 on error
+ */
+#define mt_itr_first(name, tree, itr) __mt_itr_first_##name((tree), (itr))
+
+/* get next node in tree
+ * @param name tree type specifier
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `int`
+ * @return 0 if no next element, 1 if next element found
+ */
+#define mt_itr_next(name, itr) __mt_itr_next_##name((itr))
+
+/* find node by key value
+ *
+ * places iterator at node with key value. if key is not found, iterator
+ *  1) is NULL if key is greater than all keys in the tree.
+ *  2) points to the next node greater than key if it exists.
+ *
+ * @param name tree type specifier
+ * @param tree pointer to mt_tree_t(name)
+ * @param key key of type `key_type`
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `int`
+ * @return 0 if key not found, 1 if key found
+ */
+#define mt_itr_find(name, tree, key, itr) __mt_itr_find_##name((tree), (key), (itr))
+
+/* check if iterator has data.
+ * @param name tree type specifier
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `int`
+ * @return 0 if iterator has no data, 1 if iterator has data
+ */
+#define mt_itr_valid(itr) ((itr) ? ((itr)->has_data) : 0)
+
+/* return the key of the node at the iterator
+ * @param name tree type specifier
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `value_type *`
+ * @return Pointer to key in tree. NULL if itr has no data.
+ */
+#define mt_itr_key(name, itr) __mt_itr_key_##name((itr))
+
+/* return the value of the node at the iterator
+ * @param name tree type specifier
+ * @param itr pointer to mt_itr_t(name)
+ *
+ * @retval `value_type *`
+ * @return Pointer to value in tree. NULL if itr has no data.
+ */
+#define mt_itr_val(name, itr) __mt_itr_val_##name((itr))
+
+/* return number of elements in tree
+ * @param tree pointer to mt_tree_t(name)
+ *
+ * @retval `uint32_t`
+ * @return number of elements
+ */
+#define mt_size(tree) kavl_size(head, ((tree)->root))
+
+/* Example
+#include "g_list.h"
+#include <stdio.h>
+#include <string.h>
+
+// Define key and value types
+typedef char *key_type;
+typedef int value_type;
+
+// Comparison function for keys
+int key_cmp(key_type k1, key_type k2) { return strcmp(k1, k2); }
+
+// Declare the mt_tree
+mt_declare_i(static, str_int, key_type, value_type, key_cmp)
+
+int main() {
+    // Initialize the tree
+    mt_tree_t(str_int) tree;
+    mt_init(str_int, &tree);
+
+    // Add some key-value pairs
+    char *keys[] = {"apple", "banana", "cherry", "apple", "peach"};
+    int values[] = {1, 2, 3, 4, 5};
+    mt_node_t(str_int) * node;
+    for (int i = 0; i < 5; i++) {
+        node = mt_add(str_int, &tree, keys[i], values[i]);
+        printf("Added key '%s' with value %d\n", node->key, node->value);
+    }
+
+    // Iterate over the tree
+    int iret;
+    mt_itr_t(str_int) itr;
+    mt_itr_first(str_int, &tree, &itr);
+    printf("\nBag contents:\n");
+    while (mt_itr_valid(str_int, &itr)) {
+        key_type *pkey = mt_itr_key(str_int, &itr);
+        value_type *value = mt_itr_val(str_int, &itr);
+        printf("Key: '%s', Value: %d, next: %i\n", *pkey, *value, iret);
+        iret = mt_itr_next(str_int, &itr);
+    }
+
+    // find with iter
+    key_type key = "banana";
+    printf("\nFinding key '%s' by iterator\n", key);
+    int fret = mt_itr_find(str_int, &tree, key, &itr);
+    if (fret == 1) {
+        printf("Found key '%s' with value %d\n", *mt_itr_key(str_int, &itr),
+               *mt_itr_val(str_int, &itr));
+    } else {
+        printf("Key '%s' not found\n", key);
+    }
+
+    // perform a find operation
+    printf("\nFinding key '%s' by node\n", key);
+    node = mt_find(str_int, &tree, key);
+    if (node) {
+        printf("Found key '%s' with value %d\n", node->key, node->value);
+    } else {
+        printf("Key '%s' not found\n", key);
+    }
+
+    // remove banana
+    printf("\nRemoving key '%s'\n", key);
+    key = "banana";
+    node = mt_remove(str_int, &tree, key);
+    if (node)
+        printf("Removed key '%s' with value %d\n", node->key, node->value);
+    node = mt_find(str_int, &tree, key);
+    if (node) {
+        printf("Key '%s' found with value %d\n", node->key, node->value);
+    } else {
+        printf("Key '%s' not found\n", key);
+    }
+
+    // Free the tree
+    mt_free(str_int, &tree);
+
+    return 0;
+}
+*/
 
 #endif // G_LIST_H

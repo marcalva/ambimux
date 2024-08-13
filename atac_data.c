@@ -53,6 +53,7 @@ atac_read1_t *atac_read1_dup(const atac_read1_t *r, int *ret){
     atac_read1_t *cpy = atac_read_init();
     if (cpy == NULL){
         *ret = -1;
+        err_msg(-1, 0, "atac_read1_dup: %s", strerror(errno));
         return(NULL);
     }
 
@@ -60,7 +61,8 @@ atac_read1_t *atac_read1_dup(const atac_read1_t *r, int *ret){
 
     if ( seq_base_l_cpy(&cpy->bl, &r->bl) < 0 ){
         *ret = -1;
-        free(cpy);
+        err_msg(-1, 0, "atac_read1_dup: %s", strerror(errno));
+        atac_read_dstry(cpy);
         return(NULL);
     }
 
@@ -75,8 +77,10 @@ int atac_read1_cpy(atac_read1_t *dest, const atac_read1_t *src){
 
     dest->loc = src->loc;
     
-    if ( seq_base_l_cpy(&dest->bl, &src->bl) < 0 )
-        return(-1);
+    if ( seq_base_l_cpy(&dest->bl, &src->bl) < 0 ) {
+        atac_read_free(dest);
+        return err_msg(-1, 0, "atac_read1_cpy: %s", strerror(errno));
+    }
 
     return(0);
 }
@@ -99,7 +103,8 @@ int atac_read1_add_base(atac_read1_t *r, seq_base_t base){
     if (r == NULL)
         return err_msg(-1, 0, "atac_read1_add_base: arguments are NULL");
 
-    if (seq_base_l_insert(&r->bl, base, 1, 1) < 0) return(-1);
+    if (seq_base_l_insert(&r->bl, base, 1, 1) < 0)
+        return err_msg(-1, 0, "atac_read1_add_base: failed to add base to read");
 
     return(0);
 }
@@ -143,7 +148,10 @@ void atac_rd_pair_dstry(atac_rd_pair_t *rp){
 
 atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
     *ret = 0;
-    if (rp == NULL) return(NULL);
+    if (rp == NULL) {
+        *ret = err_msg(-1, 0, "atac_rd_pair_dup: read pair is null");
+        return(NULL);
+    }
 
     atac_rd_pair_t *cp = (atac_rd_pair_t *)calloc(1, sizeof(atac_rd_pair_t));
     if (cp == NULL){
@@ -156,19 +164,25 @@ atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
     int cret = 0;
     rtmp = atac_read1_dup(&rp->r1, &cret);
     if (cret < 0){
-        *ret = -1;
+        atac_rd_pair_dstry(cp);
+        *ret = err_msg(01, 0, "atac_rd_pair_dup: failed to duplicate read 1");
         return(NULL);
     }
-    cp->r1 = *rtmp;
-    free(rtmp);
+    if (rtmp != NULL) {
+        cp->r1 = *rtmp;
+        free(rtmp);
+    }
 
     rtmp = atac_read1_dup(&rp->r2, &cret);
     if (cret < 0){
-        *ret = -1;
+        atac_rd_pair_dstry(cp);
+        *ret = err_msg(01, 0, "atac_rd_pair_dup: failed to duplicate read 2");
         return(NULL);
     }
-    cp->r2 = *rtmp;
-    free(rtmp);
+    if (rtmp != NULL) {
+        cp->r2 = *rtmp;
+        free(rtmp);
+    }
 
     cp->s = rp->s;
 
@@ -177,14 +191,18 @@ atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
 
 int atac_rd_pair_cpy(atac_rd_pair_t *dest, const atac_rd_pair_t *src){
     if (src == NULL)
-        return err_msg(-1, 0, "atac_rd_pair_cpy: dest is null");
+        return err_msg(-1, 0, "atac_rd_pair_cpy: src is null");
     if (dest == NULL)
         return err_msg(-1, 0, "atac_rd_pair_cpy: dest is null");
 
-    if (atac_read1_cpy(&dest->r1, &src->r1) < 0)
+    if (atac_read1_cpy(&dest->r1, &src->r1) < 0) {
+        atac_rd_pair_free(dest);
         return(-1);
-    if (atac_read1_cpy(&dest->r2, &src->r2) < 0) // TODO: free memory from r1 if error
+    }
+    if (atac_read1_cpy(&dest->r2, &src->r2) < 0) {
+        atac_rd_pair_free(dest);
         return(-1);
+    }
 
     dest->s = src->s;
 
@@ -204,18 +222,18 @@ int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar){
         rp->r1 = *rtmp;
         free(rtmp);
     } else if (rp->s == 1){
-        rp->r2 = *rtmp;
-        free(rtmp);
-
         /* switch order if r2 comes before r1 */
-        int rcmp = regioncmp(rp->r2.loc, rp->r1.loc);
+        int rcmp = regioncmp(rtmp->loc, rp->r1.loc);
         if (rcmp < 0){
             atac_read1_t tmp = rp->r2;
             rp->r2 = rp->r1;
-            rp->r1 = tmp;
+            rp->r1 = *rtmp;
+        } else {
+            rp->r2 = *rtmp;
         }
-    } else {
         free(rtmp);
+    } else {
+        atac_read_dstry(rtmp);
         return err_msg(0, 1, "atac_rd_pair_add_read: trying to add read to full pair "
                 "(query name was found a third time)");
     }
@@ -610,7 +628,11 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp){
     int tcmp = 0;
     for (i = 0; i < d->size; ++i){
         tcmp = atac_rd_pair_equal(&d->dups[i].rd, rp);
-        if (tcmp < 0) return(-1);
+        if (tcmp < 0) {
+            if (d->dups != NULL)
+                atac_dups_free(d);
+            return(-1);
+        }
         if (tcmp == 1){
             if (atac_rd_pair_match_qual(&d->dups[i].rd, rp) < 0) return(-1);
             ++d->dups[i].n_rd;;
@@ -747,16 +769,6 @@ int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap,
     }
 
     int ret = seq_vac_l_call_var(&f->bl, &f->vl, gv, cmap, min_qual);
-    // TODO: remove this
-    if (ret < 0){
-        ml_node_t(seq_base_l) *n = ml_begin(&f->bl);
-        while (n != NULL){
-            seq_base_t b = ml_node_val(n);
-            fprint_g_pos(stderr, b.pos);
-            fprintf(stderr, "\n");
-            n = ml_node_next(n);
-        }
-    }
 
     // free the bases since we don't need them anymore
     seq_base_l_free(&f->bl);
@@ -795,7 +807,7 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     size_t i;
     for (i = 0; i < mv_size(&overlaps); ++i){
         int ix = mv_i(&overlaps, i);
-        if (ix >= pks->n)
+        if (ix >= pks->n || ix < 0)
             return err_msg(-1, 0, "atac_frag_peak_call: %zu index >= num of peaks %zu", ix, pks->n);
         g_region pk_reg = pks->reg[ix];
 

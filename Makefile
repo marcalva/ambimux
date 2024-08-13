@@ -4,7 +4,7 @@ CC = $(shell which gcc)
 # CFLAGS = -g -O1 -Wall -Wextra -Wfloat-equal -Wno-unused-function -fsanitize=address -Wshadow -fno-omit-frame-pointer
 CFLAGS = -g -O2 -Wall -Wextra -Wfloat-equal -Wno-unused-function -Wpointer-arith -Wshadow
 
-HTSDIR = htslib
+HTSDIR = ./htslib
 HTSLIB = $(HTSDIR)/libhts.a
 
 CPPFLAGS += -I. -I$(HTSDIR)
@@ -19,8 +19,9 @@ OBJS = main.o atac_data.o str_util.o sam_read.o \
 	   clopts.o rna_data.o bc_stats.o mod.o bam_dat.o r_count.o \
 	   bam_proc.o math_util.o array_util.o
 
-LDFLAGS += -L$(HTSDIR)
-LIBS += -lm -l:libhts.a -lpthread $(HTSLIB_static_LIBS)
+LDFLAGS =
+# LDFLAGS += -L$(HTSDIR)
+LIBS += -lpthread $(HTSLIB_static_LIBS)
 
 ambimux_make : ambimux
 
@@ -45,7 +46,7 @@ check_static :
 	fi
 
 ambimux : check_lib check_static $(HTSDIR)/libhts.a $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(HTSLIB) $(LIBS)
 
 %.o: %.c %.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $< 

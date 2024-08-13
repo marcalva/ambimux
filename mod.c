@@ -17,6 +17,9 @@
 #include <limits.h>
 #include <assert.h>
 #include "bits.h"
+#include "g_list.h"
+#include "rna_data.h"
+#include "atac_data.h"
 
 #define ATAC_IX 0
 #define RNA_IX 1
@@ -1280,6 +1283,41 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
         mdl_mlcl_bc_t *mdl_bc = &mv_i(&mdl_bc_dat->bc_mlcl, bc_ix);
 
         // loop through RNA
+        mt_itr_t(rna_mols) rna_itrt;
+        if (mt_itr_first(rna_mols, &bam_bc->rna_mlcls, &rna_itrt) < 0)
+            return err_msg(-1, 0, "mdl_bc_dat_bam_data: failed to initialize RNA iterator");
+        for (; mt_itr_valid(&rna_itrt); mt_itr_next(rna_mols, &rna_itrt)) {
+            rna_mol_t *mol = mt_itr_val(rna_mols, &rna_itrt);
+
+            // skip RNA molecules with variants
+            if (ml_size(&mol->vl) == 0)
+                continue;
+
+            // filter intra/inter gene reads
+            uint32_t n_feats = ml_size(&mol->gl);
+            if (n_feats == 0 && objs->mdl_inter_reads == 0) {
+                continue;
+            } else if (n_feats > 0 && objs->mdl_intra_reads == 0) {
+                continue;
+            }
+
+            // initialize mlcl to 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+            mlcl.counts = 1;
+
+            if (mdl_mlcl_add_rna(&mlcl, mol, n_genes) < 0)
+                return -1;
+
+            mdl_mlcl_t *p; // pointer for btree add
+            p = kb_getp(kb_mdl_mlcl, mdl_bc->rna, &mlcl);
+            if (!p) {
+                kb_putp(kb_mdl_mlcl, mdl_bc->rna, &mlcl);
+            } else {
+                p->counts += 1;
+                mdl_mlcl_free(&mlcl);
+            }
+        }
         rna_mlc_bag_itr ritr;
         rna_mlc_bag_itr_first(&ritr, &bam_bc->rna_mlcs);
         for (; rna_mlc_bag_itr_alive(&ritr); rna_mlc_bag_itr_next(&ritr)) {
@@ -1316,11 +1354,45 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
         }
 
         // loop through atac
+        mt_itr_t(atac_frags) atac_itrt;
+        if (mt_itr_first(atac_frags, &bam_bc->atac_frags, &atac_itrt) < 0)
+            return err_msg(-1, 0, "mdl_bc_dat_bam_data: failed to initialize ATAC iterator");
+        for (; mt_itr_valid(&atac_itrt); mt_itr_next(atac_frags, &atac_itrt)) {
+            atac_frag_t *frag = mt_itr_val(atac_frags, &atac_itrt);
+
+            // skip ATAC read if no variants
+            if (ml_size(&frag->vl) == 0)
+                continue;
+
+            // filter intra/inter peak reads
+            uint32_t n_feats = mv_size(&frag->pks);
+            if (n_feats == 0 && objs->mdl_inter_reads == 0) {
+                continue;
+            } else if (n_feats > 0 && objs->mdl_intra_reads == 0) {
+                continue;
+            }
+
+            // initialize mlcl to all 0
+            mdl_mlcl_t mlcl;
+            mdl_mlcl_init(&mlcl);
+            mlcl.counts = 1;
+
+            if (mdl_mlcl_add_atac(&mlcl, frag) < 0)
+                return -1;
+
+            mdl_mlcl_t *p;
+            p = kb_getp(kb_mdl_mlcl, mdl_bc->atac, &mlcl);
+            if (!p) {
+                kb_putp(kb_mdl_mlcl, mdl_bc->atac, &mlcl);
+            } else {
+                p->counts += 1;
+                mdl_mlcl_free(&mlcl);
+            }
+        }
         atac_frag_bag_itr aitr, *aitrp = &aitr;
         atac_frag_bag_itr_first(aitrp, &bam_bc->atac_frgs);
         for (; atac_frag_bag_itr_alive(aitrp); atac_frag_bag_itr_next(aitrp)) {
             atac_frag_t *frag = atac_frag_bag_itr_val(aitrp);
-
 
             // skip ATAC read if no variants
             if (ml_size(&frag->vl) == 0)
