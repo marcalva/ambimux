@@ -38,7 +38,7 @@ cl_opts *init_cl_opts(){
     opts->atac_mapq = 30;
     opts->tx_basic = 0;
     opts->counts_only = 0;
-    opts->no_counts_o = 1;
+    opts->no_counts_o = 0;
     // opts->alpha_vars = 1;
 
     opts->region = strdup(".");
@@ -52,7 +52,7 @@ cl_opts *init_cl_opts(){
     opts->mdl_intra_reads = 1;
     opts->mdl_inter_reads = 0;
 
-    opts->alpha_prior_w = 1.0;
+    opts->alpha_prior_w = 1.0e-8;
 
     opts->threads = 1;
 
@@ -133,7 +133,7 @@ obj_pars *init_obj_pars(){
     p->mdl_intra_reads = 1;
     p->mdl_inter_reads = 0;
 
-    p->alpha_prior_w = 1.0;
+    p->alpha_prior_w = 1.0e-8;
 
     p->threads = 1;
 

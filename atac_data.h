@@ -7,11 +7,13 @@
  */
 
 #include <stdlib.h>
+#include "region.h"
 #include "str_util.h"
 #include "htslib/hts.h"
 #include "htslib/khash.h"
 #include "g_list.h"
 #include "kavl.h"
+#include "kbtree.h"
 #include "variants.h"
 #include "counts.h"
 
@@ -40,12 +42,20 @@ typedef struct atac_read1_t {
     ml_t(seq_base_l) bl;
 } atac_read1_t;
 
+/* @brief Compare two atac_read1_t objects.
+ *
+* @return -1 if r1 < r2, 0 if r1 == r2, 1 if r1 > r2.
+*/
+int atac_read1_cmp(atac_read1_t r1, atac_read1_t r2);
+
 /* @brief Store a pair of ATAC reads belonging to the same fragment.
  *
  * ATAC reads belong to the same fragment if they have the same read name
  * and are paired.
  */
 typedef struct atac_rd_pair_t {
+    qshort qname; // query name
+
     /* First atac read in pair. */
     atac_read1_t r1;
 
@@ -58,180 +68,63 @@ typedef struct atac_rd_pair_t {
      * Can be 0, 1, or 2.
      */
     uint8_t s;
+    uint32_t n_reads; // number of supporting reads
 } atac_rd_pair_t;
 
-/*******************************************************************************
- * atac pairs bag
- ******************************************************************************/
+/* @brief Compare two atac_rd_pair_t objects.
+ *
+ * @return -1 if rp1 < rp2, 0 if rp1 == rp2, 1 if rp1 > rp2.
+ */
+int atac_rd_pair_cmp(const atac_rd_pair_t *rp1, const atac_rd_pair_t *rp2);
 
-#define key1_cmp(key1, key2) (((key2) < (key1) - ((key1) < (key2))))
-mt_declare(atac_pair, qshort, atac_rd_pair_t, key1_cmp);
+#define atac_rd_pair_keyeq(p, q) (((p).qname) == ((q).qname))
+#define atac_rd_pair_hashfn(p) kh_qname_hash_func((p).qname)
+KHASH_INIT(kh_arp, atac_rd_pair_t, char, 0, atac_rd_pair_hashfn, atac_rd_pair_keyeq);
 
-// (internal) node for rna_dups_t object
-typedef struct atac_pair_node {
-    qshort key; // UMI hash
-    atac_rd_pair_t atac_pair;
-    KAVL_HEAD(struct atac_pair_node) head;
-} atac_pair_node;
-#define qshort_cmp(p, q) (((q)->key < (p)->key) - ((p)->key < (q)->key))
-KAVL_INIT2(bt_qr_pr, static, struct atac_pair_node, head, qshort_cmp);
-
-int atac_pair_node_init(atac_pair_node *node);
-void atac_pair_node_free(atac_pair_node *node);
-
-// container of atac_rd_pair_t objects
-typedef struct atac_pair_bag_t {
-    atac_pair_node *atac_pairs;
-} atac_pair_bag_t;
-
-int atac_pair_bag_init(atac_pair_bag_t *bag);
-void atac_pair_bag_free(atac_pair_bag_t *bag);
-int atac_pair_bag_add_read(atac_pair_bag_t *bag, const atac_read1_t *ar,
-        qshort qname);
-
-typedef struct {
-    kavl_itr_t(bt_qr_pr) itr;
-    uint8_t next;
-} atac_pair_bag_itr;
-
-void atac_pair_bag_itr_first(atac_pair_bag_itr *itr, atac_pair_bag_t *bag);
-// return 0 if nothing left and no value, 1 if itr has value after call
-int atac_pair_bag_itr_next(atac_pair_bag_itr *itr);
-int atac_pair_bag_itr_alive(atac_pair_bag_itr *itr);
-qshort *atac_pair_bag_itr_key(atac_pair_bag_itr *itr);
-atac_rd_pair_t *atac_pair_bag_itr_val(atac_pair_bag_itr *itr);
-
-/* read pairs keyed by query name */
-KHASH_INIT(khap, qshort, atac_rd_pair_t *, 1, kh_qname_hash_func, kh_qname_hash_equal);
-
-/*******************************************************************************
- ******************************************************************************/
+mv_declare(mv_arp, atac_rd_pair_t);
 
 /*******************************************************************************
  * atac frags
  ******************************************************************************/
 
-typedef struct atac_read2_t{
-    atac_read1_t r1;
-    atac_read1_t r2;
-    uint32_t s; // number os supporting reads
-} atac_read2_t;
-
-// vector of atac_read2_t
-mv_declare(ar2_vec, atac_read2_t);
-
-/*! @typedef atac_dups_t
- * Store an array of atac_rd_pair_t objects/
+/*! @brief atac_dups_t
+ *
+ * Store an array of atac_rd_pair_t objects.
+ * Designed to store atac read pairs with the same start/end genomic coordinates,
+ * but which differ by base calls.
  */
 typedef struct atac_dups_t {
-    struct _atac_dup1_t {
-        atac_rd_pair_t rd; // read pair
-        uint32_t n_rd; // number of (duplicate) reads per pair.
-    } *dups;
-    uint32_t size, m;
+    g_reg_pair reg; // region
+    mv_t(mv_arp) dups; // array of atac_rd_pair_t objects
 } atac_dups_t;
 
-/*******************************************************************************
- * atac dups bag
- ******************************************************************************/
-
-mt_declare(atac_dups, g_reg_pair, atac_dups_t, reg_pair_cmp);
-
-// (internal) node for rna_dups_t object
-typedef struct atac_dup_node {
-    g_reg_pair key;
-    atac_dups_t atac_dup;
-    KAVL_HEAD(struct atac_dup_node) head;
-} atac_dup_node;
-#define adn_cmp(p, q) reg_pair_cmp( (p)->key, (q)->key )
-KAVL_INIT2(bt_rg_dp, static, struct atac_dup_node, head, adn_cmp);
-
-int atac_dup_node_init(atac_dup_node *node);
-void atac_dup_node_free(atac_dup_node *node);
-
-// container of atac_dups_t objects
-typedef struct atac_dup_bag_t {
-    atac_dup_node *atac_dups;
-} atac_dup_bag_t;
-
-int atac_dup_bag_init(atac_dup_bag_t *bag);
-void atac_dup_bag_free(atac_dup_bag_t *bag);
-int atac_dup_bag_add_read(atac_dup_bag_t *bag, const atac_rd_pair_t *ap,
-        int skip_chim);
-
-typedef struct {
-    kavl_itr_t(bt_rg_dp) itr;
-    uint8_t next;
-} atac_dup_bag_itr;
-
-void atac_dup_bag_itr_first(atac_dup_bag_itr *itr, atac_dup_bag_t *bag);
-// return 0 if nothing left and no value, 1 if itr has value after call
-int atac_dup_bag_itr_next(atac_dup_bag_itr *itr);
-int atac_dup_bag_itr_alive(atac_dup_bag_itr *itr);
-g_reg_pair *atac_dup_bag_itr_key(atac_dup_bag_itr *itr);
-atac_dups_t *atac_dup_bag_itr_val(atac_dup_bag_itr *itr);
-
-/* duplicates keyed by region */
-KHASH_INIT(khad, g_reg_pair, atac_dups_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
+#define kh_ad_hash_fn(p) kh_reg_pair_hash((p).reg)
+#define kh_ad_key_eq(p, q) kh_reg_pair_equal((p).reg, (q).reg)
+KHASH_INIT(kh_ad, atac_dups_t, char, 0, kh_ad_hash_fn, kh_ad_key_eq)
 
 /*******************************************************************************
  * atac frags
  ******************************************************************************/
 
-/*! @typedef atac_frag_t
+/*! @brief atac_frag_t
+ *
+* Store a fragment of ATAC-seq data.
+* An ATAC fragment should be generated from an `atac_dups_t` object by calling
+* `atac_dups_dedup`.
  */
 typedef struct atac_frag_t {
+    g_reg_pair reg; // region
     ml_t(seq_base_l) bl; // bases
     ml_t(seq_vac_l) vl; // variant calls
     mv_t(int_vec) pks; // peaks
     uint32_t s; // number of supporting reads
 } atac_frag_t;
 
-/*******************************************************************************
- * atac frags bag
- ******************************************************************************/
-
-mt_declare(atac_frags, g_reg_pair, atac_frag_t, reg_pair_cmp);
-
-// (internal) node for rna_frags_t object
-typedef struct atac_frag_node {
-    g_reg_pair key;
-    atac_frag_t atac_frag;
-    KAVL_HEAD(struct atac_frag_node) head;
-} atac_frag_node;
-#define adn_cmp(p, q) reg_pair_cmp( (p)->key, (q)->key )
-KAVL_INIT2(bt_rg_fr, static, struct atac_frag_node, head, adn_cmp);
-
-int atac_frag_node_init(atac_frag_node *node);
-void atac_frag_node_free(atac_frag_node *node);
-
-// container of atac_frags_t objects
-typedef struct atac_frag_bag_t {
-    atac_frag_node *atac_frags;
-} atac_frag_bag_t;
-
-int atac_frag_bag_init(atac_frag_bag_t *bag);
-void atac_frag_bag_free(atac_frag_bag_t *bag);
-int atac_frag_bag_add(atac_frag_bag_t *bag, const atac_frag_t *af,
-        g_reg_pair reg);
-
-typedef struct {
-    kavl_itr_t(bt_rg_fr) itr;
-    uint8_t next;
-} atac_frag_bag_itr;
-
-void atac_frag_bag_itr_first(atac_frag_bag_itr *itr, atac_frag_bag_t *bag);
-// return 0 if nothing left and no value, 1 if itr has value after call
-int atac_frag_bag_itr_next(atac_frag_bag_itr *itr);
-int atac_frag_bag_itr_alive(atac_frag_bag_itr *itr);
-g_reg_pair *atac_frag_bag_itr_key(atac_frag_bag_itr *itr);
-atac_frag_t *atac_frag_bag_itr_val(atac_frag_bag_itr *itr);
-
-/* atac fragments. Key is region, value is pointer to atac_frag_t */
-KHASH_INIT(khaf, g_reg_pair, atac_frag_t *, 1, kh_reg_pair_hash, kh_reg_pair_equal);
-
-#define mlaf_lt(p, q) -1
-ml_declare(mlaf, atac_frag_t *, mlaf_lt);
+#define frag_key_cmp(p, q) reg_pair_cmp((p).reg, (q).reg)
+// always insert at the beginning since we don't need ordering
+//  makes insertions much much faster
+#define always_lt(p, q) -1
+ml_declare(ml_af, atac_frag_t, always_lt);
 
 /*******************************************************************************
  * atac_read1_t
@@ -275,15 +168,6 @@ void atac_read_dstry(atac_read1_t *ar);
 atac_read1_t *atac_read1_dup(const atac_read1_t *r, int *ret);
 int atac_read1_cpy(atac_read1_t *dest, const atac_read1_t *src);
 
-/* Compare if two atac reads are equal.
- *
- * Two atac reads are equal if they have the same genomic position and 
- * the same base list (base call quality is not considered).
- *
- * @return 1 if the reads are equal, 0 if they are not equal
- */
-int atac_read_equal(atac_read1_t r1, atac_read1_t r2);
-
 /* Add base to atac_read1_t object.
  *
  * The seq_base_t object is copied and added to the seq_blist_t in @p r.
@@ -296,11 +180,11 @@ int atac_read1_add_base(atac_read1_t *r, seq_base_t base);
  * atac_rd_pair_t
  ******************************************************************************/
 
-/* Set 0 for read pair
+/* @brief Initialize read pair by setting members to 0.
  */
 void atac_rd_pair_set0(atac_rd_pair_t *rp);
 
-/* Initialize an atac_rd_pair_t object.
+/* @brief Initialize an atac_rd_pair_t object.
  *
  * @return Pointer to allocated object, NULL on error.
  */
@@ -310,6 +194,19 @@ atac_rd_pair_t *atac_rd_pair_init();
 void atac_rd_pair_free(atac_rd_pair_t *rp);
 /* Free underlying memory and the object. */
 void atac_rd_pair_dstry(atac_rd_pair_t *rp);
+
+/* @brief Check if read pair is chimeric.
+ *
+ * Return 1 if
+ *  - there are less than 2 reads
+ *  - the reads are on different chromosomes
+ * Returns 0 if they are on the same chromosome.
+ *
+ * @param rp Pointer to atac_rd_pair_t object.
+ *
+ * @return 1 if chimeric, 0 if not, -1 on error.
+ */
+int atac_rd_pair_is_chimeric(const atac_rd_pair_t *rp);
 
 /* @brief Duplicate an atac_rd_pair_t object.
  *
@@ -371,17 +268,6 @@ int atac_rd_pair_cpy(atac_rd_pair_t *dest, const atac_rd_pair_t *src);
  * @return 0 on success, -1 on error.
  */
 int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar);
-
-/* Test if two atac read pairs are equal.
- *
- * Expects both arguments are not null.
- * The pairs are equal if they have the same number of reads (0, 1, or 2), 
- * and each of the reads are equal.
- * Neither of the parameters can be null.
- *
- * @return 1 for equality, 0 for inequality, -1  for error.
- */
-int atac_rd_pair_equal(const atac_rd_pair_t *rp1, const atac_rd_pair_t *rp2);
 
 /* Set the highest base quality in a read of the two reads 
  *
@@ -445,16 +331,26 @@ atac_frag_t *atac_frag_alloc();
 void atac_frag_free(atac_frag_t *f);
 void atac_frag_dstry(atac_frag_t *f);
 
-/*
+/* @brief Calls an ATAC fragment by deduplicating ATAC read pairs.
+ *
+ * Duplicate ATAC read pairs consists of read pairs that contain the same
+ * 5' start and 3' end positions. These read pairs can differ in their
+ * underlying sequence, possibly due to PCR or sequencing errors.
+ * The read pair with the most underlying read counts is set as the fragment
+ * for this region. If two read pairs with differing sequences have the same
+ * number of underlying reads (if its ambiguous), no fragment is called and
+ * NULL is returned.
+ *
  * @note returned object must be freed by caller.
  */
 atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret);
 
-/* call variants from atac fragments
+/* @brief call variants from atac fragments
+ *
  * Variants are called and placed in @f vacs. The seq_blist_t 
  * in @f bases is destroyed after this call.
+ * Expects non-null arguments.
  *
- * Expects non-null arguments
  * @param f Pointer to atac_frag_t object.
  * @param gv Pointer to g_var_t object.
  * @param cmap str_map between integer IDs and chromosome names.
@@ -465,8 +361,12 @@ atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret);
 int atac_frag_var_call(atac_frag_t *f, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual);
 
-/* Call peaks for a fragment.
+/* @brief Call peaks for a fragment.
+ *
  * The pairs must be aligned to the same chromosome.
+ * A fragment overlaps a peak if the adjusted cut site falls within
+ * a peak. For each fragment, there are two cut sites, thus can
+ * overlap a maximum of two peaks (if peaks are non-overlapping).
  *
  * @param f The fragment to get overlapping peaks for.
  * @param reg The g_reg_pair of the fragment.

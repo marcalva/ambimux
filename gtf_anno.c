@@ -838,23 +838,27 @@ int feats_from_region_p(const gene_anno_t *a, const char* ref,
 
     // region length
     double reg_len = (double)end - (double)beg;
-    if (reg_len < 0) 
-        return err_msg(-1, 0, "feats_from_region_p: end (%li) < beg (%li)", (int32_t)end, (int32_t)beg);
+    if (reg_len <= 0) 
+        return err_msg(-1, 0, "feats_from_region_p: end (%li) <= beg (%li)", end, beg);
 
     int ngenes = 0;
 
     // get bins for query region
     uint16_t list[MAX_BIN];
-    int n_bin = reg2bins((int)beg, (int)end, list);
+    int n_bin = reg2bins(beg, end, list);
 
+    // chr_bins is a `MAX_BIN`-length array storing lists of type `ml_t(gl)`
     ml_t(gl) *chr_bins = mv_i(&a->chrms, tid)->bins;
 
     int i;
-    for (i = 0; i < n_bin; ++i){ // for each bin
+    for (i = 0; i < n_bin; ++i){ // for each overlapping bin
         uint16_t bin = list[i];
         ml_node_t(gl) *gn;
         for (gn = ml_begin(&chr_bins[bin]); gn; gn = ml_node_next(gn)){
             gene_t *g = ml_node_val(gn);
+            if (g == NULL)
+                return err_msg(-1, 0, "feats_from_region_p: gene is NULL, likely a bug");
+
             char reg_strand = '.';
             if (stranded) reg_strand = strand;
 

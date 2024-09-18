@@ -39,10 +39,11 @@ KHASH_SET_INIT_INT64(iset);
 
 int f_t_lt_cmp(const void *a, const void *b);
 
+// https://arxiv.org/pdf/1101.6081
 // @param x input vector of length n
-// @param y output vector (x projected onto n-simplex) of length n
+// @param xp output vector (x projected onto n-simplex) of length n
 // @param n length of vectors
-int proj_splx(const f_t *x, f_t *y, size_t n);
+int proj_splx(f_t *x, f_t *xp, size_t n);
 
 /*******************************************************************************
  * seq bases

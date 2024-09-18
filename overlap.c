@@ -18,11 +18,15 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a,
         return err_msg(-1, 0, "bam1_feat_overlap: gl is not empty");
 
     int32_t tid = b->core.tid;
-    const char *ref = sam_hdr_tid2name(h, (int)tid);
+    const char *ref = sam_hdr_tid2name(h, tid);
+
+    if (ref == NULL)
+        return err_msg(-1, 0, "bam1_feat_overlap: failed to get reference name for '%d'", tid);
     
     int32_t b_beg = (int32_t)b->core.pos;
     int32_t b_end = (int32_t)bam_endpos(b);
-    if (b_end == b_beg + 1) return(-1); // unmapped;
+    if (b_end == b_beg + 1)
+        return err_msg(-1, 0, "bam1_feat_overlap: read is 0-length (unmapped)");
 
     char strand = '+';
     if (bam_is_rev(b)) strand = '-';
@@ -32,7 +36,8 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a,
     ml_init(gl, &genes);
 
     int ngenes = feats_from_region(a, ref, b_beg, b_end, 1, strand, &genes);
-    if (ngenes < 0) return -1;
+    if (ngenes < 0)
+        return err_msg(-1, 0, "bam1_feat_overlap: failed to get features from region");
 
     // add gene ID and splice status
     seq_gene_t sg;
@@ -41,26 +46,37 @@ int bam1_feat_overlap(const sam_hdr_t *h, bam1_t *b, const gene_anno_t *a,
     for (gn = ml_begin(&genes); gn; gn = ml_node_next(gn)){
         gene_t *gene = ml_node_val(gn);
 
+        if (gene == NULL) {
+            ml_free(gl, &genes);
+            return err_msg(-1, 0, "bam1_feat_overlap: gene is null");
+        }
+
         char *id = gene->id;
-        assert(id != NULL);
         int32_t gid = str_map_ix(a->gene_ix, id);
-        if (gid < 0)
+        if (gid < 0) {
+            ml_free(gl, &genes);
             return err_msg(-1, 0, "bam1_feat_overlap: failed to get gene index from gtf anno");
+        }
         sg.gene_id = gid;
 
         int sret = 0;
         sg.splice = bam1_spliced(b, gene, &sret);
-        if (sret < 0)
+        if (sret < 0) {
+            ml_free(gl, &genes);
             return err_msg(-1, 0, "bam1_feat_overlap: splice failed");
+        }
 
-        if (ml_insert(seq_gene_l, gl, sg, 0, 0) < 0)
+        if (ml_insert(seq_gene_l, gl, sg, 0, 0) < 0) {
+            ml_free(gl, &genes);
             return(-1);
+        }
         
     }
 
+    int ret = (int)(ml_size(gl));
+
     ml_free(gl, &genes);
 
-    int ret = (int)(ml_size(gl));
     return ret;
 }
 
@@ -291,7 +307,7 @@ int bam1_vars_overlap(const sam_hdr_t *h, bam1_t *b, g_var_t *gv,
     uint32_t n_cigar = (uint32_t)b->core.n_cigar;
 
     int32_t tid = b->core.tid;
-    const char *ref = sam_hdr_tid2name(h, (int)tid);
+    const char *ref = sam_hdr_tid2name(h, tid);
     int32_t left_pos = (int32_t)b->core.pos; // position of first base that consumes the reference.
 
     int n_vars = 0;

@@ -26,153 +26,15 @@ static inline umishort umi2umishort(const char *s){
     return(us);
 }
 
-/*! @typedef
- * @abstract Structure to store data of a single RNA read
- *
- * @field loc read region.
- * @field bases A seq_blist_t object to store observed bases.
- * @field genes A seq_glist_t object to store overlapping genes.
- * @field next pointer to next atac_read in a linked list, NULL otherwise.
+/* @brief Structure to store data of a single RNA read
  */
 typedef struct rna_read1_t {
-    g_region loc;
-    ml_t(seq_base_l) bl;
-    ml_t(seq_gene_l) gl;
+    g_region loc; // location of the rna read
+    ml_t(seq_base_l) bl; // observed bases
+    ml_t(seq_gene_l) gl; // observed genes
+    umishort umi;
+    uint32_t n_reads; // number of supporting reads
 } rna_read1_t;
-
-/*******************************************************************************
- * rna dups
- ******************************************************************************/
-
-/*! @typedef
- * @abstract Store duplicate RNA read
- *
- * @field dups Pointer to rna_read1_t array.
- * @field rds_per_dup Number of supporting reads for each read in dups.
- * @field size Number of reads in dups (length of valid elements in dups).
- * @field m Allocated size of dups and rds_per_dup.
- */
-typedef struct rna_dups_t {
-    rna_read1_t *dups;
-    uint32_t *rds_per_dup;
-    uint32_t size, m;
-} rna_dups_t;
-
-#define key_cmp(key1, key2) (((key2) < (key1) - ((key1) < (key2))))
-mt_declare(rna_dups, umishort, rna_dups_t, key_cmp);
-
-// (internal) node for rna_dups_t object
-typedef struct rna_dup_node {
-    umishort key; // UMI hash
-    rna_dups_t rna_dup;
-    KAVL_HEAD(struct rna_dup_node) head;
-} rna_dup_node;
-#define umishort_cmp(p, q) (((q)->key < (p)->key) - ((p)->key < (q)->key))
-KAVL_INIT2(bt_umi_dup, static, struct rna_dup_node, head, umishort_cmp);
-
-int rna_dup_node_init(rna_dup_node *node);
-rna_dup_node *rna_dup_node_alloc();
-void rna_dup_node_free(rna_dup_node *node);
-
-// container of rna_dups_t objects
-typedef struct rna_dups_bag_t {
-    rna_dup_node *rna_dups;
-} rna_dups_bag_t;
-
-int rna_dups_bag_init(rna_dups_bag_t *bag);
-void rna_dups_bag_free(rna_dups_bag_t *bag);
-int rna_dups_bag_add_read(rna_dups_bag_t *bag, const rna_read1_t *r,
-        umishort umih);
-
-typedef struct {
-    kavl_itr_t(bt_umi_dup) itr;
-    uint8_t next;
-} rna_dups_bag_itr;
-
-void rna_dups_bag_itr_first(rna_dups_bag_itr *itr, rna_dups_bag_t *bag);
-// return 0 if nothing left and no value, 1 if itr has value after call
-int rna_dups_bag_itr_next(rna_dups_bag_itr *itr);
-int rna_dups_bag_itr_alive(rna_dups_bag_itr *itr);
-umishort *rna_dups_bag_itr_key(rna_dups_bag_itr *itr);
-rna_dups_t *rna_dups_bag_itr_val(rna_dups_bag_itr *itr);
-
-/*******************************************************************************
- * rna mol
- ******************************************************************************/
-
-/*! @typedef
- * @abstract Store de-duplicated RNA reads representing molecules.
- *
- * @field dups Pointer to rna_read1_t array.
- * @field rds_per_dup Number of supporting reads for each read in dups.
- * @field size Number of reads in dups (length of valid elements in dups).
- * @field m Allocated size of dups and rds_per_dup.
- * @field n_reads Number of supporting reads
- */
-typedef struct rna_mol_t {
-    g_region loc;
-    ml_t(seq_base_l) bl;
-    ml_t(seq_vac_l) vl;
-    ml_t(seq_gene_l) gl;
-    uint32_t n_reads;
-} rna_mol_t;
-
-mt_declare(rna_mols, umishort, rna_mol_t, key_cmp);
-
-// (internal) node to store rna_mol_t
-typedef struct rna_mlc_node {
-    umishort key; // UMI hash
-    rna_mol_t rna_mol;
-    KAVL_HEAD(struct rna_mlc_node) head;
-} rna_mlc_node;
-KAVL_INIT2(bt_umi_mlc, static, struct rna_mlc_node, head, umishort_cmp);
-
-int rna_mlc_node_init(rna_mlc_node *node);
-rna_mlc_node *rna_mlc_node_alloc();
-void rna_mlc_node_free(rna_mlc_node *node);
-
-// container of rna_mols_t objects
-typedef struct rna_mlc_bag_t {
-    rna_mlc_node *rna_mlcs;
-} rna_mlc_bag_t;
-
-int rna_mlc_bag_init(rna_mlc_bag_t *bag);
-void rna_mlc_bag_free(rna_mlc_bag_t *bag);
-// return -2 on error, -1 if UMI found, 0 on success
-int rna_mlc_bag_add(rna_mlc_bag_t *bag, rna_mol_t *rna_mol, 
-        umishort umih);
-
-typedef struct {
-    kavl_itr_t(bt_umi_mlc) itr;
-    uint8_t next;
-} rna_mlc_bag_itr;
-
-void rna_mlc_bag_itr_first(rna_mlc_bag_itr *itr, rna_mlc_bag_t *bag);
-// return 0 if nothing left and no value, 1 if itr has value after call
-int rna_mlc_bag_itr_next(rna_mlc_bag_itr *itr);
-int rna_mlc_bag_itr_alive(rna_mlc_bag_itr *itr);
-umishort *rna_mlc_bag_itr_key(rna_mlc_bag_itr *itr);
-rna_mol_t *rna_mlc_bag_itr_val(rna_mlc_bag_itr *itr);
-
-/*******************************************************************************
- * rna read1
- ******************************************************************************/
-
-void rna_read1_init(rna_read1_t *r);
-rna_read1_t *rna_read1_alloc();
-
-void rna_read1_free(rna_read1_t *r);
-void rna_read1_dstry(rna_read1_t *r);
-
-/* Copy rna_read1_t object.
- *
- * If @p r is null, return null successfully.
- * Allocate a new rna_read1 object and copy the contents.
- * The return status is held by @p ret. 0 on success, -1 on error.
- *
- * @return Pointer to rna_read1_t copy.
- */
-rna_read1_t *rna_read1_cpy(const rna_read1_t *r, int *ret);
 
 /* Compare if two rna reads are equal.
  *
@@ -194,6 +56,79 @@ rna_read1_t *rna_read1_cpy(const rna_read1_t *r, int *ret);
  */
 int rna_read1_cmp(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual);
 int rna_read1_equal(const rna_read1_t *r1, const rna_read1_t *r2, int cmp_qual);
+
+// tree for rna_read1_t.
+// Key is `rna_read1_t`, val is `uint32_t` for number of supporting seq reads.
+// Sorted by key using `rna_read1_cmp`.
+#define rna_read1_keycmp(key1, key2) (rna_read1_cmp(&(key1), &(key2), 0))
+KBTREE_INIT(kb_rr, rna_read1_t, rna_read1_keycmp);
+
+#define kh_rna_read1_hf(r) (kh_umi_hash_func((r).umi))
+#define kh_rna_read1_he(r1, r2) ((r1).umi == (r2).umi)
+KHASH_INIT(kh_rr, rna_read1_t, char, 0, kh_rna_read1_hf, kh_rna_read1_he);
+
+mv_declare(mv_rr, rna_read1_t);
+
+/*******************************************************************************
+ * rna dups
+ ******************************************************************************/
+
+/* @brief Store duplicate RNA read
+ *
+ * Designed to store RNA reads (which may differ) with the same UMI.
+ * The arrays dups and rds_per_dup have the same size and allocation.
+ */
+typedef struct rna_dups_t {
+    umishort umi;
+    mv_t(mv_rr) rds;
+    // kbtree_t(kb_rr) *bt_rds;
+} rna_dups_t;
+
+#define kh_rna_dups_hf(r) (kh_umi_hash_func((r).umi))
+#define kh_rna_dups_he(r1, r2) ((r1).umi == (r2).umi)
+KHASH_INIT(kh_rd, rna_dups_t, char, 0, kh_rna_dups_hf, kh_rna_dups_he);
+
+/*******************************************************************************
+ * rna mol
+ ******************************************************************************/
+
+/* @brief Store de-duplicated RNA reads representing molecules.
+ *
+ */
+typedef struct rna_mol_t {
+    umishort umi;
+    g_region loc; // location of the rna molecule
+    ml_t(seq_base_l) bl; // observed bases
+    ml_t(seq_vac_l) vl; // observed variant calls
+    ml_t(seq_gene_l) gl; // observed genes
+    uint32_t n_reads; // number of supporting reads
+} rna_mol_t;
+
+#define rna_mol_cmp(p, q) ( ( ((q).umi) < ((p).umi) ) - ( ((p).umi) < ((q).umi) ) )
+// always insert at the beginning since we don't need ordering
+//  makes insertions much much faster
+#define always_lt(p, q) -1
+ml_declare(ml_rm, rna_mol_t, always_lt)
+
+/*******************************************************************************
+ * rna read1
+ ******************************************************************************/
+
+void rna_read1_init(rna_read1_t *r);
+rna_read1_t *rna_read1_alloc();
+
+void rna_read1_free(rna_read1_t *r);
+void rna_read1_dstry(rna_read1_t *r);
+
+/* Copy rna_read1_t object.
+ *
+ * If @p r is null, return null successfully.
+ * Allocate a new rna_read1 object and copy the contents.
+ * The return status is held by @p ret. 0 on success, -1 on error.
+ *
+ * @return Pointer to rna_read1_t copy.
+ */
+rna_read1_t *rna_read1_cpy(const rna_read1_t *r, int *ret);
 
 /* Add gene to rna_read1_t object.
  *
@@ -225,8 +160,62 @@ rna_dups_t *rna_dups_alloc();
 void rna_dups_free(rna_dups_t *rd);
 void rna_dups_dstry(rna_dups_t *rd);
 
+/**
+ * @brief Add a read to the rna_dups_t structure.
+ *
+ * This function adds a read to the rna_dups_t structure. If the read already
+ * exists in the structure, the base qualities of the existing read are updated
+ * to the highest values between the existing and new reads, and the count of
+ * duplicates for that read is incremented. If the read does not exist, it is
+ * added to the structure with a count of 1.
+ *
+ * If the input arguments are null, return -1 with an error message
+ * If the dups or rds_per_dup arrays in the rd structure are
+ * it returns -1 with an an error message.
+ *
+ * The function then iterates over the existing reads in the rd structure using
+ * the rna_read1_cmp function to compare the input read with each existing read.
+ * If rna_read1_cmp returns a negative value, indicating an error, the function
+ * returns an error message. If a match is found (rna_read1_cmp returns 0), the
+ * rna_read1_match_qual function is called to update the base qualities of the
+ * existing read with the highest values between the existing and new reads. The
+ * count of duplicates for that read is then incremented, and the function
+ * returns 0 to indicate success.
+ *
+ * If no match is found, the function reallocates memory for the dups and
+ * rds_per_dup arrays if necessary, using the realloc function. If the
+ * reallocation fails, it returns an error message.
+ *
+ * The function then creates a copy of the input read using the rna_read1_cpy
+ * function and adds it to the dups array. The count of duplicates for the new
+ * read is set to 1 in the rds_per_dup array. The size of the rd structure is
+ * incremented, and the function returns 0 to indicate success.
+ *
+ * If any error occurs during the execution of the function, it returns -1 to
+ * indicate failure.
+ *
+ * @param rd Pointer to the rna_dups_t structure.
+ * @param r Pointer to the rna_read1_t structure representing the read to add.
+ *
+ * @return 0 on success, -1 on error.
+ */
 int rna_dups_add_read(rna_dups_t *rd, const rna_read1_t *r);
 
+/**
+ * @brief Deduplicate RNA reads and return the best read based on the number of supporting reads.
+ *
+ * This function analyzes a set of duplicate RNA reads and selects the one with the highest 
+ * number of supporting reads. If there is an ambiguity or error, it returns NULL and sets 
+ * the return code appropriately.
+ *
+ * @param dups A pointer to the RNA duplicates structure (`rna_dups_t`) containing reads.
+ * @param ret  A pointer to an integer where the function will store the return code:
+ *             - `0` on success
+ *             - non-zero on error
+ * 
+ * @return A pointer to an allocated `rna_mol_t` structure containing the best RNA read,
+ *         or NULL in case of errors or ambiguity.
+ */
 rna_mol_t *rna_dups_dedup(rna_dups_t *dups, int *ret);
 
 /*******************************************************************************
@@ -241,6 +230,22 @@ void rna_mol_dstry(rna_mol_t *rmol);
 
 rna_mol_t *rna_mol_cpy(const rna_mol_t *m, int *ret);
 
+/**
+ * Call genetic variants in an RNA molecule.
+ *
+ * This function examines the base list of an RNA molecule to call genetic variants. 
+ * It uses a provided variant calling algorithm and then frees the base list of the 
+ * RNA molecule.
+ *
+ * @param m A pointer to the RNA molecule (`rna_mol_t`) to analyze.
+ * @param gv A pointer to genetic variant information (`g_var_t`).
+ * @param cmap A pointer to a chromosome map (`str_map`) used in the variant calling process.
+ * @param min_qual The minimum quality threshold for calling a variant.
+ *
+ * @return An integer status code:
+ *         - `0` on success
+ *         - non-zero error code on failure
+ */
 int rna_mol_var_call(rna_mol_t *m, g_var_t *gv, str_map *cmap, 
         uint8_t min_qual);
 

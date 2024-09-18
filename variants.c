@@ -187,7 +187,9 @@ int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *n_allele,
     }
 
     int n_val = ngt / n_samples;
-    assert(n_val == fmt->n);
+    if (n_val != fmt->n)
+        return err_msg(-1, 0, "bcf1_t_miss_maf: there are %i values in GT, "
+            "but %i samples", n_val, n_samples);
 
     // check missing
     int32_t *p = (int32_t *)gt_arr;
@@ -204,8 +206,6 @@ int bcf1_t_miss_maf(bcf_hdr_t *vcf_hdr, bcf1_t *b, int *nmiss, int *n_allele,
                 return err_msg(-1, 0, "bcf1_t_miss_maf: there are multiple "
                         "alleles for variant '%s' and sample '%s'. Only bi-allelic variants "
                         "are supported", b->d.id, vcf_hdr->samples[s]);
-            // if this fails, need new way to check for bi-allelic
-            assert(sgt < 2);
 
             if (is_miss)
                 ++n_miss;
@@ -399,7 +399,10 @@ g_var_t *g_var_read_vcf(bcf_srs_t *sr, bcf_hdr_t *vcf_hdr, int max_miss, double 
 
     // add chromosomes from header to str map
     if (bcf_hdr_chr_ix(vcf_hdr, gv->chrm_ix) < 0) return(NULL);
-    assert(gv->chrm_ix->n >= 0);
+    if (gv->chrm_ix->n < 0) {
+        err_msg(-1, 0, "g_var_read_vcf: negative chromosomes found in VCF header");
+        return NULL;
+    }
     size_t n_chr = (size_t)gv->chrm_ix->n;
 
     // create chromosome bin vector

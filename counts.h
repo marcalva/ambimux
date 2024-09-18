@@ -235,7 +235,6 @@ int seq_vac_l_call_var_v(mv_t(seq_base_v) *vl, mv_t(seq_vac_v) *vv, g_var_t *gv,
  *
  * @field gene_id Integer ID of the gene.
  * @field splice Integer code of splice.
- * @field next Pointer to next object in a list.
  */
 typedef struct seq_gene_t {
    int32_t gene_id : 30;

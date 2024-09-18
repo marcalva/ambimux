@@ -100,6 +100,8 @@ int seq_base_l_match_qual(ml_t(seq_base_l) *bl, const ml_t(seq_base_l) *cmp){
                 ml_size(bl), ml_size(cmp));
 
     ml_node_t(seq_base_l) *n1 = ml_begin(bl), *n2 = ml_begin(cmp);
+    if (n1 == NULL || n2 == NULL)
+        return(0);
     while (n2 != NULL){
         if (seq_base_cmp(ml_node_val(n1), ml_node_val(n2), 0) != 0)
             return err_msg(-1, 0, "seq_base_l_match_qual: bases don't match");
@@ -235,10 +237,15 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
     ml_t(vcfr_list) vars;
     ml_init(vcfr_list, &vars);
     int n_v = g_var_get_region_vars(gv, b_ref, b_beg, b_end, &vars);
-    if (n_v < 0) return(-1);
+    if (n_v < 0) {
+        ml_free(vcfr_list, &vars);
+        return err_msg(-1, 0, "seq_base_call_var: error getting variants");
+    }
+
     // debugging to check for mutliple snps at same site
     // if (1){
     if (n_v > 1 || ml_size(&vars) > 1){
+        ml_free(vcfr_list, &vars);
         err_msg(0, 1, "seq_base_call_var: %i variants found at position %s:%"PRIi32"\n", 
                 n_v, b_ref, b_beg);
     }
@@ -259,9 +266,11 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
 
         // throw error if more alleles than present than can be stored.
         // last allele is reserved for missing/other
-        if (rec->n_allele > (MAX_ALLELE-1))
+        if (rec->n_allele > (MAX_ALLELE-1)) {
+            ml_free(vcfr_list, &vars);
             return err_msg(-1, 0, "seq_base_call_var: too many alleles: "
                     "%i > %i", rec->n_allele, MAX_ALLELE-1);
+        }
 
         // set up vac
         seq_vac_t v_i;
@@ -286,24 +295,15 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
 
         // add variant
         // TODO: change back to 0,0 
-        if (seq_vac_l_insert(vl, v_i, 1, 1) < 0)
+        if (seq_vac_l_insert(vl, v_i, 1, 1) < 0) {
+            ml_free(vcfr_list, &vars);
             return err_msg(-1, 0, "seq_base_call_var: error adding variant call, %i vars", n_v);
+        }
         ++n_added;
     }
     // free allocated var_t objects.
     ml_free(vcfr_list, &vars);
 
-    /* debug */
-    /*
-    if (1){
-        printf("var list:\n");
-        ml_node_t(seq_vac_l) *nv;
-        for (nv = ml_begin(vl); nv; nv = ml_node_next(nv)){
-            seq_vac_t vi = ml_node_val(nv);
-            printf("\tvix=%i,allele=%u,qual=%u\n", vi.vix, vi.allele, vi.qual);
-        }
-    }
-    */
     return(n_added);
 }
 
@@ -380,8 +380,9 @@ int seq_gene_l_cmp(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2){
     int sc = ml_size(&gl1) - ml_size(&gl2);
     if (sc != 0) return(sc);
 
+    // TODO: check this is correct
     ml_node_t(seq_gene_l) *n1 = ml_begin(&gl1);
-    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl2);
     while (n1 != NULL && n2 != NULL){
         seq_gene_t g1 = ml_node_val(n1);
         seq_gene_t g2 = ml_node_val(n2);
@@ -398,8 +399,9 @@ int seq_gene_l_equal(ml_t(seq_gene_l) gl1, ml_t(seq_gene_l) gl2){
     if (ml_size(&gl1) != ml_size(&gl2))
         return(0);
 
+    // TODO: check this is correct
     ml_node_t(seq_gene_l) *n1 = ml_begin(&gl1);
-    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl1);
+    ml_node_t(seq_gene_l) *n2 = ml_begin(&gl2);
     while (n1 != NULL && n2 != NULL){
         seq_gene_t g1 = ml_node_val(n1);
         seq_gene_t g2 = ml_node_val(n2);

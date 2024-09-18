@@ -310,7 +310,7 @@
 
 #define mv_free(v) ( free((v)->a), (v)->a = NULL , (v)->n = (v)->m = 0 )
 
-#define mv_i(v, ix) (v)->a[(ix)]
+#define mv_i(v, ix) ((v)->a[(ix)])
 
 #define mv_size(v) ( (v)->n )
 
@@ -351,7 +351,7 @@ typedef struct __mt_tree_##name mt_tree_##name##_t; \
 \
 /* cmp function */ \
 SCOPE int __key_cmp_##name(const mt_node_##name##_t *n1, const mt_node_##name##_t *n2){ \
-    return key_cmp_fn((n1)->key, (n2)->key); \
+    return key_cmp_fn(((n1)->key), ((n2)->key)); \
 } \
 \
 KAVL_INIT2(__bt_##name, SCOPE, struct __mt_node_##name, head, __key_cmp_##name) \
@@ -394,7 +394,7 @@ SCOPE void __mt_tree_free_##name(__mt_tree_##name *b){ \
 \
 /* add to tree */\
 SCOPE mt_node_##name##_t *__mt_tree_add_##name(__mt_tree_##name *b, \
-    key_type key, value_type val){ \
+    key_type key, value_type val, int *found){ \
     if (b == NULL) {\
         fprintf(stderr, "error: __mt_tree_add_%s: tree is null\n", #name); \
         return(NULL); \
@@ -415,7 +415,10 @@ SCOPE mt_node_##name##_t *__mt_tree_add_##name(__mt_tree_##name *b, \
     mt_node_##name##_t *q; \
     q = kavl_insert(__bt_##name, &b->root, p, 0); \
     if (q != p) { \
+        *found = 1; \
         free(p); \
+    } else { \
+        *found = 0; \
     } \
     return(q); \
 }\
@@ -460,7 +463,11 @@ SCOPE int __mt_itr_first_##name(mt_tree_##name##_t *b, mt_itr_##name##_t *itr){ 
         return 0; \
     } \
     kavl_itr_first(__bt_##name, b->root, &itr->itr); \
-    itr->has_data = 1; \
+    if (kavl_at(&itr->itr) == NULL) { \
+        itr->has_data = 0; \
+    } else { \
+        itr->has_data = 1; \
+    } \
     return(0); \
 } \
 \
@@ -540,7 +547,7 @@ SCOPE value_type *__mt_itr_val_##name(mt_itr_##name##_t *itr){ \
 
 /* declare type and functions with static scope */
 #define mt_declare(name, key_type, value_type, key_cmp_fn) \
-    mt_declare_i(static, name, key_type, value_type, key_cmp_fn)
+    mt_declare_i(static inline, name, key_type, value_type, key_cmp_fn)
 
 /* types
  * @param name The name specifier of the tree type
@@ -577,15 +584,16 @@ SCOPE value_type *__mt_itr_val_##name(mt_itr_##name##_t *itr){ \
  * @param tree pointer to mt_tree_t(name)
  * @param key key of type `key_type`
  * @param val value of type `value_type`
+ * @param found pointer to int to hold return value of found status
  *
  * @retval `mt_node_t(name) *`
  * @return Pointer to mt_node_t(name) with key-value data.
- *         If key already exists, returns pointer to existing node.
- *         Otherwise, returns pointer to newly allocated node.
+ *         If key already exists, returns pointer to existing node and sets *found=1.
+ *         Otherwise, returns pointer to newly allocated node and sets *found=0.
  *         Will return NULL on error.
  * @note Unclear exactly how kavl_insert will return on error.
  */
-#define mt_add(name, tree, key, val) __mt_tree_add_##name((tree), (key), (val))
+#define mt_add(name, tree, key, val, found) __mt_tree_add_##name((tree), (key), (val), (found))
 
 /* find node by key value
  * @param name tree type specifier
@@ -653,7 +661,7 @@ SCOPE value_type *__mt_itr_val_##name(mt_itr_##name##_t *itr){ \
  * @retval `int`
  * @return 0 if iterator has no data, 1 if iterator has data
  */
-#define mt_itr_valid(itr) ((itr) ? ((itr)->has_data) : 0)
+#define mt_itr_valid(name, itr) __mt_itr_valid_##name((itr))
 
 /* return the key of the node at the iterator
  * @param name tree type specifier

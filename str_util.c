@@ -314,7 +314,7 @@ str_map * read_str_map(const char *fn){
     str_map *sm = init_str_map();
     if (sm == NULL) return NULL;
 
-    int len = 0, found = 0;
+    int found = 0;
     while ((ret = bgzf_getline(fp, '\n', &line)) >= 0){
         if (ret < -1){
             err_msg(-1, 0, "read_str_map: failed to read from file %s", fn);
@@ -328,7 +328,6 @@ str_map * read_str_map(const char *fn){
             err_msg(-1, 0, "read_str_map: duplicate index key %s found in %s", line.s, fn);
             return NULL;
         }
-        len++;
     }
     ks_free(&line);
     bgzf_close(fp);

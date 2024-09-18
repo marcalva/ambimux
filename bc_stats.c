@@ -38,11 +38,15 @@ int bc_stats_init(bc_stats_t *bcc){
 
 bc_stats_t *bc_stats_alloc(){
     bc_stats_t *bcc = calloc(1, sizeof(bc_stats_t));
-    if (bcc == NULL)
+    if (bcc == NULL) {
         err_msg(-1, 0, "bc_stats_alloc: %s", strerror(errno));
+        return NULL;
+    }
 
-    if (bc_stats_init(bcc) < 0)
+    if (bc_stats_init(bcc) < 0) {
+        err_msg(-1, 0, "bc_stats_alloc: could not initialize bc_stats_t");
         return(NULL);
+    }
 
     return(bcc);
 }

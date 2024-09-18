@@ -1,7 +1,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include "atac_data.h"
 #include "str_util.h"
 #include "variants.h"
@@ -38,6 +37,7 @@ void atac_read_free(atac_read1_t *ar){
     if (ar == NULL) return;
 
     seq_base_l_free(&ar->bl);
+    atac_read_set0(ar);
 }
 
 void atac_read_dstry(atac_read1_t *ar){
@@ -85,18 +85,19 @@ int atac_read1_cpy(atac_read1_t *dest, const atac_read1_t *src){
     return(0);
 }
 
-int atac_read_equal(atac_read1_t r1, atac_read1_t r2){
+int atac_read1_cmp(atac_read1_t r1, atac_read1_t r2){
 
     /* compare region */
     int rcmp = regioncmp(r1.loc, r2.loc);
     if (rcmp != 0)
-        return(0);
+        return rcmp;
 
     /* compare bases, ignore qual */
-    int bcmp = seq_base_l_equal(r1.bl, r2.bl, 0);
-    if (bcmp != 1)
-        return(0);
-    return(1);
+    int bcmp = seq_base_l_cmp(r1.bl, r2.bl, 0);
+    if (bcmp != 0)
+        return bcmp;
+
+    return 0;
 }
 
 int atac_read1_add_base(atac_read1_t *r, seq_base_t base){
@@ -115,9 +116,11 @@ int atac_read1_add_base(atac_read1_t *r, seq_base_t base){
 
 void atac_rd_pair_set0(atac_rd_pair_t *rp){
     if (rp == NULL) return;
+    rp->qname = 0;
     atac_read_set0(&rp->r1);
     atac_read_set0(&rp->r2);
     rp->s = 0;
+    rp->n_reads = 0;
 }
 
 atac_rd_pair_t *atac_rd_pair_init(){
@@ -135,8 +138,13 @@ atac_rd_pair_t *atac_rd_pair_init(){
 void atac_rd_pair_free(atac_rd_pair_t *rp){
     if (rp == NULL) return;
 
+    rp->qname = 0;
     atac_read_free(&rp->r1);
+    atac_read_set0(&rp->r1);
     atac_read_free(&rp->r2);
+    atac_read_set0(&rp->r2);
+    rp->s = 0;
+    rp->n_reads = 0;
 }
 
 void atac_rd_pair_dstry(atac_rd_pair_t *rp){
@@ -144,6 +152,22 @@ void atac_rd_pair_dstry(atac_rd_pair_t *rp){
 
     atac_rd_pair_free(rp);
     free(rp);
+}
+
+int atac_rd_pair_is_chimeric(const atac_rd_pair_t *rp) {
+    if (rp == NULL)
+        return err_msg(-1, 0, "atac_rd_pair_is_chimeric: read pair is null");
+
+    if (rp->s > 2)
+        return err_msg(-1, 0, "atac_rd_pair_is_chimeric: read pair has %u reads", rp->s);
+
+    if (rp->s < 2)
+        return(1);
+
+    if (rp->r1.loc.rid != rp->r2.loc.rid)
+        return(1);
+
+    return(0);
 }
 
 atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
@@ -158,6 +182,8 @@ atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
         *ret = err_msg(-1, 0, "atac_rd_pair_dup: %s", strerror(errno));
         return(NULL);
     }
+
+    cp->qname = rp->qname;
 
     atac_read1_t *rtmp = NULL;
 
@@ -185,6 +211,7 @@ atac_rd_pair_t *atac_rd_pair_dup(const atac_rd_pair_t *rp, int *ret){
     }
 
     cp->s = rp->s;
+    cp->n_reads = rp->n_reads;
 
     return(cp);
 }
@@ -194,6 +221,8 @@ int atac_rd_pair_cpy(atac_rd_pair_t *dest, const atac_rd_pair_t *src){
         return err_msg(-1, 0, "atac_rd_pair_cpy: src is null");
     if (dest == NULL)
         return err_msg(-1, 0, "atac_rd_pair_cpy: dest is null");
+
+    dest->qname = src->qname;
 
     if (atac_read1_cpy(&dest->r1, &src->r1) < 0) {
         atac_rd_pair_free(dest);
@@ -205,6 +234,7 @@ int atac_rd_pair_cpy(atac_rd_pair_t *dest, const atac_rd_pair_t *src){
     }
 
     dest->s = src->s;
+    dest->n_reads = src->n_reads;
 
     return(0);
 }
@@ -225,7 +255,6 @@ int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar){
         /* switch order if r2 comes before r1 */
         int rcmp = regioncmp(rtmp->loc, rp->r1.loc);
         if (rcmp < 0){
-            atac_read1_t tmp = rp->r2;
             rp->r2 = rp->r1;
             rp->r1 = *rtmp;
         } else {
@@ -241,20 +270,24 @@ int atac_rd_pair_add_read(atac_rd_pair_t *rp, const atac_read1_t *ar){
     return(0);
 }
 
-int atac_rd_pair_equal(const atac_rd_pair_t *rp1, const atac_rd_pair_t *rp2){
+int atac_rd_pair_cmp(const atac_rd_pair_t *rp1, const atac_rd_pair_t *rp2) {
     if (rp1 == NULL || rp2 == NULL)
-        return err_msg(-1, 0, "atac_rd_pair_equal: one of read pairs is null");
+        return err_msg(-1, 0, "atac_rd_pair_cmp: one of read pairs is null");
 
-    if (rp1->s != rp2->s)
-        return(0);
+    if (rp1->s < rp2->s)
+        return -1;
+    else if (rp1->s > rp2->s)
+        return 1;
 
-    int rcmp1 = atac_read_equal(rp1->r1, rp2->r1); // compare read 1
-    if (rcmp1 != 1) return(0);
+    int cmp1 = atac_read1_cmp(rp1->r1, rp2->r1);
+    if (cmp1 != 0)
+        return cmp1;
 
-    int rcmp2 = atac_read_equal(rp1->r2, rp2->r2); // compare read 2
-    if (rcmp2 != 1) return(0);
+    int cmp2 = atac_read1_cmp(rp1->r2, rp2->r2);
+    if (cmp2 != 0)
+        return cmp2;
 
-    return(1);
+    return 0;
 }
 
 int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp){
@@ -275,309 +308,6 @@ int atac_rd_pair_match_qual(atac_rd_pair_t *rp, const atac_rd_pair_t *cmp){
 }
 
 /*******************************************************************************
- * atac pairs bag
- ******************************************************************************/
-
-int atac_pair_node_init(atac_pair_node *node) {
-    if (node == NULL)
-        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
-
-    node->key = 0;
-    atac_rd_pair_set0(&node->atac_pair);
-
-     return 0;
-}
-
-void atac_pair_node_free(atac_pair_node *node) {
-    if (node == NULL) return;
-    atac_rd_pair_free(&node->atac_pair);
-}
-
-int atac_pair_bag_init(atac_pair_bag_t *bag) {
-    if (bag == NULL) return -1;
-    bag->atac_pairs = NULL;
-    return 0;
-}
-
-void atac_pair_bag_free(atac_pair_bag_t *bag) {
-    if (bag == NULL) return;
-    if (bag->atac_pairs == NULL) return;
-
-    kavl_itr_t(bt_qr_pr) itr;
-    kavl_itr_first(bt_qr_pr, bag->atac_pairs, &itr);  // place at first
-    do {                             // traverse
-        atac_pair_node *p = (atac_pair_node *)kavl_at(&itr);
-        atac_pair_node_free(p);
-        free((void*)p);                // free node
-    } while (kavl_itr_next(bt_qr_pr, &itr));
-    bag->atac_pairs = NULL;
-}
-
-int atac_pair_bag_add_read(atac_pair_bag_t *bag, const atac_read1_t *ar,
-        qshort qname) {
-    if (bag == NULL || ar == NULL)
-        return err_msg(-1, 0, "atac_pair_bag_add_read: argument is null");
-
-    atac_pair_node *node_i, *node_j = calloc(1, sizeof(atac_pair_node));
-    if (node_j == NULL)
-        return err_msg(-1, 0, "atac_pair_bag_add_read: %s", strerror(errno));
-
-    atac_pair_node_init(node_j);
-    node_j->key = qname;
-    node_i = kavl_insert(bt_qr_pr, &bag->atac_pairs, node_j, NULL);
-    if (node_i != node_j) {
-        atac_pair_node_free(node_j);
-        free(node_j);
-    }
-
-    if (atac_rd_pair_add_read(&node_i->atac_pair, ar) < 0)
-        return -1;
-
-    return 0;
-}
-
-void atac_pair_bag_itr_first(atac_pair_bag_itr *itr, atac_pair_bag_t *bag) {
-    assert(itr != NULL || bag != NULL);
-    if (bag->atac_pairs == NULL) {
-        itr->next = 0;
-        return;
-    }
-    itr->next = 1;
-    kavl_itr_first(bt_qr_pr, bag->atac_pairs, &itr->itr);
-}
-
-int atac_pair_bag_itr_next(atac_pair_bag_itr *itr) {
-    assert(itr != NULL);
-    if (itr->next == 0) return 0;
-    itr->next = kavl_itr_next(bt_qr_pr, &itr->itr);
-    return(itr->next);
-}
-
-int atac_pair_bag_itr_alive(atac_pair_bag_itr *itr) {
-    assert(itr != NULL);
-    return(itr->next);
-}
-
-qshort *atac_pair_bag_itr_key(atac_pair_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_pair_node *p = (atac_pair_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->key);
-}
-
-atac_rd_pair_t *atac_pair_bag_itr_val(atac_pair_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_pair_node *p = (atac_pair_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->atac_pair);
-}
-
-/*******************************************************************************
- * atac dups bag
- ******************************************************************************/
-
-int atac_dup_node_init(atac_dup_node *node) {
-    if (node == NULL)
-        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
-
-    init_reg_pair(&node->key);
-    atac_dups_init(&node->atac_dup);
-
-     return 0;
-}
-
-void atac_dup_node_free(atac_dup_node *node) {
-    if (node == NULL) return;
-    atac_dups_free(&node->atac_dup);
-}
-
-int atac_dup_bag_init(atac_dup_bag_t *bag) {
-    if (bag == NULL) return -1;
-    bag->atac_dups = NULL;
-    return 0;
-}
-
-void atac_dup_bag_free(atac_dup_bag_t *bag) {
-    if (bag == NULL) return;
-    if (bag->atac_dups == NULL) return;
-
-    kavl_itr_t(bt_rg_dp) itr;
-    kavl_itr_first(bt_rg_dp, bag->atac_dups, &itr);  // place at first
-    do {                             // traverse
-        atac_dup_node *p = (atac_dup_node *)kavl_at(&itr);
-        atac_dup_node_free(p);
-        free((void*)p);                // free node
-    } while (kavl_itr_next(bt_rg_dp, &itr));
-    bag->atac_dups = NULL;
-}
-
-int atac_dup_bag_add_read(atac_dup_bag_t *bag, const atac_rd_pair_t *ap,
-        int skip_chim) {
-    if (bag == NULL || ap == NULL)
-        return err_msg(-1, 0, "atac_dup_bag_add_read: argument is null");
-
-    // skip if chimeric
-    if (skip_chim && ap->r1.loc.rid != ap->r2.loc.rid)
-        return 0;
-
-    atac_dup_node *node_i, *node_j = calloc(1, sizeof(atac_dup_node));
-    if (node_j == NULL)
-        return err_msg(-1, 0, "atac_dup_bag_add_read: %s", strerror(errno));
-
-    atac_dup_node_init(node_j);
-    g_reg_pair reg_pair = get_reg_pair(ap->r1.loc, ap->r2.loc);
-    node_j->key = reg_pair;
-    node_i = kavl_insert(bt_rg_dp, &bag->atac_dups, node_j, NULL);
-    if (node_i != node_j) {
-        atac_dup_node_free(node_j);
-        free(node_j);
-    }
-
-    if (atac_dups_add_pair(&node_i->atac_dup, ap) < 0)
-        return -1;
-
-    return 0;
-}
-
-void atac_dup_bag_itr_first(atac_dup_bag_itr *itr, atac_dup_bag_t *bag) {
-    assert(itr != NULL || bag != NULL);
-    if (bag->atac_dups == NULL) {
-        itr->next = 0;
-        return;
-    }
-    itr->next = 1;
-    kavl_itr_first(bt_rg_dp, bag->atac_dups, &itr->itr);
-}
-
-int atac_dup_bag_itr_next(atac_dup_bag_itr *itr) {
-    assert(itr != NULL);
-    if (itr->next == 0) return 0;
-    itr->next = kavl_itr_next(bt_rg_dp, &itr->itr);
-    return(itr->next);
-}
-
-int atac_dup_bag_itr_alive(atac_dup_bag_itr *itr) {
-    assert(itr != NULL);
-    return(itr->next);
-}
-
-g_reg_pair *atac_dup_bag_itr_key(atac_dup_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_dup_node *p = (atac_dup_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->key);
-}
-
-atac_dups_t *atac_dup_bag_itr_val(atac_dup_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_dup_node *p = (atac_dup_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->atac_dup);
-}
-
-/*******************************************************************************
- * atac frags bag
- ******************************************************************************/
-
-int atac_frag_node_init(atac_frag_node *node) {
-    if (node == NULL)
-        return err_msg(-1, 0, "atac_pair_node_init: argument is null");
-
-    init_reg_pair(&node->key);
-    atac_frag_init(&node->atac_frag);
-
-    return 0;
-}
-
-void atac_frag_node_free(atac_frag_node *node) {
-    if (node == NULL) return;
-
-    atac_frag_free(&node->atac_frag);
-}
-
-int atac_frag_bag_init(atac_frag_bag_t *bag) {
-    if (bag == NULL) return -1;
-    bag->atac_frags = NULL;
-    return 0;
-}
-
-void atac_frag_bag_free(atac_frag_bag_t *bag) {
-    if (bag == NULL) return;
-    if (bag->atac_frags == NULL) return;
-
-    kavl_itr_t(bt_rg_fr) itr;
-    kavl_itr_first(bt_rg_fr, bag->atac_frags, &itr);  // place at first
-    do {                             // traverse
-        atac_frag_node *p = (atac_frag_node *)kavl_at(&itr);
-        atac_frag_node_free(p);
-        free((void*)p);                // free node
-    } while (kavl_itr_next(bt_rg_fr, &itr));
-    bag->atac_frags = NULL;
-}
-
-int atac_frag_bag_add(atac_frag_bag_t *bag, const atac_frag_t *af,
-        g_reg_pair reg) {
-    if (bag == NULL || af == NULL)
-        return err_msg(-2, 0, "atac_frag_bag_add: argument is null");
-
-    atac_frag_node *node_i, *node_j = calloc(1, sizeof(atac_frag_node));
-    if (node_j == NULL)
-        return err_msg(-2, 0, "atac_frag_bag_add: %s", strerror(errno));
-    node_j->key = reg;
-    node_j->atac_frag = *af;
-    node_i = kavl_insert(bt_rg_fr, &bag->atac_frags, node_j, NULL);
-    if (node_i != node_j) {
-        atac_frag_node_free(node_j);
-        free(node_j);
-        return -1;
-    }
-
-    return 0;
-}
-
-void atac_frag_bag_itr_first(atac_frag_bag_itr *itr, atac_frag_bag_t *bag) {
-    assert(itr != NULL || bag != NULL);
-    if (bag->atac_frags == NULL) {
-        itr->next = 0;
-        return;
-    }
-    itr->next = 1;
-    kavl_itr_first(bt_rg_fr, bag->atac_frags, &itr->itr);
-}
-
-int atac_frag_bag_itr_next(atac_frag_bag_itr *itr) {
-    assert(itr != NULL);
-    if (itr->next == 0) return 0;
-    itr->next = kavl_itr_next(bt_rg_fr, &itr->itr);
-    return(itr->next);
-}
-
-int atac_frag_bag_itr_alive(atac_frag_bag_itr *itr) {
-    assert(itr != NULL);
-    return(itr->next);
-}
-
-g_reg_pair *atac_frag_bag_itr_key(atac_frag_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_frag_node *p = (atac_frag_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->key);
-}
-
-atac_frag_t *atac_frag_bag_itr_val(atac_frag_bag_itr *itr) {
-    assert(itr != NULL);
-    atac_frag_node *p = (atac_frag_node *)kavl_at(&itr->itr);
-    if (p == NULL)
-        return NULL;
-    return(&p->atac_frag);
-}
-
-/*******************************************************************************
  * atac_dups_t
  ******************************************************************************/
 
@@ -585,11 +315,10 @@ int atac_dups_init(atac_dups_t *d){
     if (d == NULL)
         return err_msg(-1, 0, "atac_dups_init: argument is null");
 
-    d->size = 0;
-    d->m = 1;
-    d->dups = calloc(d->m, sizeof(struct _atac_dup1_t));
-    if (d->dups == NULL)
-        return err_msg(-1, 0, "atac_dups_init: %s", strerror(errno));
+    init_reg_pair(&d->reg);
+
+    mv_init(&d->dups);
+
     return 0;
 }
 
@@ -605,13 +334,15 @@ atac_dups_t *atac_dups_alloc() {
 
 void atac_dups_free(atac_dups_t *d){
     if (d == NULL) return;
+
+    init_reg_pair(&d->reg);
+
     size_t i;
-    for (i = 0; i < d->size; ++i)
-        atac_rd_pair_free(&d->dups[i].rd); // free underlying reads
-    free(d->dups);
-    d->dups = NULL;
-    d->size = 0;
-    d->m = 0;
+    for (i = 0; i < mv_size(&d->dups); ++i){
+        atac_rd_pair_t *rp = &mv_i(&d->dups, i);
+        atac_rd_pair_free(rp);
+    }
+    mv_free(&d->dups);
 }
 
 void atac_dups_dstry(atac_dups_t *d){
@@ -624,36 +355,36 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp){
     if (d == NULL || rp == NULL)
         return err_msg(-1, 0, "atac_dups_add_pair: arguments must not be NULL");
 
+    // copy read pair
+    int ret;
+    atac_rd_pair_t *tmp = atac_rd_pair_dup(rp, &ret);
+    if (ret < 0 || tmp == NULL)
+        return err_msg(-1, 0, "atac_dups_add_pair: failed to duplicate read pair");
+
     size_t i;
-    int tcmp = 0;
-    for (i = 0; i < d->size; ++i){
-        tcmp = atac_rd_pair_equal(&d->dups[i].rd, rp);
-        if (tcmp < 0) {
-            if (d->dups != NULL)
-                atac_dups_free(d);
-            return(-1);
-        }
-        if (tcmp == 1){
-            if (atac_rd_pair_match_qual(&d->dups[i].rd, rp) < 0) return(-1);
-            ++d->dups[i].n_rd;;
+    for (i = 0; i < mv_size(&d->dups); ++i){
+        atac_rd_pair_t *rp_vec = &mv_i(&d->dups, i);
+        // if read pair is found, set existing pair's base qualities to max
+        //  of the two.
+        if (atac_rd_pair_cmp(rp_vec, tmp) == 0){
+            if (atac_rd_pair_match_qual(rp_vec, tmp) < 0){
+                atac_rd_pair_dstry(tmp);
+                return err_msg(-1, 0, "atac_dups_add_pair: failed to match quality of read pair");
+            }
+            rp_vec->n_reads += 1;
+            atac_rd_pair_dstry(tmp);
+            tmp = NULL;
             return(0);
         }
     }
-    if (d->size >= d->m){
-        d->m = d->size + 1;
-        d->dups = realloc(d->dups, d->m * sizeof(struct _atac_dup1_t));
-        if (d->dups == NULL)
-            return err_msg(-1, 0, "atac_dups_add_pair: %s", strerror(errno));
+    // if not found, add to vector
+    if (mv_push(mv_arp, &d->dups, *tmp) < 0){
+        atac_rd_pair_dstry(tmp);
+        return err_msg(-1, 0, "atac_dups_add_pair: failed to add read pair to vector");
     }
+    free(tmp);
 
-    // copy read pair
-    if (atac_rd_pair_cpy(&d->dups[d->size].rd, rp) < 0)
-        return(-1);
-
-    d->dups[d->size].n_rd = 1;
-    ++d->size;
-
-    return(0);
+    return 0;
 }
 
 /*******************************************************************************
@@ -663,6 +394,7 @@ int atac_dups_add_pair(atac_dups_t *d, const atac_rd_pair_t *rp){
 int atac_frag_init(atac_frag_t *f){
     if (f == NULL)
         return err_msg(-1, 0, "atac_frag_init: argument is null");
+    init_reg_pair(&f->reg);
     seq_base_l_init(&f->bl);
     seq_vac_l_init(&f->vl);
     mv_init(&f->pks);
@@ -676,14 +408,17 @@ atac_frag_t *atac_frag_alloc() {
         err_msg(-1, 0, "atac_frag_alloc: %s", strerror(errno));
         return(NULL);
     }
-    if (atac_frag_init(f) < 0)
+    if (atac_frag_init(f) < 0) {
+        atac_frag_dstry(f);
         return NULL;
+    }
     return f;
 }
 
 void atac_frag_free(atac_frag_t *f) {
     if (f == NULL) return;
 
+    init_reg_pair(&f->reg);
     seq_base_l_free(&f->bl);
     seq_vac_l_free(&f->vl);
     mv_free(&f->pks);
@@ -701,63 +436,84 @@ atac_frag_t *atac_dups_dedup(atac_dups_t *dups, int *ret) {
         *ret = err_msg(-1, 0, "atac_dups_dedup: argument is null");
         return NULL;
     }
-    int ix_best = 0;
-    size_t max_c = 0; // store read count
-    size_t rp_w_max = 0; // number of read pairs with max_c read counts
+
+    if (mv_size(&dups->dups) == 0) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: no read pairs in 'dups'");
+        return NULL;
+    }
+
+    uint32_t max_c = 0; // store read count
+    atac_rd_pair_t *rp_best = NULL;
+    uint32_t rp_w_max = 0; // number of read pairs with max_c read counts
 
     size_t i;
-    for (i = 0; i < dups->size; ++i){
-        assert(dups->dups[i].n_rd > 0);
-
-        if (dups->dups[i].n_rd == max_c){
+    for (i = 0; i < mv_size(&dups->dups); ++i){
+        atac_rd_pair_t *rp = &mv_i(&dups->dups, i);
+        uint32_t rds_per_dup = rp->n_reads;
+        if (rds_per_dup == 0) {
+            *ret = err_msg(-1, 0, "atac_dups_dedup: read pair has no reads");
+            return NULL;
+        }
+        if (rds_per_dup == max_c){
             ++rp_w_max;
-        } else if (dups->dups[i].n_rd > max_c){
-            max_c = dups->dups[i].n_rd;
-            ix_best = i;
+        } else if (rds_per_dup > max_c){
+            max_c = rds_per_dup;
+            rp_best = rp;
             rp_w_max = 1;
         }
     }
 
-    assert(max_c > 0 && rp_w_max > 0);
-
-    // skip if ambiguous
-    if (rp_w_max > 1)
-        return 0;
-
-    atac_rd_pair_t rpb = dups->dups[ix_best].rd;
-
-    ml_node_t(seq_base_l) *bn;
-
-    assert(rpb.s == 2);
-
-    atac_frag_t *frag = atac_frag_alloc();
-    if (frag == NULL) {
-        *ret = -1;
+    if (rp_w_max == 0) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: no read pairs with reads");
+        return NULL;
+    }
+    if (rp_best == NULL) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: failed to find best read pair");
         return NULL;
     }
 
+    // skip if ambiguous
+    if (rp_w_max > 1)
+        return NULL;
+
+    // check that read pair is complete
+    if (rp_best->s != 2) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: read pair has %u reads", rp_best->s);
+        return NULL;
+    }
+
+    atac_frag_t *frag = atac_frag_alloc();
+    if (frag == NULL) {
+        *ret = err_msg(-1, 0, "atac_dups_dedup: failed to allocate fragment");
+        return NULL;
+    }
+
+    // add base calls from both reads of pair to fragment
+    ml_node_t(seq_base_l) *bn;
+
     /* add bases from read 1 */
-    for (bn = ml_begin(&rpb.r1.bl); bn; bn = ml_node_next(bn)){
+    for (bn = ml_begin(&rp_best->r1.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
         if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) {
             atac_frag_dstry(frag);
-            *ret = -1;
+            *ret = err_msg(-1, 0, "atac_dups_dedup: failed to insert base");
             return NULL;
         }
     }
 
     /* add bases from read 2 */
-    for (bn = ml_begin(&rpb.r2.bl); bn; bn = ml_node_next(bn)){
+    for (bn = ml_begin(&rp_best->r2.bl); bn; bn = ml_node_next(bn)){
         seq_base_t base = ml_node_val(bn);
         if (seq_base_l_insert(&frag->bl, base, 1, 1) < 0) {
             atac_frag_dstry(frag);
-            *ret = -1;
+            *ret = err_msg(-1, 0, "atac_dups_dedup: failed to insert base");
             return NULL;
         }
     }
 
     /* add number of supporting reads */
-    frag->s = dups->dups[ix_best].n_rd;
+    frag->s = rp_w_max;
+    frag->reg = dups->reg;
 
     return frag;
 }
@@ -782,8 +538,10 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     if (pks == NULL)
         return err_msg(-1, 0, "atac_frag_peak_call: pks is NULL");
 
+    // check if chimeric
     if (reg.r1.rid != reg.r2.rid)
         return err_msg(-1, 0, "atac_frag_peak_call: chromosomes in given region pair don't match");
+
     int rid = (int)reg.r1.rid;
     const char *chr = str_map_str(cmap, rid);
 
@@ -799,7 +557,10 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     mv_t(int_vec) overlaps;
     mv_init(&overlaps);
     int ret = iregs_overlap(pks, chr, beg, end, &overlaps);
-    if (ret < 0) return(-1);
+    if (ret < 0) {
+        mv_free(&overlaps);
+        return err_msg(-1, 0, "atac_frag_peak_call: failed to overlap peaks");
+    }
 
     // check if the individual cut sites overlap peaks
     // A fragment fully contained within a peak will contain two counts/instances
@@ -807,23 +568,35 @@ int atac_frag_peak_call(atac_frag_t *f, g_reg_pair reg, iregs_t *pks, str_map *c
     size_t i;
     for (i = 0; i < mv_size(&overlaps); ++i){
         int ix = mv_i(&overlaps, i);
-        if (ix >= pks->n || ix < 0)
+        if (ix >= pks->n || ix < 0) {
+            mv_free(&overlaps);
             return err_msg(-1, 0, "atac_frag_peak_call: %zu index >= num of peaks %zu", ix, pks->n);
+        }
         g_region pk_reg = pks->reg[ix];
 
         int64_t ovrlp;
 
         // check cut site 1 (+4 based on 10X)
         ovrlp = bp_overlap(beg+4, beg+5, '.', pk_reg.start, pk_reg.end, '.');
-        if (ovrlp < 0) return(-1);
-        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0)
-            return(-1);
+        if (ovrlp < 0) {
+            mv_free(&overlaps);
+            return err_msg(-1, 0, "atac_frag_peak_call: failed to overlap cut site 1");
+        }
+        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0) {
+            mv_free(&overlaps);
+            return err_msg(-1, 0, "atac_frag_peak_call: failed to push peak index");
+        }
 
         // check cut site 2 (-5 based on 10X)
         ovrlp = bp_overlap(end-5, end-4, '.', pk_reg.start, pk_reg.end, '.');
-        if (ovrlp < 0) return(-1);
-        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0)
-            return(-1);
+        if (ovrlp < 0) {
+            mv_free(&overlaps);
+            return err_msg(-1, 0, "atac_frag_peak_call: failed to overlap cut site 2");
+        }
+        if (ovrlp > 0 && mv_push(int_vec, &f->pks, ix) < 0) {
+            mv_free(&overlaps);
+            return err_msg(-1, 0, "atac_frag_peak_call: failed to push peak index");
+        }
     }
 
     mv_free(&overlaps);

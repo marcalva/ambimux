@@ -158,11 +158,11 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
         if (bcc == NULL) return(-1);
 
         if (bam_data->has_rna){
-            mt_itr_t(rna_mols) itrt;
-            if (mt_itr_first(rna_mols, &bc_data->rna_mlcls, &itrt) < 0)
-                return err_msg(-1, 0, "bam_counts_count: failed to get first rna_mol");
-            for (; mt_itr_valid(&itrt); mt_itr_next(rna_mols, &itrt)){
-                rna_mol_t *mol = mt_itr_val(rna_mols, &itrt);
+            ml_node_t(ml_rm) *rna_node = ml_begin(bc_data->rna_mols);
+            while (rna_node != NULL) {
+                rna_mol_t *mol = &ml_node_val(rna_node);
+                if (mol == NULL)
+                    return err_msg(-1, 0, "bam_counts_count: mol is null");
                 ml_node_t(seq_gene_l) *gn;
                 if (ml_size(&mol->gl) == 1) {
                     for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
@@ -206,66 +206,15 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     }
                     agc->has_rna_ac = 1;
                 }
-            }
-            rna_mlc_bag_itr itr;
-            rna_mlc_bag_itr_first(&itr, &bc_data->rna_mlcs);
-            for (; rna_mlc_bag_itr_alive(&itr); rna_mlc_bag_itr_next(&itr)) {
-                rna_mol_t *mol = rna_mlc_bag_itr_val(&itr);
-                ml_node_t(seq_gene_l) *gn;
-                if (ml_size(&mol->gl) == 1) {
-                    for (gn = ml_begin(&mol->gl); gn; gn = ml_node_next(gn)){
-                        seq_gene_t gene = ml_node_val(gn);
-                        int32_t fix = gene.gene_id;
-                        uint8_t spl = gene.splice;
-                        assert(spl <= N_SPL);
-                        cnt_node_t *p, t;
-                        memset(&t, 0, sizeof(cnt_node_t));
-                        t.ix = (int)fix;
-                        t.counts[spl] = 1.0;
-                        p = kb_getp(kh_cnode, bcc->rna_gc, &t);
-                        if (!p){
-                            kb_putp(kh_cnode, bcc->rna_gc, &t);
-                            ++agc->rna_gcs_nz;
-                        } else {
-                            p->counts[spl] += 1.0;
-                        }
-                        agc->has_rna_gc = 1;
-                    }
-                }
-                ml_node_t(seq_vac_l) *vn;
-                for (vn = ml_begin(&mol->vl); vn; vn = ml_node_next(vn)){
-                    seq_vac_t vac = ml_node_val(vn);
-                    int32_t vix = vac.vix;
-                    uint8_t allele = vac.allele;
-                    if (allele >= MAX_ALLELE)
-                        return err_msg(-1, 0, "bam_counts_count: "
-                                "allele %u > %i", allele, MAX_ALLELE);
-                    cnt_node_t *p, t;
-                    memset(&t, 0, sizeof(cnt_node_t));
-                    t.ix = vix;
-                    t.counts[allele] = 1.0;
-                    p = kb_getp(kh_cnode, bcc->rna_ac, &t);
-                    if (!p){
-                        kb_putp(kh_cnode, bcc->rna_ac, &t);
-                        ++agc->rna_acs_nz;
-                    }
-                    else {
-                        p->counts[allele] += 1.0;
-                    }
-                    agc->has_rna_ac = 1;
-                }
+                rna_node = ml_node_next(rna_node);
             }
         }
         if (bam_data->has_atac){
-            mt_itr_t(atac_frags) itrt;
-            if (mt_itr_first(atac_frags, &bc_data->atac_frags, &itrt) < 0)
-                return err_msg(-1, 0, "bam_counts_count: failed to get first atac_frag");
-            for (; mt_itr_valid(&itrt); mt_itr_next(atac_frags, &itrt)){
-                atac_frag_t *frag = mt_itr_val(atac_frags, &itrt);
-                if (frag == NULL){
-                    printf("frag is null in bam_counts_count, is this ok?\n");
-                    continue;
-                }
+            ml_node_t(ml_af) *atac_node = ml_begin(bc_data->atac_frgs);
+            while (atac_node != NULL) {
+                atac_frag_t *frag = &ml_node_val(atac_node);
+                if (frag == NULL)
+                    return err_msg(-1, 0, "bam_counts_count: frag is null");
                 size_t ip;
                 for (ip = 0; ip < mv_size(&frag->pks); ++ip){
                     cnt_node_t *p, t;
@@ -304,53 +253,7 @@ int bam_counts_count(bam_counts_t *agc, bam_data_t *bam_data){
                     }
                     agc->has_atac_ac = 1;
                 }
-            }
-            atac_frag_bag_itr itr;
-            atac_frag_bag_itr_first(&itr, &bc_data->atac_frgs);
-            for (; atac_frag_bag_itr_alive(&itr); atac_frag_bag_itr_next(&itr)) {
-                atac_frag_t *frag = atac_frag_bag_itr_val(&itr);
-                if (frag == NULL){
-                    printf("frag is null in bam_counts_count, is this ok?\n");
-                    continue;
-                }
-                size_t ip;
-                for (ip = 0; ip < mv_size(&frag->pks); ++ip){
-                    cnt_node_t *p, t;
-                    memset(&t, 0, sizeof(cnt_node_t));
-                    t.ix = mv_i(&frag->pks, ip);
-                    t.counts[0] = 1.0;
-                    p = kb_getp(kh_cnode, bcc->atac_pc, &t);
-                    if (p == NULL){
-                        kb_putp(kh_cnode, bcc->atac_pc, &t);
-                        ++agc->atac_pcs_nz;
-                    } else {
-                        p->counts[0] += 1.0;
-                    }
-                    agc->has_atac_pc = 1;
-                }
-                ml_node_t(seq_vac_l) *vn;
-                for (vn = ml_begin(&frag->vl); vn; vn = ml_node_next(vn)){
-                    seq_vac_t vac = ml_node_val(vn);
-                    int32_t vix = vac.vix;
-                    uint8_t allele = vac.allele;
-                    if (allele >= MAX_ALLELE)
-                        return err_msg(-1, 0, "bam_atac_ac_count: "
-                                "allele %u > %i", allele, MAX_ALLELE);
-
-                    cnt_node_t *p, t;
-                    memset(&t, 0, sizeof(cnt_node_t));
-                    t.ix = vix;
-                    t.counts[allele] = 1.0;
-                    p = kb_getp(kh_cnode, bcc->atac_ac, &t);
-                    if (!p){
-                        kb_putp(kh_cnode, bcc->atac_ac, &t);
-                        ++agc->atac_acs_nz;
-                    }
-                    else{
-                        p->counts[allele] += 1.0;
-                    }
-                    agc->has_atac_ac = 1;
-                }
+            atac_node = ml_node_next(atac_node);
             }
         }
         kh_val(agc->bc_counts, k_bt) = bcc;
