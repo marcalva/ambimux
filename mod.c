@@ -2566,6 +2566,10 @@ int mdl_m_pi(mdl_t *mdl) {
 int mdl_m_pi_amb(mdl_t *mdl) {
     if (mdl == NULL)
         return err_msg(-1, 0, "mdl_m_pi_amb: mdl is null");
+    if (mdl->mp == NULL)
+        return err_msg(-1, 0, "mdl_m_pi_amb: model parameters are missing");
+    if (mdl->mdl_bc_dat == NULL)
+        return err_msg(-1, 0, "mdl_m_pi_amb: barcode count data is missing");
 
     uint32_t i;
     uint16_t M = mdl->mp->M;
@@ -2588,16 +2592,24 @@ int mdl_m_pi_amb(mdl_t *mdl) {
     mv_t(i32) amb_bcs;
     mv_init(&amb_bcs);
     for (i = 0; i < D; ++i) {
-        // if fixed, set Pr(empty) = 1
         int afl = bflg_get(&bd->amb_flag, i);
         if (afl)
             mv_push(i32, &amb_bcs, i);
     }
     uint32_t E = mv_size(&amb_bcs);
+    if (E == 0) {
+        mv_free(&amb_bcs);
+        free(d_pi_amb);
+        free(new_pi_amb);
+        free(new_pi_ambp);
+        return err_msg(0, 1, "mdl_m_pi_amb: no ambient barcodes found");
+    }
 
 
     int max_iter = 10000, iter = 0;
     f_t vareps = 1e-1, delta_thresh = mdl->eps, p_delta = delta_thresh + 1;
+    if (delta_thresh < 1e-15)
+        delta_thresh = 1e-15;
     while (p_delta >= delta_thresh && iter < max_iter) {
         for (i = 0; i < M; ++i) {
             d_pi_amb[i] = 0;
@@ -2646,9 +2658,15 @@ int mdl_m_pi_amb(mdl_t *mdl) {
                         f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
 
                         f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+                        if (prob_invalid(amb_alt_freq) || (amb_alt_freq <= 0)) {
+                            return err_msg(-1, 0, "mdl_m_pi_amb: invalid gamma value '%f'", amb_alt_freq);
+                        }
                         uint16_t s_ix;
                         for (s_ix = 0; s_ix < M; ++s_ix) {
                             f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                            if (prob_invalid(s_alt_freq) || (s_alt_freq <= 0) || (s_alt_freq >= 1)) {
+                                return err_msg(-1, 0, "mdl_m_pi_amb: invalid gamma value '%f'", s_alt_freq);
+                            }
                             f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
                             if (num_invalid(dp1)) dp1 = 0;
                             f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
@@ -2660,6 +2678,11 @@ int mdl_m_pi_amb(mdl_t *mdl) {
                     }
                 }
             }
+        }
+
+        if (n_tot <= 1e-15) {
+            err_msg(0, 1, "mdl_m_pi_amb: no reads found for ambient barcodes");
+            break;
         }
 
         uint16_t s_ix;
@@ -2679,7 +2702,13 @@ int mdl_m_pi_amb(mdl_t *mdl) {
             f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
             pid_norm += ldiff * ldiff;
             p_delta += pow(ldiff, 2.0);
+            if (prob_invalid(new_pi_ambp[s_ix])) {
+                return err_msg(-1, 0, "mdl_m_pi_amb: invalid pi_amb value '%f'", new_pi_ambp[s_ix]);
+            }
             mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
+        }
+        if (pi0_norm <= 1e-15) {
+            return err_msg(-1, 0, "mdl_m_pi_amb: invalid pi0_norm");
         }
         pi0_norm = sqrt(pi0_norm);
         pid_norm = sqrt(pid_norm);
