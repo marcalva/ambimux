@@ -244,11 +244,8 @@ int seq_base_call_var(seq_base_t b, ml_t(seq_vac_l) *vl, g_var_t *gv,
 
     // debugging to check for mutliple snps at same site
     // if (1){
-    if (n_v > 1 || ml_size(&vars) > 1){
+    if (n_v > 1 || ml_size(&vars) > 1)
         ml_free(vcfr_list, &vars);
-        err_msg(0, 1, "seq_base_call_var: %i variants found at position %s:%"PRIi32"\n", 
-                n_v, b_ref, b_beg);
-    }
     // }
 
     /* loop through overlapping variants (should just be one) */

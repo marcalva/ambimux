@@ -1295,9 +1295,7 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             return err_msg(-1, 0, "mdl_bc_dat_bam_data: barcode stats is NULL");
 
         // barcode can be both absent and empty
-        // since all low count droplets are collapsed, absent is always 0
         // low_count=1 when num. atac and num. rna are both below threshold
-        int absent = 0;
         int low_count = (bc_stat->atac_counts < c_thresh) && (bc_stat->rna_counts < c_thresh);
         int dup_ok = low_count; // only low count empty barcode can be duplicate
 
@@ -1306,7 +1304,7 @@ int mdl_bc_dat_bam_data(mdl_bc_dat_t *mdl_bc_dat, bam_data_t *bam_data, obj_pars
             bc_key = bc_empty;
 
         found = 0;
-        bc_ix = mdl_bc_dat_add_bc(mdl_bc_dat, bc_key, absent, low_count, dup_ok, &found);
+        bc_ix = mdl_bc_dat_add_bc(mdl_bc_dat, bc_key, 0, low_count, dup_ok, &found);
         if (bc_ix < 0)
             return(-1);
 
@@ -2563,13 +2561,114 @@ int mdl_m_pi(mdl_t *mdl) {
     return 0;
 }
 
+/**
+ * @brief Process molecules to update ambient sample fraction estimates.
+ *
+ * This function processes individual molecules (RNA or ATAC) to update the
+ * estimates of ambient sample fractions. It handles missing values and ensures
+ * that only valid probability values are used in calculations.
+ *
+ * @param mdl Pointer to the model structure.
+ * @param mols Pointer to the kbtree containing molecule data.
+ * @param M Number of samples.
+ * @param gamma_nrow Number of rows in the gamma matrix.
+ * @param d_pi_amb Array to store the updates for pi_amb.
+ * @param n_tot Pointer to the total count of processed molecules.
+ * @return 0 if successful, or a negative value if an error occurred.
+ */
+static int pi_amb_process_molecules(mdl_t *mdl,
+                                    kbtree_t(kb_mdl_mlcl) *mols,
+                                    uint16_t M,
+                                    uint32_t gamma_nrow,
+                                    f_t *d_pi_amb,
+                                    f_t *n_tot) {
+    kbitr_t itr;
+    kb_itr_first(kb_mdl_mlcl, mols, &itr); 
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols, &itr)){
+        mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+        uint32_t n_vars = mv_size(&mlcl->var_ixs);
+
+        size_t j;
+        for (j = 0; j < n_vars; ++j){
+            // get base call for variant allele
+            uint32_t pack = mv_i(&mlcl->var_ixs, j);
+            uint32_t v_ix;
+            uint8_t allele;
+            mdl_mlcl_unpack_var(pack, &v_ix, &allele);
+            if (allele > 1) continue; // if missing
+
+            // get base quality score
+            // set to default tau if missing
+            uint8_t bqual = mv_i(&mlcl->bquals, j);
+            f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
+
+            f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+            if (amb_alt_freq < 0)
+                continue;
+
+            if (prob_invalid(amb_alt_freq)) {
+                char estr[] = "pi_amb_process_molecules: invalid gamma value '%f'";
+                return err_msg(-1, 0, estr, amb_alt_freq);
+            }
+
+            uint16_t s_ix;
+            for (s_ix = 0; s_ix < M; ++s_ix) {
+                f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                if (s_alt_freq < 0)
+                    continue;
+
+                if (prob_invalid(s_alt_freq)) {
+                    char estr[] = "mdl_m_pi_amb: invalid gamma value '%f'";
+                    return err_msg(-1, 0, estr, s_alt_freq);
+                }
+
+                f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
+                f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
+                f_t dp = dp1 - dp2;
+
+                if (num_invalid(dp))
+                    continue;
+
+                d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
+            }
+            *n_tot += (1 - perr) * mlcl->counts;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Calculate the delta between old and new pi_amb values and update pi_amb.
+ *
+ * This function calculates the difference (delta) between the old and new pi_amb
+ * values, updates the pi_amb values in the model, and returns the calculated delta.
+ *
+ * @param mdl Pointer to the model structure.
+ * @param M Number of samples.
+ * @param new_pi_ambp Array containing the new pi_amb values.
+ * @return The calculated delta value, or a negative value if an error occurred.
+ */
+static f_t calculate_delta_and_update_pi_amb(mdl_t *mdl, uint16_t M, const f_t *new_pi_ambp) {
+    f_t pi0_norm = 0.0, pid_norm = 0.0;
+    for (uint16_t s_ix = 0; s_ix < M; ++s_ix) {
+        pi0_norm += mdl->mp->pi_amb[s_ix] * mdl->mp->pi_amb[s_ix];
+        f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
+        pid_norm += ldiff * ldiff;
+        if (prob_invalid(new_pi_ambp[s_ix])) {
+            char estr[] = "calculate_delta_and_update_pi_amb: Invalid pi_amb value %f";
+            return err_msg(-1, 0, estr, new_pi_ambp[s_ix]);
+        }
+        mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
+    }
+    if (pi0_norm <= 1e-15)
+        return err_msg(-1, 0, "calculate_delta_and_update_pi_amb: Invalid pi0_norm");
+    
+    return sqrt(pid_norm) / sqrt(pi0_norm);
+}
+
 int mdl_m_pi_amb(mdl_t *mdl) {
-    if (mdl == NULL)
-        return err_msg(-1, 0, "mdl_m_pi_amb: mdl is null");
-    if (mdl->mp == NULL)
-        return err_msg(-1, 0, "mdl_m_pi_amb: model parameters are missing");
-    if (mdl->mdl_bc_dat == NULL)
-        return err_msg(-1, 0, "mdl_m_pi_amb: barcode count data is missing");
+    if (mdl == NULL || mdl->mp == NULL || mdl->mdl_bc_dat == NULL)
+        return err_msg(-1, 0, "mdl_m_pi_amb: invalid input: parameters are null");
 
     uint32_t i;
     uint16_t M = mdl->mp->M;
@@ -2577,7 +2676,6 @@ int mdl_m_pi_amb(mdl_t *mdl) {
     uint32_t gamma_nrow = M + 1;
     mdl_bc_dat_t *bd = mdl->mdl_bc_dat;
 
-    uint8_t n_mod = 2;
     int has_mod[2] = {0, 0};
     has_mod[ATAC_IX] = mdl->has_atac;
     has_mod[RNA_IX] = mdl->has_rna;
@@ -2607,15 +2705,13 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
 
     int max_iter = 10000, iter = 0;
-    f_t vareps = 1e-1, delta_thresh = mdl->eps, p_delta = delta_thresh + 1;
+    f_t vareps = 1e-1, delta_thresh = mdl->eps, delta = delta_thresh + 1;
     if (delta_thresh < 1e-15)
         delta_thresh = 1e-15;
-    while (p_delta >= delta_thresh && iter < max_iter) {
-        for (i = 0; i < M; ++i) {
-            d_pi_amb[i] = 0;
-            new_pi_amb[i] = 0;
-            new_pi_ambp[i] = 0;
-        }
+    while (delta >= delta_thresh && iter < max_iter) {
+        memset(d_pi_amb, 0, M * sizeof(f_t));
+        memset(new_pi_amb, 0, M * sizeof(f_t));
+        memset(new_pi_ambp, 0, M * sizeof(f_t));
 
         f_t n_tot = 0.0;
         for (i = 0; i < E; ++i){
@@ -2628,55 +2724,19 @@ int mdl_m_pi_amb(mdl_t *mdl) {
             mols[RNA_IX] = bc_dat.rna;
             mols[ATAC_IX] = bc_dat.atac;
 
-            // loop over RNA and ATAC
-            uint8_t mod_ix;
-            for (mod_ix = 0; mod_ix < n_mod; ++mod_ix) {
-                if (!has_mod[mod_ix])
-                    continue;
-
-                kbitr_t itr;
-                kb_itr_first(kb_mdl_mlcl, mols[mod_ix], &itr); 
-
-                for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols[mod_ix], &itr)){
-                    mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
-                    uint32_t n_vars = mv_size(&mlcl->var_ixs);
-                    if (n_vars < 1)
-                        continue;
-
-                    size_t j;
-                    for (j = 0; j < n_vars; ++j){
-                        // get base call for variant allele
-                        uint32_t pack = mv_i(&mlcl->var_ixs, j);
-                        uint32_t v_ix;
-                        uint8_t allele;
-                        mdl_mlcl_unpack_var(pack, &v_ix, &allele);
-                        if (allele > 1) continue; // if missing
-
-                        // get base quality score
-                        // set to default tau if missing
-                        uint8_t bqual = mv_i(&mlcl->bquals, i);
-                        f_t perr = bqual != 0xff ? phred_to_perr(bqual) : mdl->mp->tau;
-
-                        f_t amb_alt_freq = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
-                        if (prob_invalid(amb_alt_freq) || (amb_alt_freq <= 0)) {
-                            return err_msg(-1, 0, "mdl_m_pi_amb: invalid gamma value '%f'", amb_alt_freq);
-                        }
-                        uint16_t s_ix;
-                        for (s_ix = 0; s_ix < M; ++s_ix) {
-                            f_t s_alt_freq = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
-                            if (prob_invalid(s_alt_freq) || (s_alt_freq <= 0) || (s_alt_freq >= 1)) {
-                                return err_msg(-1, 0, "mdl_m_pi_amb: invalid gamma value '%f'", s_alt_freq);
-                            }
-                            f_t dp1 = allele * s_alt_freq / (amb_alt_freq);
-                            if (num_invalid(dp1)) dp1 = 0;
-                            f_t dp2 = (1.0 - allele) * s_alt_freq / (1.0 - amb_alt_freq);
-                            if (num_invalid(dp2)) dp2 = 0;
-                            f_t dp = dp1 - dp2;
-                            d_pi_amb[s_ix] += (1 - perr) * mlcl->counts * dp;
-                        }
-                        n_tot += (1 - perr) * mlcl->counts;
-                    }
-                }
+            int ret_rna = pi_amb_process_molecules(
+                mdl, bc_dat.rna, M, gamma_nrow, d_pi_amb, &n_tot
+            );
+            int ret_atac = pi_amb_process_molecules(
+                mdl, bc_dat.atac, M, gamma_nrow, d_pi_amb, &n_tot
+            );
+            if (ret_rna < 0 || ret_atac < 0) {
+                mv_free(&amb_bcs);
+                free(d_pi_amb);
+                free(new_pi_amb);
+                free(new_pi_ambp);
+                char estr[] = "mdl_m_pi_amb: failed to process molecules";
+                return err_msg(-1, 0, estr);
             }
         }
 
@@ -2685,38 +2745,31 @@ int mdl_m_pi_amb(mdl_t *mdl) {
             break;
         }
 
+        // Update pi_amb
         uint16_t s_ix;
         for (s_ix = 0; s_ix < M; ++s_ix) {
             d_pi_amb[s_ix] /= n_tot;
             new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
         }
 
-        if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0)
+        if (proj_splx(new_pi_amb, new_pi_ambp, M) < 0) {
+            mv_free(&amb_bcs);
+            free(d_pi_amb);
+            free(new_pi_amb);
+            free(new_pi_ambp);
+            return err_msg(0, 1, "mdl_m_pi_amb: failed simplex projection");
+        }
+
+        // Calculate delta and update pi_amb
+        delta = calculate_delta_and_update_pi_amb(mdl, M, new_pi_ambp);
+
+        if (mdl_pars_set_gamma_amb(mdl->mp) < 0) {
+            mv_free(&amb_bcs);
+            free(d_pi_amb);
+            free(new_pi_amb);
+            free(new_pi_ambp);
             return -1;
-
-        // calculate delta
-        f_t pi0_norm = 0.0, pid_norm = 0.0;
-        p_delta = 0;
-        for (s_ix = 0; s_ix < M; ++s_ix) {
-            pi0_norm += mdl->mp->pi_amb[s_ix] * mdl->mp->pi_amb[s_ix];
-            f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
-            pid_norm += ldiff * ldiff;
-            p_delta += pow(ldiff, 2.0);
-            if (prob_invalid(new_pi_ambp[s_ix])) {
-                return err_msg(-1, 0, "mdl_m_pi_amb: invalid pi_amb value '%f'", new_pi_ambp[s_ix]);
-            }
-            mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
         }
-        if (pi0_norm <= 1e-15) {
-            return err_msg(-1, 0, "mdl_m_pi_amb: invalid pi0_norm");
-        }
-        pi0_norm = sqrt(pi0_norm);
-        pid_norm = sqrt(pid_norm);
-        p_delta = pid_norm / pi0_norm;
-        // p_delta = sqrt(p_delta);
-
-        if (mdl_pars_set_gamma_amb(mdl->mp) < 0)
-            return(-1);
 
         ++iter;
     }

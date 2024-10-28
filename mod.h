@@ -482,7 +482,16 @@ int mdl_sub_e(mdl_t *mdl, int *ixs, uint32_t ix_len);
 
 int mdl_m_lambda(mdl_t *mdl);
 int mdl_m_pi(mdl_t *mdl);
-// return num. of iterations, or -1 on error
+/**
+ * @brief Estimate the ambient sample fractions (pi_amb) using an iterative approach.
+ *
+ * This function implements an algorithm to estimate the ambient sample fractions
+ * based on the observed data in ambient droplets. It iteratively updates the
+ * pi_amb values until convergence or a maximum number of iterations is reached.
+ *
+ * @param mdl Pointer to the model structure containing all necessary data and parameters.
+ * @return The number of iterations performed if successful, or a negative value if an error occurred.
+ */
 int mdl_m_pi_amb(mdl_t *mdl);
 
 int mdl_sub_m(mdl_t *mdl);
