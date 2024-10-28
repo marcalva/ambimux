@@ -38,7 +38,7 @@ static int num_invalid(f_t x) {
 static int prob_invalid(f_t x) {
     if (num_invalid(x))
         return 1;
-    if (x < 0 || x > 1)
+    if (x < 0.0 && x != -0.0 || x > 1.0)
         return 1;
     return 0;
 }
@@ -999,7 +999,7 @@ int mdl_pars_set_dat(mdl_pars_t *mp, mdl_bc_dat_t *bd, obj_pars *objs,
     // set tau
     mp->tau = TAU;
     if (prob_invalid(mp->tau))
-        return err_msg(-1, 0, "mdl_pars_set_dat: invalid prob tau = %f", mp->tau);
+        return err_msg(-1, 0, "mdl_pars_set_dat: invalid prob tau = %e", mp->tau);
 
     // alpha prior
     mp->alpha_prior_w = objs->alpha_prior_w;
@@ -1024,11 +1024,11 @@ int is_in_simplex(f_t *x, size_t len) {
     unsigned int i;
     for (i = 0; i < len; ++i) {
         if (prob_invalid(x[i]))
-            return err_msg(-1, 0, "is_in_simplex: x[%i] = %f", i, x[i]);
+            return err_msg(-1, 0, "is_in_simplex: x[%i] = %e", i, x[i]);
         tot += x[i];
     }
     if (psum_invalid(tot, lt1, ut1))
-        return err_msg(-1, 0, "is_in_simplex: x sum = %f", tot);
+        return err_msg(-1, 0, "is_in_simplex: x sum = %e", tot);
 
     return 0;
 }
@@ -1092,10 +1092,10 @@ int mdl_pars_check(mdl_pars_t *mp){
             f_t a1;
             a1 = mp->alpha_rna1[CMI(i, j, mp->D)];
             if (!isnan(a1) && (a1 < 0 || a1 > 1))
-                return err_msg(-1, 0, "mdl_pars_check: alpha_rna1[%i,%i] = %f", i, j, a1);
+                return err_msg(-1, 0, "mdl_pars_check: alpha_rna1[%i,%i] = %e", i, j, a1);
             a1 = mp->alpha_atac1[CMI(i, j, mp->D)];
             if (!isnan(a1) && (a1 < 0 || a1 > 1))
-                return err_msg(-1, 0, "mdl_pars_check: alpha_atac1[%i,%i] = %f", i, j, a1);
+                return err_msg(-1, 0, "mdl_pars_check: alpha_atac1[%i,%i] = %e", i, j, a1);
         }
     }
 
@@ -1133,7 +1133,7 @@ int mdl_pars_check(mdl_pars_t *mp){
             if (p > (-1 - 1e-2) && p < (-1 + 1e-2))
                 continue;
             if (prob_invalid(p))
-                return err_msg(-1, 0, "mdl_pars_check: gamma[%i, %i] = %f",
+                return err_msg(-1, 0, "mdl_pars_check: gamma[%i, %i] = %e",
                         i, j, p);
         }
     }
@@ -1589,7 +1589,7 @@ int pr_tdm(mdl_pars_t *mp, int mol_type, int bc_ix, par_ix_t *par_ix,
         return err_msg(-1, 0, "pr_tdm: invalid `mol_type` index '%i'", mol_type);
     }
     if (num_invalid(al))
-        return err_msg(-1.0, 0, "pr_tdm: alpha=%f is invalid", al);
+        return err_msg(-1.0, 0, "pr_tdm: alpha=%e is invalid", al);
     f_t pr = 0;
     switch (par_ix->hd) {
         case 0:
@@ -1794,7 +1794,7 @@ int d_p_bd_d_alpha(mdl_pars_t *mp, mdl_mlcl_t *mlcl, int mol_type, int bc_ix,
     *d2 = ((-1.0) * (x * x)) / (psum * psum);
 
     if (*d2 > 0)
-        return err_msg(-1, 0, "d_p_bd_d_alpha: result d2/da2=%f is invalid", *d2);
+        return err_msg(-1, 0, "d_p_bd_d_alpha: result d2/da2=%e is invalid", *d2);
 
     return 0;
 }
@@ -1883,7 +1883,7 @@ int mdl_init_alpha(mdl_t *mdl, f_t val) {
     has_mod[RNA_IX] = mdl->has_rna;
 
     if (val <= 0 || val >= 1)
-        return err_msg(-1, 0, "mdl_init_alpha: val='%f' must be within (0, 1)",
+        return err_msg(-1, 0, "mdl_init_alpha: val='%e' must be within (0, 1)",
                        val);
 
     uint8_t mod_ix;
@@ -1960,13 +1960,13 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
     // priors needed
     if (alpha_prior[0] <= 0 || alpha_prior[0] >= 1)
-        return err_msg(-1, 0, "mdl_get_mmle_alpha: prior='%f' needs to be within (0,1)",
+        return err_msg(-1, 0, "mdl_get_mmle_alpha: prior='%e' needs to be within (0,1)",
                        alpha_prior[0]);
     if (alpha_prior[1] <= 0 || alpha_prior[1] >= 1)
-        return err_msg(-1, 0, "mdl_get_mmle_alpha: prior='%f' needs to be within (0,1)",
+        return err_msg(-1, 0, "mdl_get_mmle_alpha: prior='%e' needs to be within (0,1)",
                        alpha_prior[1]);
     if (al_prior_w <= 0)
-        return err_msg(-1, 0, "mwl_get_mmle_alpha: prior weight='%f' needs to be greater than 0",
+        return err_msg(-1, 0, "mwl_get_mmle_alpha: prior weight='%e' needs to be greater than 0",
                        al_prior_w);
 
     // upper and lower bounds for initial alpha
@@ -2053,7 +2053,7 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                         if (pret < 0)
                             return -1;
                         if (isinf(d2))
-                            return err_msg(-1, 0, "mdl_get_mmle_alpha: d2/da2='%f', likelihood collapse. "
+                            return err_msg(-1, 0, "mdl_get_mmle_alpha: d2/da2='%e', likelihood collapse. "
                                            "There may be a bug.", d2);
                         if (isnan(d2))
                             return err_msg(-1, 0, "mdl_get_mmle_alpha: d2/da2='nan'. There may be a bug.");
@@ -2064,13 +2064,13 @@ int mdl_get_mmle_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
                     // sanity check
                     if (isnan(d1_sum))
-                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 1st derivative is nan (a=%f)", best_alpha);
+                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 1st derivative is nan (a=%e)", best_alpha);
                     if (isnan(d2_sum))
-                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 2nd derivative is nan (a=%f)", best_alpha);
+                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 2nd derivative is nan (a=%e)", best_alpha);
                     if (isinf(d1_sum))
-                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 1st derivative is inf (a=%f)", best_alpha);
+                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 1st derivative is inf (a=%e)", best_alpha);
                     if (isinf(d2_sum))
-                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 2nd derivative is inf (a=%f)", best_alpha);
+                        return err_msg(-1, 0, "mdl_get_mmle_alpha: barcode 2nd derivative is inf (a=%e)", best_alpha);
 
                     // update alpha, ensure update is valid
                     f_t alpha_t1;
@@ -2156,13 +2156,13 @@ int mdl_em_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
 
     // priors needed
     if (alpha_prior[0] <= 0 || alpha_prior[0] >= 1)
-        return err_msg(-1, 0, "mdl_em_alpha: prior=%f needs to be within (0,1)",
+        return err_msg(-1, 0, "mdl_em_alpha: prior=%e needs to be within (0,1)",
                        alpha_prior[0]);
     if (alpha_prior[1] <= 0 || alpha_prior[1] >= 1)
-        return err_msg(-1, 0, "mdl_em_alpha: prior=%f needs to be within (0,1)",
+        return err_msg(-1, 0, "mdl_em_alpha: prior=%e needs to be within (0,1)",
                        alpha_prior[1]);
     if (al_prior_w <= 0)
-        return err_msg(-1, 0, "mwl_em_alpha: prior weight=%f needs to be greater than 0",
+        return err_msg(-1, 0, "mwl_em_alpha: prior weight=%e needs to be greater than 0",
                        al_prior_w);
 
     par_ix_t par_ix;
@@ -2231,7 +2231,7 @@ int mdl_em_alpha(mdl_t *mdl, int *ixs, uint32_t ix_len) {
                         if (pret < 0)
                             return -1;
                         if (psum < 0 || num_invalid(psum))
-                            return err_msg(-1, 1, "mdl_em_alpha: invalid read likelihood '%f'", psum);
+                            return err_msg(-1, 1, "mdl_em_alpha: invalid read likelihood '%e'", psum);
                         lp += mlcl->counts * log(psum);
 
                         int t_im;
@@ -2607,7 +2607,7 @@ static int pi_amb_process_molecules(mdl_t *mdl,
                 continue;
 
             if (prob_invalid(amb_alt_freq)) {
-                char estr[] = "pi_amb_process_molecules: invalid gamma value '%f'";
+                char estr[] = "pi_amb_process_molecules: invalid ambient gamma value '%e'";
                 return err_msg(-1, 0, estr, amb_alt_freq);
             }
 
@@ -2618,7 +2618,7 @@ static int pi_amb_process_molecules(mdl_t *mdl,
                     continue;
 
                 if (prob_invalid(s_alt_freq)) {
-                    char estr[] = "mdl_m_pi_amb: invalid gamma value '%f'";
+                    char estr[] = "mdl_m_pi_amb: invalid sample gamma value '%e'";
                     return err_msg(-1, 0, estr, s_alt_freq);
                 }
 
@@ -2655,7 +2655,7 @@ static f_t calculate_delta_and_update_pi_amb(mdl_t *mdl, uint16_t M, const f_t *
         f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
         pid_norm += ldiff * ldiff;
         if (prob_invalid(new_pi_ambp[s_ix])) {
-            char estr[] = "calculate_delta_and_update_pi_amb: Invalid pi_amb value %f";
+            char estr[] = "calculate_delta_and_update_pi_amb: Invalid pi_amb value %e";
             return err_msg(-1, 0, estr, new_pi_ambp[s_ix]);
         }
         mdl->mp->pi_amb[s_ix] = new_pi_ambp[s_ix];
@@ -3107,7 +3107,7 @@ int mdl_sub_llk(mdl_t *mdl, f_t *llk) {
             continue;
         llkt += mdl->sub_lp_x[i];
         if (num_invalid(llkt))
-            return err_msg(-1, 0, "mdl_sub_llk: invalid log likelihood %f", llkt);
+            return err_msg(-1, 0, "mdl_sub_llk: invalid log likelihood %e", llkt);
     }
     *llk = llkt;
     return(0);
@@ -3883,7 +3883,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
             } else {
                 par = alpha_v;
                 if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                    return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                    return err_msg(-1, 0, "write_res: failed to convert %e to string", par);
                 fret = fputc(delim, fp);
                 fret = fputs(pstr, fp);
             }
@@ -3894,7 +3894,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
             } else {
                 par = alpha_info;
                 if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                    return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                    return err_msg(-1, 0, "write_res: failed to convert %e to string", par);
                 fret = fputc(delim, fp);
                 fret = fputs(pstr, fp);
             }
@@ -3918,7 +3918,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         for (i = 0; i < 3; ++i){
             par = mdl->sub_pp_h[CMI(i, all_bc_ix, 3)];
             if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                return err_msg(-1, 0, "write_res: failed to convert %e to string", par);
             fret = fputc(delim, fp);
             fret = fputs(pstr, fp);
         }
@@ -3927,7 +3927,7 @@ int write_res(mdl_t *mdl, bam_data_t *bam_dat, char *fn){
         for (i = 0; i < 3; ++i){
             par = mdl->sub_lp_h[CMI(i, all_bc_ix, 3)];
             if ( (pstr_len = double2str_in(par, &pstr, &buf_size, decp)) < 0)
-                return err_msg(-1, 0, "write_res: failed to convert %f to string", par);
+                return err_msg(-1, 0, "write_res: failed to convert %e to string", par);
             fret = fputc(delim, fp);
             fret = fputs(pstr, fp);
         }
