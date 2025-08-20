@@ -2638,6 +2638,90 @@ static int pi_amb_process_molecules(mdl_t *mdl,
 }
 
 /**
+ * @brief Process molecules using the likelihood-gradient update for pi_amb.
+ *
+ * Accumulate d / d pi_as log p(B | T=a) using model
+ * A(x) = x^B (1-x)^(1-B)
+ * p(B | x, \tau) = (1 − \tau) A(x) + \tau/2,
+ * x = \gamma_av = \sum_s \pi_as \gamma_sv
+ * dx/d\pi_as = \gamma_sv
+ *
+ * For each observed variant, adds
+ * ((1 − \tau) A(x) / p) * ((B − x) / (x (1 − x))) * \gamma_sv
+ * to d_pi_amb[s], weighted by mlcl->counts, skipping missing allele/genotype.
+ *
+ * @param mdl Pointer to the model structure.
+ * @param mols Pointer to the kbtree containing molecule data.
+ * @param M Number of samples.
+ * @param gamma_nrow Number of rows in the gamma matrix.
+ * @param d_pi_amb Array to store the updates for pi_amb.
+ * @param n_tot Pointer to the total count of processed molecules.
+ * @return 0 if successful, or a negative value if an error occurred.
+ */
+static int pi_amb_process_molecules_p(mdl_t *mdl,
+                                      kbtree_t(kb_mdl_mlcl) *mols,
+                                      uint16_t M,
+                                      uint32_t gamma_nrow,
+                                      f_t *d_pi_amb,
+                                      f_t *n_tot) {
+    const f_t eps = 1e-8;
+
+    kbitr_t itr;
+    kb_itr_first(kb_mdl_mlcl, mols, &itr);
+    for (; kb_itr_valid(&itr); kb_itr_next(kb_mdl_mlcl, mols, &itr)) {
+        mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
+        uint32_t n_vars = mv_size(&mlcl->var_ixs);
+
+        for (size_t j = 0; j < n_vars; ++j) {
+            uint32_t pack = mv_i(&mlcl->var_ixs, j);
+            uint32_t v_ix; uint8_t allele;
+            mdl_mlcl_unpack_var(pack, &v_ix, &allele);
+            if (allele > 1) continue; // skip missing
+
+            // per-base error
+            uint8_t bqual = mv_i(&mlcl->bquals, j);
+            f_t tau = (bqual != 0xff) ? phred_to_perr(bqual) : mdl->mp->tau;
+
+            // ambient alt allele frequency x
+            f_t x = mdl->mp->gamma[CMI(M, v_ix, gamma_nrow)];
+            if (x < 0) continue; // ambient missing for this variant
+            if (prob_invalid(x)) {
+                return err_msg(-1, 0, "pi_amb_process_molecules_p: invalid ambient gamma value '%e'", x);
+            }
+            // clip x
+            if (x <= eps) x = eps;
+            if (x >= 1.0 - eps) x = 1.0 - eps;
+
+            // B in [0,1];  may replace w/ imputed
+            f_t B = (f_t)allele;
+
+            // A(x) and denominator p(x)
+            f_t A = pow(x, B) * pow(1.0 - x, 1.0 - B);
+            f_t denom = (1.0 - tau) * A + 0.5 * tau;
+            if (!(denom > 0) || num_invalid(A) || num_invalid(denom))
+                continue;
+
+            // d log p / dx
+            f_t dlogp_dx = ((1.0 - tau) * A / denom) * ((B - x) / (x * (1.0 - x)));
+            if (num_invalid(dlogp_dx)) continue;
+
+            // accumulate gradient over non-missing sample genotypes
+            for (uint16_t s_ix = 0; s_ix < M; ++s_ix) {
+                f_t gsv = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
+                if (gsv < 0) continue;
+                f_t contrib = mlcl->counts * gsv * dlogp_dx;
+                if (num_invalid(contrib)) continue;
+                d_pi_amb[s_ix] += contrib;
+            }
+
+            *n_tot += (1.0 - tau) * mlcl->counts;
+        }
+    }
+    return 0;
+
+}
+
+/**
  * @brief Calculate the delta between old and new pi_amb values and update pi_amb.
  *
  * This function calculates the difference (delta) between the old and new pi_amb
@@ -2724,10 +2808,10 @@ int mdl_m_pi_amb(mdl_t *mdl) {
             mols[RNA_IX] = bc_dat.rna;
             mols[ATAC_IX] = bc_dat.atac;
 
-            int ret_rna = pi_amb_process_molecules(
+            int ret_rna = pi_amb_process_molecules_p(
                 mdl, bc_dat.rna, M, gamma_nrow, d_pi_amb, &n_tot
             );
-            int ret_atac = pi_amb_process_molecules(
+            int ret_atac = pi_amb_process_molecules_p(
                 mdl, bc_dat.atac, M, gamma_nrow, d_pi_amb, &n_tot
             );
             if (ret_rna < 0 || ret_atac < 0) {
@@ -2748,7 +2832,7 @@ int mdl_m_pi_amb(mdl_t *mdl) {
         // Update pi_amb
         uint16_t s_ix;
         for (s_ix = 0; s_ix < M; ++s_ix) {
-            d_pi_amb[s_ix] /= n_tot;
+            // d_pi_amb[s_ix] /= n_tot;
             new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
         }
 
