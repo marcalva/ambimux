@@ -2792,7 +2792,7 @@ int mdl_m_pi_amb(mdl_t *mdl) {
 
 
     int max_iter = 10000, iter = 0;
-    f_t vareps = 1e-1, delta_thresh = mdl->eps, delta = delta_thresh + 1;
+    f_t delta_thresh = mdl->eps, delta = delta_thresh + 1;
     if (delta_thresh < 1e-15)
         delta_thresh = 1e-15;
     while (delta >= delta_thresh && iter < max_iter) {
@@ -2832,10 +2832,11 @@ int mdl_m_pi_amb(mdl_t *mdl) {
             break;
         }
 
+        f_t vareps = 1.0 / n_tot;
+
         // Update pi_amb
         uint16_t s_ix;
         for (s_ix = 0; s_ix < M; ++s_ix) {
-            // d_pi_amb[s_ix] /= n_tot;
             new_pi_amb[s_ix] = mdl->mp->pi_amb[s_ix] + (vareps * d_pi_amb[s_ix]);
         }
 
