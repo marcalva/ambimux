@@ -2672,7 +2672,8 @@ static int pi_amb_process_molecules_p(mdl_t *mdl,
         mdl_mlcl_t *mlcl = &kb_itr_key(mdl_mlcl_t, &itr);
         uint32_t n_vars = mv_size(&mlcl->var_ixs);
 
-        for (size_t j = 0; j < n_vars; ++j) {
+        size_t j;
+        for (j = 0; j < n_vars; ++j) {
             uint32_t pack = mv_i(&mlcl->var_ixs, j);
             uint32_t v_ix; uint8_t allele;
             mdl_mlcl_unpack_var(pack, &v_ix, &allele);
@@ -2706,7 +2707,8 @@ static int pi_amb_process_molecules_p(mdl_t *mdl,
             if (num_invalid(dlogp_dx)) continue;
 
             // accumulate gradient over non-missing sample genotypes
-            for (uint16_t s_ix = 0; s_ix < M; ++s_ix) {
+            uint16_t s_ix;
+            for (s_ix = 0; s_ix < M; ++s_ix) {
                 f_t gsv = mdl->mp->gamma[CMI(s_ix, v_ix, gamma_nrow)];
                 if (gsv < 0) continue;
                 f_t contrib = mlcl->counts * gsv * dlogp_dx;
@@ -2734,7 +2736,8 @@ static int pi_amb_process_molecules_p(mdl_t *mdl,
  */
 static f_t calculate_delta_and_update_pi_amb(mdl_t *mdl, uint16_t M, const f_t *new_pi_ambp) {
     f_t pi0_norm = 0.0, pid_norm = 0.0;
-    for (uint16_t s_ix = 0; s_ix < M; ++s_ix) {
+    uint16_t s_ix;
+    for (s_ix = 0; s_ix < M; ++s_ix) {
         pi0_norm += mdl->mp->pi_amb[s_ix] * mdl->mp->pi_amb[s_ix];
         f_t ldiff = new_pi_ambp[s_ix] - mdl->mp->pi_amb[s_ix];
         pid_norm += ldiff * ldiff;
