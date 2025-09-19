@@ -332,6 +332,7 @@ int copy_options(cl_opts *opts, obj_pars *objs){
     strcpy(objs->atac_bc_tag, opts->atac_bc_tag);
     strcpy(objs->rna_umi_tag, opts->rna_umi_tag);
     strcpy(objs->rna_nh_tag, opts->rna_nh_tag);
+    strcpy(objs->atac_nh_tag, opts->atac_nh_tag);
     free(objs->region);
     if (opts->region) objs->region = strdup(opts->region);
     objs->region_set = opts->region_set;

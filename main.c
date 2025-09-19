@@ -18,7 +18,7 @@
         goto cleanup; \
     } \
 
-char am_version_str[] = "v0.4.0";
+char am_version_str[] = "v0.5.0";
 
 static void usage(FILE *fp, int exit_status){
     fprintf(fp, 
@@ -50,8 +50,8 @@ static void usage(FILE *fp, int exit_status){
             "  -u, --rna-umi-tag   RNA BAM tag for UMI [UB].\n"
             "  -b, --rna-bc-tag    RNA BAM tag for cell barcode [CB].\n"
             "  -c, --atac-bc-tag   ATAC BAM tag for cell barcode [CB].\n"
-            "  -H, --nh-tag [type] BAM tag for the number of alignments of a read, where type is one \n"
-            "                      of 'rna' or 'atac'  [NH].\n"
+            "  -N, --rna-nh-tag   RNA BAM tag for number of alignments [NH].\n"
+            "  -A, --atac-nh-tag  ATAC BAM tag for number of alignments [NH].\n"
             "\n"
             "Mapping thresholds\n"
             "\n"
@@ -65,14 +65,14 @@ static void usage(FILE *fp, int exit_status){
             "Model options\n"
             "\n"
             "  -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many \n"
-            "                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip [100].\n"
+            "                      RNA UMIs or ATAC fragments. If both the UMIs and fragments are below this, skip [100].\n"
             "  -h, --eps           Convergence threshold, where the percent change in parameters\n"
             "                      must be less than this value [1e-6].\n"
             "  -j, --amb-eps       Convergence threshold for droplet ambient contamination parameter alpha,\n"
             "                      the percent change in value must be less than this argument [1e-6].\n"
             "  -q, --max-iter      Maximum number of iterations to perform for EM [100].\n"
             "  -d, --amb-prior-w   Weight of the ambient fraction prior. Effectively gives the number\n"
-            "                      of reads added to the likelihood as a prior. Must be > 0 [1].\n"
+            "                      of reads added to the likelihood as a prior. Must be > 0 [1e-8].\n"
             "  -i, --mdl-reads     The type of reads to use for demultiplexing and ambient estimation.\n"
             "                      One of 'intra', 'inter', or 'all'. 'intra' (default) specifies the model\n"
             "                      should use only reads contained in peaks or genes.\n"
@@ -113,7 +113,8 @@ int main(int argc, char *argv[]){
         {"rna-umi-tag", required_argument, NULL, 'u'}, 
         {"rna-bc-tag", required_argument, NULL, 'b'}, 
         {"atac-bc-tag", required_argument, NULL, 'c'}, 
-        {"nh-tag", required_argument, NULL, 'H'}, 
+        {"rna-nh-tag", required_argument, NULL, 'N'}, 
+        {"atac-nh-tag", required_argument, NULL, 'A'}, 
         {"max-nh", required_argument, NULL, 'm'}, 
         {"min-phredq", required_argument, NULL, 'P'},
         {"rna-mapq", required_argument, NULL, 'z'},
@@ -144,7 +145,7 @@ int main(int argc, char *argv[]){
     char *p_end = NULL;
     int option_index = 0;
     int cm, eno;
-    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cnx:w:u:b:c:H:m:P:z:Z:R:h:j:q:d:i:T:tV", loptions, &option_index)) != -1){
+    while ((cm = getopt_long_only(argc, argv, "a:r:v:g:p:e:s:o:Cnx:w:u:b:c:m:P:z:Z:R:h:j:q:d:i:T:tVN:A:", loptions, &option_index)) != -1){
         switch(cm){
             case 'a':
                 opts->atac_bam_fn = strdup(optarg);
@@ -254,13 +255,21 @@ int main(int argc, char *argv[]){
                 }
                 strcpy(opts->atac_bc_tag, optarg);
                 break;
-            case 'H': 
+            case 'N':
                 if (strlen(optarg) != 2){
-                    ret = err_msg(EXIT_FAILURE, 0, 
-                                  "nh-tag must be a 2 character string: %s given", optarg);
+                    ret = err_msg(EXIT_FAILURE, 0,
+                                  "rna-nh-tag must be a 2 character string: %s given", optarg);
                     goto cleanup;
                 }
                 strcpy(opts->rna_nh_tag, optarg);
+                break;
+            case 'A':
+                if (strlen(optarg) != 2){
+                    ret = err_msg(EXIT_FAILURE, 0,
+                                  "atac-nh-tag must be a 2 character string: %s given", optarg);
+                    goto cleanup;
+                }
+                strcpy(opts->atac_nh_tag, optarg);
                 break;
             case 'm':
                 errno = 0;
@@ -499,4 +508,3 @@ cleanup:
 
     return(ret);
 }
-
