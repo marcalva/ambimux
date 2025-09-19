@@ -14,6 +14,7 @@ cd ambimux
 make hts   # fetches and builds a pinned htslib release (1.17)
 make       # builds ambimux against the local htslib
 ```
+
 This usually takes no more than a few minutes.
 
 Notes:
