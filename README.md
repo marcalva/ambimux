@@ -5,27 +5,23 @@ Software tool for demultiplexing single cell multiome data.
 
 ## Installation
 
-The source code can be downloaded using
-```
-git clone --recurse-submodules git@github.com:marcalva/ambimux.git
-```
-The `--recurse-submodules` flag makes sure the
-[htslib](https://github.com/samtools/htslib) dependency is downloaded.
-If not, you can also clone this manually. Make sure that the `htslib` directory
-is in the same folder as the source code files.
+Platform: ambimux is developed for Linux and tested on CentOS 7.
 
-After cloning, you can build htslib and then ambimux using the following
-sequence of commands. `make hts` will download htslib and build the library,
-while `make` will build ambimux:
-```bash
-make hts
-make
+Clone and build:
 ```
+git clone git@github.com:marcalva/ambimux.git
+cd ambimux
+make hts   # fetches and builds a pinned htslib release (1.17)
+make       # builds ambimux against the local htslib
+```
+This usually takes no more than a few minutes.
 
-The only dependency is [htslib](https://github.com/samtools/htslib),
-which is included as a subdirectory. Note that
-ambimux requires htslib to be built successfully during the `make` step.
-Thus all dependencies for htslib are also required for ambimux.
+Notes:
+- The `make hts` target removes any existing `htslib/` directory and clones a
+  pinned release (1.17), then builds static libs.
+- ambimux depends on [htslib](https://github.com/samtools/htslib) and therefore on
+  htslib’s system prerequisites (autotools, zlib, bzip2, xz, libcurl, etc.). Ensure
+  these are installed on your system before running `make hts`.
 
 ## Usage
 
@@ -43,14 +39,25 @@ ambimux \
     --rna-mapq 30 \
     --atac-mapq 30 \
     --tx-basic \
-    --eps 1-e5 \
+    --eps 1e-6 \
     --max-iter 100 \
     --threads 8 \
     --verbose \
-    --out path/to/output/dir/ambimux
+    --out path/to/output/dir/ambimux \
     --out-min 100 \
 ```
 where the variables are replaced by your own files.
+
+Because ambimux retains per‑barcode molecule/fragment data (for deduplication
+and counting) and all variant‑overlapping reads used by the ambient model, it
+can take longer and use more memory than tools that operate on prefiltered
+barcode sets. In one run with seven donors and ~1 billion RNA+ATAC reads,
+ambimux completed in roughly 4 hours and used about 50 GB RAM. Actual
+performance varies with hardware, --threads, number of barcodes, and variant
+density.
+
+You can test ambimux on simulated data using
+[ambisim](https://github.com/marcalva/ambisim).
 
 For a detailed explanation of each parameter, see below.
 
@@ -120,7 +127,7 @@ the file `$sfile`, and a fasta file `$fa` and outputs a filtered, normalized
 VCF file `$vcf_out`. This filtering removes multiallelic SNPs, includes only samples
 present in `$sfile`, updates the allele frequencies, removes monomorphic SNPs,
 normalizes SNPs to a reference genome (so that the reference allele matches the
-reference sequence in the fasta file), merges multiallic SNPs, and again
+reference sequence in the fasta file), merges multiallelic SNPs, and again
 removes multiallelic SNPs. The last step annotates SNP IDs by their position and
 alleles, and this step can be skipped if original IDs are desired. Be careful
 with strand issues, as these are not fixed here.
@@ -159,8 +166,8 @@ The `--max-nh` filter specifies the maximum number of hits for a query read. Set
 this option to `1` means that only uniquely mapped reads are considered while,
 for example, setting this to `10` means that a query with up to 10 alignments is
 used for demultiplexing. Setting this to `0` ignores any filtering, and all reads
-will be used. The `--nh-tag` ambimux option specifies the BAM field that contains
-the number of alignments for the query read (set to `NH` by default).
+will be used. The number-of-alignments tag is read separately for RNA and ATAC
+using `--rna-nh-tag` and `--atac-nh-tag` (both default to `NH`).
 
 Only the primary alignment for each read is used. For reads mapping to multiple
 locations in the genome, only the query alignment with the `primary` flag present
@@ -177,7 +184,8 @@ sequencing error.
 The `--rna-mapq` and `--atac-mapq` ambimux options specify the mapping quality
 score threshold of the RNA and ATAC BAM alignments, respectively. This gives the
 probability that the alignment position is incorrect. By default, the threshold
-is set at 30, meaning a 1 in 1,000 chance of an error in mapping position.
+is set at 30, which usually means roughly a 1 in 1,000 chance of an error in
+mapping position.
 
 The `--region` parameter can be used to specify a region of analysis, although
 we strongly recommend using the entire genome for normal analysis.
@@ -243,17 +251,19 @@ This file contains the following columns
   character. Ambiguous samples are not given and further filtering is recommended.
 16. **best_rna_ambient** The RNA ambient fraction estimated for `best_sample`. This
   will be NA if there are no RNA reads. A fraction of 0 means no contamination.
-17. **best_atac_ambient** The ATAC ambient fraction estimated for `best_sample`. This
+17. **rna_ambient_info** Effective informative RNA reads for `best_sample` (higher is better; assignment‑specific).
+18. **best_atac_ambient** The ATAC ambient fraction estimated for `best_sample`. This
   will be NA if there are no ATAC reads. A fraction of 0 means no contamination.
-18. **best_singlet** The best singlet sample with the highest likelihood.
-19. **best_doublet** The best doublet samples with the highest likelihood. The
+19. **atac_ambient_info** Effective informative ATAC reads for `best_sample` (higher is better; assignment‑specific).
+20. **best_singlet** The best singlet sample with the highest likelihood.
+21. **best_doublet** The best doublet samples with the highest likelihood. The
   samples are delimited with a ":" character.
-20. **PP0** Posterior probability of being empty.
-21. **PP1** Posterior probability of being singlet.
-22. **PP2** Posterior probability of being doublet.
-23. **LLK0** Log likelihood of being empty.
-24. **LLK1** Log likelihood of being singlet.
-25. **LLK2** Log likelihood of being doublet.
+22. **PP0** Posterior probability of being empty.
+23. **PP1** Posterior probability of being singlet.
+24. **PP2** Posterior probability of being doublet.
+25. **LLK0** Log likelihood of being empty.
+26. **LLK1** Log likelihood of being singlet.
+27. **LLK2** Log likelihood of being doublet.
 
 To call singlets, we recommend applying a filter on the singlet posterior probability.
 Thresholds of 0.9, 0.95, or 0.99 are suitable, and ultimately depend on the desired
@@ -267,6 +277,12 @@ output file. These give the fraction (from 0 to 1) of ambient contamination
 estimated from the data.
 These can be used for downstream analyses as covariates for filtering criteria.
 
+Each ambient estimate is accompanied by an assignment‑specific “info” column
+(rna_ambient_info, atac_ambient_info) that reflects the effective number of
+informative reads contributing to that estimate. Variants that better
+differentiate donors contribute more. Higher values indicate more reliable
+ambient estimates.
+
 The ambient estimates in these columns are specific
 to the **best_sample** sample and can't be used for other sample assignments.
 Each ambient estimate is specific to each assignment. For example,
@@ -276,11 +292,10 @@ are can be obtained from the `alpha_rna.txt.gz` and `alpha_atac.txt.gz`
 files, with the `samples.txt` file giving which columns correspond to which
 assignment. An `Empty` droplet will always have a contamination of `1`.
 
-The level of confidence in these ambient fraction estimates can be
-inferred from the **n_rna_info** and **n_atac_info** fields. These
-give the number of reads used in determining the ambient estimates. Estimates
-with low numbers of UMIs/fragments, such as below 10, will likely be
-noisy.
+As a quick rule of thumb, `rna_ambient_info` or `atac_ambient_info` below ~10
+often yield noisier estimates. The raw informative counts (**n_rna_info**,
+**n_atac_info**) remain useful context but are not weighted by variant
+discriminability.
 
 ### Sample proportions
 
@@ -293,7 +308,7 @@ third column (`Pi_amb`) contains the ambient sample proportions.
 
 ### Empty, singlet, and doublet proportions
 
-The parameter experiemnt-wide estimates for empty, singlet, and doublet percents
+The parameter experiment-wide estimates for empty, singlet, and doublet percents
 found in the `lambda.txt.gz` file. These give the proportion of empty, singlet,
 and doublet droplets in the entire experiment.
 
@@ -317,11 +332,11 @@ counts are
 - SNP variant allele counts per barcode from ATAC-seq
     - `atac.ac.ref.mtx.gz` SNP reference allele counts from ATAC-seq
     - `atac.ac.alt.mtx.gz` SNP alternate allele counts from ATAC-seq
-    - `atac.ac.alt.mtx.gz` SNP other allele counts from ATAC-seq
+    - `atac.ac.oth.mtx.gz` SNP other allele counts from ATAC-seq
 - SNP variant allele counts per barcode from RNA-seq
     - `rna.ac.ref.mtx.gz` SNP reference allele counts from RNA-seq
     - `rna.ac.alt.mtx.gz` SNP alternate allele counts from RNA-seq
-    - `rna.ac.alt.mtx.gz` SNP other allele counts from RNA-seq
+    - `rna.ac.oth.mtx.gz` SNP other allele counts from RNA-seq
 - Gene counts per barcode from RNA-seq
     - `gc.spl.mtx.gz` Counts from spliced genes from RNA-seq
     - `gc.uns.mtx.gz` Counts from unspliced genes from RNA-seq
@@ -349,7 +364,7 @@ by including the `--counts-only` argument.
 
 ```
 
-ambimux v0.4.0: single-cell demultiplexing
+ambimux v0.5.0: single-cell demultiplexing
 
 Options:
 
@@ -376,8 +391,8 @@ Alignment options
   -u, --rna-umi-tag   RNA BAM tag for UMI [UB].
   -b, --rna-bc-tag    RNA BAM tag for cell barcode [CB].
   -c, --atac-bc-tag   ATAC BAM tag for cell barcode [CB].
-  -H, --nh-tag [type] BAM tag for the number of alignments of a read, where type is one 
-                      of 'rna' or 'atac'  [NH].
+  -N, --rna-nh-tag   RNA BAM tag for number of alignments [NH].
+  -A, --atac-nh-tag  ATAC BAM tag for number of alignments [NH].
 
 Mapping thresholds
 
@@ -391,12 +406,14 @@ Mapping thresholds
 Model options
 
   -x, --out-min       Calculate the likelihood and demultiplex barcodes that have at least this many 
-                      RNA UMIs or ATAC fragments. If there both the UMIs and fragments are below this, skip [100].
+                      RNA UMIs or ATAC fragments. If both the UMIs and fragments are below this, skip [100].
   -h, --eps           Convergence threshold, where the percent change in parameters
                       must be less than this value [1e-6].
+  -j, --amb-eps       Convergence threshold for droplet ambient contamination parameter alpha,
+                      the percent change in value must be less than this argument [1e-6].
   -q, --max-iter      Maximum number of iterations to perform for EM [100].
   -d, --amb-prior-w   Weight of the ambient fraction prior. Effectively gives the number
-                      of reads added to the likelihood as a prior. Must be > 0 [1].
+                      of reads added to the likelihood as a prior. Must be > 0 [1e-8].
   -i, --mdl-reads     The type of reads to use for demultiplexing and ambient estimation.
                       One of 'intra', 'inter', or 'all'. 'intra' (default) specifies the model
                       should use only reads contained in peaks or genes.
@@ -413,4 +430,3 @@ GTF options
       --help          Print this help screen.
 
 ```
-
